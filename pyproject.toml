@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "diting-src"
+version = "0.1.0"
+description = "Diting 核心包（重构版）"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["PyYAML>=6.0", "pytest>=7.0", "pytest-cov>=4.0"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["diting*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
