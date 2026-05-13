@@ -4,7 +4,7 @@
 .PHONY: test build lint clean
 
 test:
-	PYTHONPATH=. pytest tests/ -v
+	PYTHONPATH=. python3 -m pytest tests/ -v
 
 build:
 	@echo "make build: 请在此补充 Docker 镜像构建指令"
