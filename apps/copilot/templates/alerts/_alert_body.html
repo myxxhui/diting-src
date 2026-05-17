@@ -1,0 +1,64 @@
+<style>
+  .page-alerts .filters button { margin-right: 8px; padding: 6px 12px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; }
+  .page-alerts .filters button.active { background: #2563eb; color: white; border-color: #2563eb; }
+  .page-alerts .alerts-table { width: 100%; border-collapse: collapse; margin-top: 12px; background: white; }
+  .page-alerts .alerts-table th, .page-alerts .alerts-table td { padding: 8px 10px; border-bottom: 1px solid #e5e7eb; font-size: 14px; }
+  .page-alerts .row-red { background: #fef2f2; }
+  .page-alerts .row-orange { background: #fff7ed; }
+  .page-alerts .ok { color: #16a34a; }
+  .page-alerts .ng { color: #dc2626; }
+  .page-alerts .chip { display: inline-block; margin: 2px; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+  .page-alerts .chip.ok { background: #dcfce7; }
+  .page-alerts .chip.ng { background: #fee2e2; }
+  .page-alerts .refresh { margin-top: 12px; color: #6b7280; font-size: 13px; }
+</style>
+<div class="page-alerts" x-data="{ filter: 'all' }">
+  <h1>告警历史（最近 72 小时）</h1>
+
+  <div class="filters">
+    <button type="button" @click="filter='all'"     :class="{ active: filter==='all' }">全部</button>
+    <button type="button" @click="filter='red'"     :class="{ active: filter==='red' }">🔴 红色</button>
+    <button type="button" @click="filter='orange'"  :class="{ active: filter==='orange' }">🟠 橙色</button>
+  </div>
+
+  <table class="alerts-table">
+    <thead>
+      <tr>
+        <th>时间</th><th>级别</th><th>类型</th>
+        <th>标的</th><th>详情</th><th>SLA</th><th>通道</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in alerts %}
+      <tr x-show="filter==='all' || filter==='{{ a.level }}'"
+          class="row-{{ a.level }}">
+        <td>{{ a.created_at.strftime('%m-%d %H:%M:%S') if a.created_at else '-' }}</td>
+        <td>{% if a.level == 'red' %}🔴{% else %}🟠{% endif %} {{ a.level }}</td>
+        <td><code>{{ a.alert_type }}</code></td>
+        <td><strong>{{ a.symbol }}</strong> {{ a.name }}</td>
+        <td>{{ a.message }}</td>
+        <td>
+          {% if a.level == 'red' %}
+            {% if a.sla_met is sameas true %}<span class="ok">✓ {{ a.latency_ms or 0 }}ms</span>
+            {% elif a.sla_met is sameas false %}<span class="ng">✗ 超时</span>
+            {% else %}<span class="ng">—</span>{% endif %}
+          {% else %}-{% endif %}
+        </td>
+        <td>
+          {% for ch, r in (a.channels_sent or {}).items() %}
+            <span class="chip {{ 'ok' if r.get('ok') else 'ng' }}">{{ ch }}</span>
+          {% endfor %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="refresh"
+       hx-get="/alerts"
+       hx-trigger="every 30s"
+       hx-target=".page-alerts"
+       hx-swap="outerHTML">
+    每 30 秒自动刷新
+  </div>
+</div>

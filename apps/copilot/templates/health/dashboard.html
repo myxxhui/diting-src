@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}持仓体检 · 4 色卡片{% endblock %}
+{% block content %}
+<style>
+  .stat-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px;}
+  .stat-card { padding:18px; border-radius:8px; text-align:center; color:white; }
+  .stat-card .num { font-size:32px; font-weight:bold; }
+  .stat-red { background:#dc2626; } .stat-orange { background:#ea580c; }
+  .stat-yellow { background:#ca8a04; } .stat-green { background:#16a34a; }
+  .holding { padding:10px 12px; border-left:6px solid; border-radius:6px; margin-bottom:6px; background:white; }
+  .holding.red { border-color:#dc2626;} .holding.orange { border-color:#ea580c;}
+  .holding.yellow { border-color:#ca8a04;} .holding.green { border-color:#16a34a;}
+  .delta-neg { color:#dc2626;} .delta-pos { color:#16a34a;}
+</style>
+
+<div x-data="{ filter: 'all' }" hx-get="/api/health/dashboard"
+     hx-trigger="every 30s" hx-swap="none">
+  <div class="stat-grid">
+    {% for color, label, css in [('red','🔴 红','stat-red'),('orange','🟠 橙','stat-orange'),('yellow','🟡 黄','stat-yellow'),('green','🟢 绿','stat-green')] %}
+    <div class="stat-card {{ css }}" @click="filter='{{ color }}'">
+      <div>{{ label }}</div>
+      <div class="num">{{ summary[color] }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <button @click="filter='all'">显示全部 ({{ summary.total }})</button>
+
+  <div style="margin-top:16px;">
+    {% for color in ['red','orange','yellow','green'] %}
+      {% for h in cards[color] %}
+      <div x-show="filter === 'all' || filter === '{{ color }}'"
+           class="holding {{ color }}"
+           hx-get="/health-detail/{{ h.symbol }}"
+           hx-target="#detail-pane"
+           hx-swap="innerHTML"
+           style="cursor:pointer;">
+        <strong>{{ h.symbol }}</strong> {{ h.name }}
+        · 健康度 <strong>{{ "%.0f"|format(h.new_health) }}</strong>
+        · <span class="{% if h.health_delta < 0 %}delta-neg{% elif h.health_delta > 0 %}delta-pos{% endif %}">
+            Δ {{ "%+.1f"|format(h.health_delta) }}
+          </span>
+        · {{ h.change_reason or "—" }}
+      </div>
+      {% endfor %}
+    {% endfor %}
+  </div>
+
+  <div id="detail-pane" class="card" style="margin-top:16px;">
+    <em style="color:#6b7280;">点击任一持仓查看 30 天趋势与节点 4 态</em>
+  </div>
+</div>
+{% endblock %}

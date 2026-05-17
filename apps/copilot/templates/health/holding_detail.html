@@ -1,0 +1,19 @@
+<h3>{{ symbol }} · 节点状态: <span style="color:{% if color=='red' %}#dc2626{% elif color=='orange' %}#ea580c{% elif color=='yellow' %}#ca8a04{% else %}#16a34a{% endif %}">{{ state }}</span></h3>
+{% if history %}
+<table>
+  <thead><tr><th>时间</th><th>健康度</th><th>变化</th><th>push_level</th><th>原因</th></tr></thead>
+  <tbody>
+  {% for p in history %}
+    <tr>
+      <td>{{ p.date }}</td>
+      <td>{{ "%.1f"|format(p.score) }}</td>
+      <td>{{ "%+.1f"|format(p.delta) }}</td>
+      <td>{{ p.push_level }}</td>
+      <td>{{ p.reason }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color:#6b7280;">尚无该持仓的健康度事件,需上游维度三发布 events:monitor:health_change。</p>
+{% endif %}

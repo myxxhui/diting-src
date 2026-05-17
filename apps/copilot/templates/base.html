@@ -1,0 +1,38 @@
+{# 基础布局，所有页面继承此模板。
+   [Ref: 03_/00_维度零/stages/stage_1_启动期/steps/step_02] #}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}AI 投资副驾驶{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <script src="https://unpkg.com/alpinejs@3.13.5/dist/cdn.min.js" defer></script>
+  <style>
+    body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 0; background: #f5f7fa; }
+    nav { background: #1f2937; color: white; padding: 12px 24px; }
+    nav a { color: white; margin-right: 16px; text-decoration: none; }
+    nav a:hover { text-decoration: underline; }
+    main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+    .card { background: white; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+    button { padding: 6px 14px; border: 1px solid #d1d5db; border-radius: 6px; background: white; cursor: pointer; }
+    button.primary { background: #2563eb; color: white; border-color: #2563eb; }
+    input, select { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/">首页</a>
+    <a href="/holdings">持仓管理</a>
+    <a href="/health-dashboard">持仓体检</a>
+    <a href="/alerts">告警历史</a>
+    <a href="/value">价值账本</a>
+    <a href="/health">健康检查</a>
+  </nav>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

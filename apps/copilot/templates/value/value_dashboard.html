@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}价值账本 · AI 投资副驾驶{% endblock %}
+{% block content %}
+<div class="page-value" x-data="{ }">
+  <h1>价值账本（本月）</h1>
+
+  {% if breaker.paused %}
+  <div class="banner banner-red" style="background:#fee2e2;color:#991b1b;padding:12px;border-radius:8px;margin-bottom:16px;">
+    🚨 自我熔断已触发：{{ breaker.reason }}
+  </div>
+  {% endif %}
+
+  <div class="metric-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;">
+    <div class="metric metric-scs card">
+      <div class="label" style="color:#6b7280;font-size:14px;">系统贡献分（SCS）</div>
+      <div class="value" style="font-size:32px;font-weight:600;">{{ scs.score }}</div>
+      <div class="sub" style="color:#6b7280;font-size:13px;margin-top:8px;">
+        基础 {{ scs.base }} + 净贡献 {{ scs.contribution_sum }} - 迟滞 {{ scs.lag_penalty }}
+        （样本 {{ scs.sample_count }}）
+      </div>
+    </div>
+    <div class="metric metric-ev card">
+      <div class="label" style="color:#6b7280;font-size:14px;">经济价值（EV）</div>
+      <div class="value" style="font-size:32px;font-weight:600;">¥{{ ev.total }}</div>
+      <div class="sub" style="color:#6b7280;font-size:13px;margin-top:8px;">
+        避险 ¥{{ ev.hedge_value }} + 增益 ¥{{ ev.gain_value }}
+        - 卖飞 ¥{{ ev.cost_value }}
+      </div>
+    </div>
+  </div>
+
+  <h2>月报</h2>
+  <a class="btn" style="display:inline-block;padding:8px 16px;background:#2563eb;color:white;border-radius:6px;text-decoration:none;"
+     href="/api/value/monthly-report/{{ '%04d-%02d' % (year, month) }}?user_id={{ user_id }}">
+    下载本月月报
+  </a>
+
+  <h2>自我熔断</h2>
+  <table>
+    <tr><th>状态</th><td>{% if breaker.paused %}🚨 已暂停{% else %}✅ 正常{% endif %}</td></tr>
+    <tr><th>窗口大小</th><td>{{ breaker.last_window_size }}</td></tr>
+    <tr><th>B+H 占比</th><td>{{ '%.1f' % (breaker.last_bh_ratio * 100) }}%</td></tr>
+    <tr><th>更新时间</th><td>{{ breaker.updated_at }}</td></tr>
+  </table>
+</div>
+{% endblock %}

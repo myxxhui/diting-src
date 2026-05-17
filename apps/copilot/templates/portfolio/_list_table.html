@@ -1,0 +1,25 @@
+{# 持仓列表片段，可被 HTMX hx-swap=outerHTML 整块替换。 #}
+<div id="holdings-list" class="card">
+  <h2>当前持仓（{{ holdings|length }} 只）</h2>
+  {% if holdings %}
+  <table>
+    <thead>
+      <tr><th>代码</th><th>名称</th><th>数量</th><th>成本价</th><th>备注</th><th>更新时间</th></tr>
+    </thead>
+    <tbody>
+      {% for h in holdings %}
+      <tr>
+        <td>{{ h.symbol }}</td>
+        <td>{{ h.name }}</td>
+        <td>{{ "%.2f"|format(h.shares) }}</td>
+        <td>{{ "%.2f"|format(h.cost_price) }}</td>
+        <td>{{ h.notes or "-" }}</td>
+        <td>{{ h.updated_at.strftime("%Y-%m-%d %H:%M") }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#6b7280;">还没有持仓,请先添加或导入。</p>
+  {% endif %}
+</div>

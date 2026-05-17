@@ -8,11 +8,32 @@ version = "0.1.0"
 description = "Diting 核心包（重构版）"
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["PyYAML>=6.0", "pytest>=7.0", "pytest-cov>=4.0"]
+dependencies = [
+    "PyYAML>=6.0",
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "redis>=5.0",
+    "sqlalchemy>=2.0",
+    "greenlet>=3.0",
+    "aiosqlite>=0.19",
+    "jinja2>=3.1",
+    "httpx>=0.27",
+    "pydantic-settings>=2.2",
+    "apscheduler>=3.10",
+    "python-multipart>=0.0.9",
+    "openpyxl>=3.1",
+    "pandas>=2.2",
+    "aiosmtplib>=3.0",
+    "pytest-asyncio>=0.24",
+    "weasyprint>=62.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["diting*"]
+include = ["diting*", "apps*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"

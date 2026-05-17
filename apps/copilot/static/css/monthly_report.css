@@ -1,0 +1,42 @@
+@page {
+  size: A4;
+  margin: 20mm 18mm 22mm 18mm;
+  @bottom-center {
+    content: "AI 投资副驾驶 · 价值账本月报 — 第 " counter(page) " / " counter(pages) " 页";
+    font-size: 9pt;
+    color: #888;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  font-family: "PingFang SC", "Microsoft YaHei", Helvetica, Arial, sans-serif;
+  color: #222;
+  font-size: 11pt;
+  line-height: 1.55;
+}
+header { border-bottom: 2px solid #1f4e79; padding-bottom: 6mm; margin-bottom: 6mm; }
+header h1 { color: #1f4e79; font-size: 22pt; margin: 0 0 2mm; }
+.meta { color: #666; font-size: 10pt; }
+
+.metrics { display: flex; gap: 6mm; margin: 6mm 0; }
+.metrics .card { flex: 1; padding: 4mm; border-radius: 2mm;
+  background: #f5f8fc; border-left: 3mm solid #1f4e79; }
+.metrics .card.scs { border-left-color: #2e7d32; }
+.metrics .card.ev  { border-left-color: #e65100; }
+.metrics .label { color: #555; font-size: 10pt; }
+.metrics .value { font-size: 28pt; font-weight: 600; margin: 1mm 0; }
+.metrics .sub { color: #666; font-size: 9.5pt; }
+
+section { page-break-inside: avoid; margin-top: 6mm; }
+section h2 { color: #1f4e79; font-size: 14pt; border-bottom: 1px solid #d0d7de;
+  padding-bottom: 1mm; margin-bottom: 3mm; }
+table { width: 100%; border-collapse: collapse; }
+th, td { border: 1px solid #d0d7de; padding: 1.5mm 3mm; font-size: 10pt; }
+th { background: #f0f4f8; text-align: left; }
+
+.highlights ul { padding-left: 6mm; }
+.highlights li { margin: 1mm 0; }
+
+footer { margin-top: 8mm; padding-top: 3mm;
+  border-top: 1px dashed #d0d7de; font-size: 9.5pt; color: #777; text-align: center; }

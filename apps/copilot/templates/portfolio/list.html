@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}持仓管理{% endblock %}
+{% block content %}
+  <div class="card">
+    <h2>新增持仓</h2>
+    <form hx-post="/holdings"
+          hx-target="#holdings-list"
+          hx-swap="outerHTML"
+          hx-on::after-request="this.reset()">
+      <input type="text" name="symbol" placeholder="股票代码,如 600519" required>
+      <input type="text" name="name" placeholder="股票名称" required>
+      <input type="number" step="any" name="shares" placeholder="持仓数量" required>
+      <input type="number" step="any" name="cost_price" placeholder="成本价" required>
+      <input type="text" name="notes" placeholder="备注(可选)">
+      <button class="primary" type="submit">添加</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Excel 批量导入</h2>
+    <form hx-post="/holdings/import"
+          hx-target="#holdings-list"
+          hx-swap="outerHTML"
+          hx-encoding="multipart/form-data">
+      <input type="file" name="file" accept=".xlsx,.xls" required>
+      <button type="submit">导入</button>
+    </form>
+    <p style="color:#6b7280;font-size:13px;">需要列:股票代码 / 股票名称 / 持仓数量 / 成本价（备注可选）</p>
+  </div>
+
+  {% include "portfolio/_list_table.html" %}
+{% endblock %}

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ year }}-{{ '%02d' % month }} 价值账本月报</title>
+  <link rel="stylesheet" href="../../static/css/monthly_report.css" />
+</head>
+<body>
+  <header>
+    <h1>AI 投资副驾驶 · 价值账本月报</h1>
+    <p class="meta">用户：{{ user_id }} · 周期：{{ year }}-{{ '%02d' % month }} · 生成于 {{ generated_at }}</p>
+  </header>
+
+  <section class="metrics">
+    <div class="card scs">
+      <div class="label">系统贡献分 (SCS)</div>
+      <div class="value">{{ scs }}</div>
+      <div class="sub">基础 {{ scs_detail.base }} + 净贡献 {{ scs_detail.contribution_sum }} - 迟滞 {{ scs_detail.lag_penalty }}（样本 {{ scs_detail.sample_count }}）</div>
+    </div>
+    <div class="card ev">
+      <div class="label">经济价值 (EV)</div>
+      <div class="value">¥{{ ev }}</div>
+      <div class="sub">避险 ¥{{ ev_detail.hedge_value }} + 增益 ¥{{ ev_detail.gain_value }} - 卖飞 ¥{{ ev_detail.cost_value }}</div>
+    </div>
+  </section>
+
+  <section class="distribution">
+    <h2>8 象限归因分布</h2>
+    <table>
+      <thead>
+        <tr><th>象限</th><th>含义</th><th>次数</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>A</td><td>建议买 + 已买 + 盈</td><td>{{ distribution.A }}</td></tr>
+        <tr><td>B</td><td>建议买 + 已买 + 亏</td><td>{{ distribution.B }}</td></tr>
+        <tr><td>C</td><td>建议卖 + 已卖 + 避亏</td><td>{{ distribution.C }}</td></tr>
+        <tr><td>D</td><td>建议卖 + 未卖 + 亏</td><td>{{ distribution.D }}</td></tr>
+        <tr><td>E</td><td>建议买 + 未买 + 涨</td><td>{{ distribution.E }}</td></tr>
+        <tr><td>F</td><td>建议买 + 未买 + 跌</td><td>{{ distribution.F }}</td></tr>
+        <tr><td>G</td><td>建议卖 + 未卖 + 涨</td><td>{{ distribution.G }}</td></tr>
+        <tr><td>H</td><td>建议卖 + 已卖 + 涨</td><td>{{ distribution.H }}</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="highlights">
+    <h2>本月亮点</h2>
+    <ul>
+      {% for line in highlights %}<li>{{ line }}</li>{% endfor %}
+    </ul>
+  </section>
+
+  <footer>
+    <p>本月报由 AI 投资副驾驶 · 价值账本 自动生成；如有疑问请联系架构师复盘。</p>
+  </footer>
+</body>
+</html>
