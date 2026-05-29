@@ -1,6 +1,14 @@
 .env
 # 持仓 SoT 私有副本：禁止提交真实持仓
 data/config/my_holdings.yaml
+
+# 运行时数据库文件（本地生成，不纳入版本控制）
+data/*.db
+
+# 原始财报 PDF（采集产出，体积大，不纳入版本控制）
+data/raw/
+
+# Python 构建产物
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -10,3 +18,11 @@ build/
 .coverage
 htmlcov/
 *.log
+
+# 模型权重与 LoRA（大文件）
+models/
+loras/
+
+# 训练输出
+output/
+tmp/
