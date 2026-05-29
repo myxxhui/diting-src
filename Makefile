@@ -2,6 +2,22 @@
 # [Ref: 03_原子目标与规约/_共享规约/02_三位一体仓库规约]
 # [Ref: step_08 · WeasyPrint 镜像验证 / §3.11 冒烟]
 
+# Python：优先 .venv（make deps），避免系统 python 缺 sqlalchemy/pytest
+PYTHON ?= $(shell if [ -x .venv/bin/python3 ]; then echo .venv/bin/python3; elif command -v python3.9 >/dev/null 2>&1; then echo python3.9; else echo python3; fi)
+RUNPY = PYTHONPATH=. $(PYTHON)
+
+.PHONY: deps venv _ensure-deps
+deps: venv
+venv:
+	@if [ ! -x .venv/bin/python3 ]; then \
+	  (command -v python3.9 >/dev/null 2>&1 && python3.9 -m venv .venv) || python3 -m venv .venv; \
+	fi
+	.venv/bin/pip install -q -e .
+	@echo "✅ deps 就绪 · $$(.venv/bin/python3 --version)"
+
+_ensure-deps:
+	@$(RUNPY) -c "import sqlalchemy, pytest" 2>/dev/null || $(MAKE) deps
+
 .PHONY: test test-integration-redis build lint clean
 .PHONY: super-evo-dev super-evo-infra-up super-evo-infra-down super-evo-test
 .PHONY: test-teacher-distill distill-demo
@@ -389,6 +405,28 @@ test-integration-redis:
 
 build:
 	docker build -t diting-src-copilot:latest .
+
+# ─── Copilot K3s 镜像（Helm diting-stack.copilot）────────────────────────────
+ACR_REGISTRY ?= crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com
+ACR_REPO_COPILOT ?= titan-core/diting-copilot
+ACR_USERNAME ?= sean_hui
+DITING_ACR_PASSWORD ?=
+ACR_IMAGE_COPILOT := $(ACR_REGISTRY)/$(ACR_REPO_COPILOT):latest
+DOCKER_PLATFORM ?= linux/amd64
+
+.PHONY: build-copilot-image push-copilot-image copilot-image-all
+build-copilot-image:
+	@root="$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))"; \
+	cd "$$root" && docker build --platform $(DOCKER_PLATFORM) -f Dockerfile.copilot -t diting-copilot:latest .
+	@echo "build-copilot-image: diting-copilot:latest OK ($(DOCKER_PLATFORM))"
+
+push-copilot-image: build-copilot-image
+	@if [ -z "$(DITING_ACR_PASSWORD)" ]; then echo "错误: 请 export DITING_ACR_PASSWORD 或在 Makefile 赋值"; exit 1; fi; \
+	echo "$(DITING_ACR_PASSWORD)" | docker login $(ACR_REGISTRY) -u $(ACR_USERNAME) --password-stdin || exit 1; \
+	docker tag diting-copilot:latest $(ACR_IMAGE_COPILOT) && docker push $(ACR_IMAGE_COPILOT) && \
+	echo "push-copilot-image: $(ACR_IMAGE_COPILOT) OK"
+
+copilot-image-all: push-copilot-image
 
 docker-copilot-build:
 	docker compose -f docker-compose.copilot.yml build
@@ -1123,7 +1161,61 @@ copilot-step04-status:
 	@echo "▶ [copilot-step04-status] D0 推荐池快照"
 	$(MAKE) copilot-step04-pool-status
 
-# W1 并行服务本地启动（[Ref: 14_六维度启动期统一节奏表]）
+# ──────────────────────────────────────────────────────────────────────────────
+# D0 step_05 — M3 告警 · sell_signal → 邮件（必做② · 23_表）
+# [Ref: 03_/00_维度零/.../step_05_告警系统.md]
+# ──────────────────────────────────────────────────────────────────────────────
+.PHONY: copilot-step05-prep copilot-step05-rules-test copilot-step05-notrade-check
+.PHONY: copilot-step05-sell-signal-e2e copilot-step05-chain-e2e copilot-step05-test
+.PHONY: copilot-step05-status copilot-step05-all
+
+copilot-step05-prep: _ensure-deps copilot-step01-prep
+	@echo "▶ [copilot-step05-prep] init_db + SMTP 凭证 + sell_signal stream"
+	$(RUNPY) -c "import asyncio; from apps.copilot.db.database import init_db; asyncio.run(init_db()); print('✅ copilot.db')"
+	$(RUNPY) -c "from apps.copilot.config import settings; \
+assert settings.smtp_username and settings.smtp_password and settings.smtp_to, '缺 COPILOT_SMTP_*'; \
+print('✅ SMTP', settings.smtp_to)"
+	@docker start diting-redis-step07 2>/dev/null || docker run -d --name diting-redis-step07 -p 6379:6379 redis:7-alpine
+	@sleep 1
+
+copilot-step05-rules-test: _ensure-deps
+	@echo "▶ [copilot-step05-rules-test] sell_signal 映射 + 规则单测"
+	$(RUNPY) -m pytest tests/copilot/test_alerts.py -v --tb=short -k "map_event or level_map or sell_signal or rebalance or financial"
+
+copilot-step05-notrade-check:
+	@echo "▶ [copilot-step05-notrade-check]"
+	@bash scripts/assert_alert_no_trade_link.sh
+
+copilot-step05-sell-signal-e2e: copilot-step05-prep
+	@echo "▶ [copilot-step05-sell-signal-e2e] XADD sell_signal → 消费 → 🔴 邮件"
+	COPILOT_REDIS_URL=redis://127.0.0.1:6379/0 \
+	  $(RUNPY) scripts/copilot_step05_sell_signal_e2e.py --symbol 601138 --name 工业富联 --signal-type stop_loss
+
+copilot-step05-chain-e2e: copilot-step05-prep
+	@echo "▶ [copilot-step05-chain-e2e] D4 step_07 publish → D0 消费邮件（同 Redis db/0）"
+	EXIT_REDIS_URL=redis://127.0.0.1:6379/0 COPILOT_REDIS_URL=redis://127.0.0.1:6379/0 \
+	  $(RUNPY) scripts/run_one_evaluation.py --demo-stop-loss
+	COPILOT_REDIS_URL=redis://127.0.0.1:6379/0 \
+	  $(RUNPY) scripts/copilot_step05_sell_signal_e2e.py --symbol STEP07 --name step07演示 --signal-type stop_loss --skip-xadd
+
+copilot-step05-test: _ensure-deps
+	@echo "▶ [copilot-step05-test] pytest test_alerts"
+	$(RUNPY) -m pytest tests/copilot/test_alerts.py -v --tb=short
+
+copilot-step05-status:
+	@echo "▶ [copilot-step05-status]"
+	COPILOT_REDIS_URL=redis://127.0.0.1:6379/0 $(RUNPY) scripts/copilot_step05_status.py
+
+copilot-step05-all: copilot-step05-prep copilot-step05-rules-test copilot-step05-notrade-check copilot-step05-test copilot-step05-sell-signal-e2e copilot-step05-status
+	@echo "✅ [copilot-step05-all] tier-1 准出：本机 sell_signal → 🔴 邮件（非 K3s）"
+
+.PHONY: copilot-step05-tier2-e2e
+copilot-step05-tier2-e2e: _ensure-deps
+	@echo "▶ [copilot-step05-tier2-e2e] XADD → 云上 Redis · K3s Copilot 消费发邮件"
+	@test -n "$${EXIT_REDIS_URL:-$$(grep '^EXIT_REDIS_URL=' .env 2>/dev/null | cut -d= -f2-)}" || { echo "❌ .env 缺 EXIT_REDIS_URL"; exit 1; }
+	EXIT_REDIS_URL=$${EXIT_REDIS_URL:-$$(grep '^EXIT_REDIS_URL=' .env | cut -d= -f2-)} \
+	  $(RUNPY) scripts/copilot_step05_tier2_e2e.py --symbol 601138 --name 工业富联
+
 
 deep-strike-dev:
 	PYTHONPATH=. uvicorn apps.deep_strike.main:app --port 8082 --reload
@@ -1472,6 +1564,58 @@ exit-step06-status:
 	PYTHONPATH=. python3 -c "from apps.exit_engine.protocols.rebalance import RebalanceProtocol; print('  SP4 ✅ 已实现')"
 
 # ──────────────────────────────────────────────────────────────────────────────
+# D4 step_07 — 冲突仲裁 + sell_signal 真流（★M4）
+# [Ref: 03_/04_维度四/.../step_07_冲突处理与回测.md]
+# ──────────────────────────────────────────────────────────────────────────────
+.PHONY: exit-step07-prep exit-step07-conflict-test exit-step07-test exit-step07-schema
+.PHONY: exit-step07-publish-once exit-step07-backtest exit-step07-status exit-step07-all
+
+exit-step07-prep: exit-step06-all
+	@echo "▶ [exit-step07-prep] DB 初始化 + 协议注册 + Redis 探测"
+	PYTHONPATH=. python3 -m apps.exit_engine.db.init_db
+	PYTHONPATH=. python3 -c "from apps.exit_engine.protocols import PROTOCOL_CLASSES; assert len(PROTOCOL_CLASSES)==5; print('✅ 5 协议已注册')"
+	@PYTHONPATH=. python3 -c "import redis,os; r=redis.from_url(os.environ.get('EXIT_REDIS_URL') or os.environ.get('REDIS_URL') or 'redis://127.0.0.1:6379/2'); r.ping(); print('✅ Redis OK')" \
+	  || echo "⚠️  Redis 未启动（tier-1 单测仍可过；publish-once 需 Redis）"
+
+exit-step07-conflict-test:
+	@echo "▶ [exit-step07-conflict-test] 7 场景冲突单测"
+	PYTHONPATH=. python3 -m pytest tests/exit_engine/test_conflict_resolver.py tests/exit_engine/test_sp_conflict_priority.py -v --tb=short
+
+exit-step07-schema:
+	@echo "▶ [exit-step07-schema] sell_signal ↔ D0 schema"
+	PYTHONPATH=. python3 scripts/check_exit_step07_schema.py
+
+exit-step07-test:
+	@echo "▶ [exit-step07-test] pytest step_07 全套"
+	PYTHONPATH=. python3 -m pytest \
+		tests/exit_engine/test_conflict_resolver.py \
+		tests/exit_engine/test_sell_signal_publisher.py \
+		tests/exit_engine/test_exit_engine_orchestrator.py \
+		tests/exit_engine/test_sp_conflict_priority.py \
+		-v --tb=short
+
+exit-step07-publish-once: exit-step07-prep
+	@echo "▶ [exit-step07-publish-once] 演示止损场景真 XADD（tier-1 本地 Redis）"
+	@docker start diting-redis-step07 2>/dev/null || docker run -d --name diting-redis-step07 -p 6379:6379 redis:7-alpine
+	@sleep 2
+	EXIT_REDIS_URL=redis://127.0.0.1:6379/2 REDIS_URL=redis://127.0.0.1:6379/2 \
+	  PYTHONPATH=. python3 scripts/run_one_evaluation.py --demo-stop-loss
+	@EXIT_REDIS_URL=redis://127.0.0.1:6379/2 PYTHONPATH=. python3 -c "\
+import redis; r=redis.from_url('redis://127.0.0.1:6379/2',decode_responses=True); \
+n=r.xlen('events:exit:sell_signal'); print('events:exit:sell_signal XLEN=', n); assert n>=1"
+
+exit-step07-backtest:
+	@echo "▶ [exit-step07-backtest] 100 笔回测准确率"
+	PYTHONPATH=. python3 scripts/backtest_100_history.py
+
+exit-step07-status:
+	@echo "▶ [exit-step07-status]"
+	PYTHONPATH=. python3 scripts/exit_step07_status.py
+
+exit-step07-all: exit-step07-prep exit-step07-conflict-test exit-step07-schema exit-step07-test exit-step07-backtest exit-step07-publish-once exit-step07-status
+	@echo "✅ [exit-step07-all] D4 step_07 tier-1 准出：冲突 + publisher + 回测 + schema"
+
+# ──────────────────────────────────────────────────────────────────────────────
 # D3 step_05 — 叙事一致性 NLI LoRA（tier-1：数据+配置+降级客户端+pytest）
 # [Ref: 03_/03_维度三/step_05]
 # BLOCKED(gpu_unavailable): 训练本体需 GPU ≥16GB，tier-2 走 P-step_04 diting-training
@@ -1518,6 +1662,62 @@ watch-step05-status:
 	@echo "▶ [watch-step05-status] NLI LoRA 状态"
 	@wc -l training/data/narrative_nli/*.jsonl
 	@test -d outputs/narrative_nli_lora_v1 && echo "  adapter 已存在 ✅" || echo "  adapter 未训练（BLOCKED(gpu_unavailable)）"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# D3 step_07 — health_change 事件流 + 10 持仓 e2e
+# [Ref: 03_/03_维度三/.../step_07_health_change事件流与10持仓测试.md §7.2]
+# ──────────────────────────────────────────────────────────────────────────────
+.PHONY: watch-step07-prep watch-step07-publisher-smoke watch-step07-fixture-10
+.PHONY: watch-step07-e2e watch-step07-schema watch-step07-latency watch-step07-test
+.PHONY: watch-step07-all watch-step07-status watch-step07-clean
+
+watch-step07-prep:
+	@echo "▶ [watch-step07-prep] Redis 连通 + step_07 模块可导入"
+	@REDIS_URL=$${STATE_WATCH_REDIS_URL:-$${REDIS_URL:-redis://127.0.0.1:6379/0}} $(RUNPY) -c "\
+import redis, os; \
+u=os.environ.get('REDIS_URL','redis://127.0.0.1:6379/0'); \
+r=redis.from_url(u, decode_responses=True); r.ping(); print('✅ Redis OK', u)"
+	@PYTHONPATH=. python3 -c "from apps.state_watch.health.orchestrator import HealthOrchestrator; print('✅ HealthOrchestrator 可导入')"
+
+watch-step07-publisher-smoke: watch-step07-prep
+	@echo "▶ [watch-step07-publisher-smoke] 1 节点 transition → XLEN+1"
+	STATE_WATCH_REDIS_URL=$${STATE_WATCH_REDIS_URL:-$$(grep '^REDIS_URL=' .env 2>/dev/null | cut -d= -f2-)} \
+	  $(RUNPY) scripts/watch_step07_publisher_smoke.py
+
+watch-step07-fixture-10:
+	@echo "▶ [watch-step07-fixture-10] 10 持仓 fixture 注入校验"
+	$(RUNPY) -c "from tests.state_watch.fixtures.positions_10 import POSITIONS_10; assert len(POSITIONS_10)==10; print('✅ 10 持仓 fixture OK')"
+
+watch-step07-e2e:
+	@echo "▶ [watch-step07-e2e] 10 持仓状态切换准确率 ≥0.90"
+	PYTHONPATH=. python3 -m pytest tests/state_watch/test_e2e_10_positions.py -v --tb=short
+
+watch-step07-schema:
+	@echo "▶ [watch-step07-schema] D0+D4 payload 字段对齐"
+	PYTHONPATH=. python3 scripts/schema_check_d0_d4.py
+
+watch-step07-latency:
+	@echo "▶ [watch-step07-latency] P95 <30s"
+	PYTHONPATH=. python3 scripts/watch_step07_latency.py
+
+watch-step07-test:
+	@echo "▶ [watch-step07-test] pytest step_07 单测"
+	PYTHONPATH=. python3 -m pytest tests/state_watch/test_health_step07.py tests/state_watch/test_health_change_publisher.py -v --tb=short
+
+watch-step07-status:
+	@echo "▶ [watch-step07-status]"
+	STATE_WATCH_REDIS_URL=$${STATE_WATCH_REDIS_URL:-$$(grep '^REDIS_URL=' .env 2>/dev/null | cut -d= -f2-)} \
+	  $(RUNPY) scripts/watch_step07_status.py
+
+watch-step07-clean:
+	@echo "▶ [watch-step07-clean] dev only — 清理本地 stream"
+	@REDIS_URL=$${STATE_WATCH_REDIS_URL:-redis://127.0.0.1:6379/0} $(RUNPY) -c "\
+import redis, os; \
+u=os.environ.get('REDIS_URL'); r=redis.from_url(u, decode_responses=True); \
+n=r.delete('events:monitor:health_change'); print('DEL events:monitor:health_change', n)"
+
+watch-step07-all: watch-step07-prep watch-step07-publisher-smoke watch-step07-fixture-10 watch-step07-e2e watch-step07-schema watch-step07-latency watch-step07-test watch-step07-status
+	@echo "✅ [watch-step07-all] D3 step_07 tier-1 准出：publisher + 10 持仓 e2e + schema + latency"
 
 # ============================================================
 # D1 step_04 财务测谎引擎（5 节点骨架 · tier-1 本地）

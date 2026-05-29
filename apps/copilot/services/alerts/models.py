@@ -31,12 +31,16 @@ class AlertType(str, enum.Enum):
     THESIS_INVALID = "thesis_invalid"
     MARKET_PHASE_SHIFT = "market_phase_change"
     MARKET_PHASE_EXHAUSTION = "market_phase_exhaustion"
+    REBALANCE = "sell_signal:rebalance"
+    FINANCIAL_WINDOW = "sell_signal:financial_window"
 
 
 ALERT_LEVEL_MAP: dict[AlertType, AlertLevel] = {
     AlertType.REJECT: AlertLevel.RED,
     AlertType.STOP_LOSS: AlertLevel.RED,
     AlertType.TAKE_PROFIT: AlertLevel.RED,
+    AlertType.REBALANCE: AlertLevel.RED,
+    AlertType.FINANCIAL_WINDOW: AlertLevel.ORANGE,
     AlertType.HEALTH_DROP: AlertLevel.RED,
     AlertType.DEGRADE: AlertLevel.ORANGE,
     AlertType.THESIS_INVALID: AlertLevel.ORANGE,

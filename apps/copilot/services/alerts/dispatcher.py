@@ -99,35 +99,50 @@ def map_event_to_alert(user_id: str, stream: str, event: dict[str, Any]) -> Aler
         )
 
     if stream == "events:exit:sell_signal":
-        signal_type = event.get("signal_type", "")
-        if signal_type == "stop_loss":
-            return Alert.new(
-                user_id=user_id,
-                alert_type=AlertType.STOP_LOSS,
-                symbol=symbol,
-                name=name,
-                message=str(event.get("advice", "止损线触发，建议卖出")),
-                payload=event,
-            )
-        if signal_type == "take_profit":
-            return Alert.new(
-                user_id=user_id,
-                alert_type=AlertType.TAKE_PROFIT,
-                symbol=symbol,
-                name=name,
-                message=str(event.get("advice", "止盈线触发，建议卖出")),
-                payload=event,
-            )
-        if signal_type == "thesis_invalid":
-            return Alert.new(
-                user_id=user_id,
-                alert_type=AlertType.THESIS_INVALID,
-                symbol=symbol,
-                name=name,
-                message=str(event.get("advice", "Thesis 失效，建议清仓")),
-                payload=event,
-            )
-        return None
+        signal_type = str(event.get("signal_type", ""))
+        advice = str(event.get("advice", "卖出条件触发，建议人工确认"))
+        payload = {**event, "source_stream": stream}
+
+        mapping: dict[str, tuple[AlertType, str, str]] = {
+            "stop_loss": (
+                AlertType.STOP_LOSS,
+                "🔴",
+                f"🔴 [diting] {name} {symbol} 止损触发 · 建议查看 thesis",
+            ),
+            "take_profit": (
+                AlertType.TAKE_PROFIT,
+                "🔴",
+                f"🔴 [diting] {name} {symbol} 止盈触发 · 建议查看 thesis",
+            ),
+            "thesis_invalid": (
+                AlertType.THESIS_INVALID,
+                "🔴",
+                f"🔴 [diting] {name} {symbol} Thesis 失效 · 建议清仓",
+            ),
+            "rebalance": (
+                AlertType.REBALANCE,
+                "🔴",
+                f"🔴 [diting] {name} {symbol} 再平衡触发 · 建议减仓",
+            ),
+            "financial_window": (
+                AlertType.FINANCIAL_WINDOW,
+                "🟠",
+                f"🟠 [diting] {name} {symbol} 财报窗口 · 请关注 SP5 建议",
+            ),
+        }
+        entry = mapping.get(signal_type)
+        if entry is None:
+            return None
+        alert_type, _emoji, subject = entry
+        payload["email_subject"] = subject
+        return Alert.new(
+            user_id=user_id,
+            alert_type=alert_type,
+            symbol=symbol,
+            name=name,
+            message=advice,
+            payload=payload,
+        )
 
     if stream == "events:monitor:health_change":
         delta = float(event.get("health_delta", 0.0))

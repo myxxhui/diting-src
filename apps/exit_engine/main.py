@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 from apps.exit_engine.config import settings
 from apps.exit_engine.protocols import PROTOCOL_CLASSES
+from apps.exit_engine.routers.engine_router import router as engine_router
 from apps.exit_engine.routers.buffer_router import router as buffer_router
 from apps.exit_engine.routers.consumer_router import router as consumer_router
 from apps.exit_engine.routers.portfolio_router import router as portfolio_router
@@ -34,6 +35,7 @@ app.include_router(portfolio_router)
 app.include_router(positions_router)
 app.include_router(protocol_router)
 app.include_router(sp3_sp5_router)
+app.include_router(engine_router)
 app.include_router(consumer_router)
 app.include_router(buffer_router)
 

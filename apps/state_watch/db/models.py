@@ -114,6 +114,22 @@ class NodeSLIValue(Base):
     )
 
 
+class FailedStreamPublish(Base):
+    """Redis Stream XADD 失败兜底（step_07 retry_worker 重试）。
+
+    [Ref: 03_/03_维度三/.../step_07_health_change事件流与10持仓测试.md §7.1 C]
+    """
+
+    __tablename__ = "failed_stream_publish"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    stream_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    error: Mapped[str] = mapped_column(Text, nullable=False)
+    retried_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+
 class MarketPhaseRecord(Base):
     """市场阶段分类历史（INSERT-only · 按 symbol+classified_at 查询最新）.
 

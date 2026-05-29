@@ -1,0 +1,101 @@
+row_id,symbol,cost_price,current_price,context_json,expected_signal
+1,SL000,100.0000,80.0000,{},stop_loss
+2,SL001,100.0000,80.0000,{},stop_loss
+3,SL002,100.0000,80.0000,{},stop_loss
+4,SL003,100.0000,80.0000,{},stop_loss
+5,SL004,100.0000,80.0000,{},stop_loss
+6,SL005,100.0000,80.0000,{},stop_loss
+7,SL006,100.0000,80.0000,{},stop_loss
+8,SL007,100.0000,80.0000,{},stop_loss
+9,SL008,100.0000,80.0000,{},stop_loss
+10,SL009,100.0000,80.0000,{},stop_loss
+11,SL010,100.0000,80.0000,{},stop_loss
+12,SL011,100.0000,80.0000,{},stop_loss
+13,SL012,100.0000,80.0000,{},stop_loss
+14,SL013,100.0000,80.0000,{},stop_loss
+15,SL014,100.0000,80.0000,{},stop_loss
+16,SL015,100.0000,80.0000,{},stop_loss
+17,SL016,100.0000,80.0000,{},stop_loss
+18,SL017,100.0000,80.0000,{},stop_loss
+19,SL018,100.0000,80.0000,{},stop_loss
+20,SL019,100.0000,80.0000,{},stop_loss
+21,SL020,100.0000,80.0000,{},stop_loss
+22,SL021,100.0000,80.0000,{},stop_loss
+23,TP000,100.0000,135.0000,{},take_profit
+24,TP001,100.0000,135.0000,{},take_profit
+25,TP002,100.0000,135.0000,{},take_profit
+26,TP003,100.0000,135.0000,{},take_profit
+27,TP004,100.0000,135.0000,{},take_profit
+28,TP005,100.0000,135.0000,{},take_profit
+29,TP006,100.0000,135.0000,{},take_profit
+30,TP007,100.0000,135.0000,{},take_profit
+31,TP008,100.0000,135.0000,{},take_profit
+32,TP009,100.0000,135.0000,{},take_profit
+33,TP010,100.0000,135.0000,{},take_profit
+34,TP011,100.0000,135.0000,{},take_profit
+35,TP012,100.0000,135.0000,{},take_profit
+36,TP013,100.0000,135.0000,{},take_profit
+37,TP014,100.0000,135.0000,{},take_profit
+38,TP015,100.0000,135.0000,{},take_profit
+39,TP016,100.0000,135.0000,{},take_profit
+40,TP017,100.0000,135.0000,{},take_profit
+41,TP018,100.0000,135.0000,{},take_profit
+42,TP019,100.0000,135.0000,{},take_profit
+43,TP020,100.0000,135.0000,{},take_profit
+44,TP021,100.0000,135.0000,{},take_profit
+45,TI000,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+46,TI001,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+47,TI002,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+48,TI003,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+49,TI004,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+50,TI005,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+51,TI006,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+52,TI007,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+53,TI008,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+54,TI009,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+55,TI010,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+56,TI011,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+57,TI012,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+58,TI013,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+59,TI014,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+60,TI015,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+61,TI016,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+62,TI017,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+63,TI018,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+64,TI019,50.0000,52.0000,"{""new_state"": ""exit""}",thesis_invalid
+65,RB000,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+66,RB001,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+67,RB002,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+68,RB003,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+69,RB004,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+70,RB005,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+71,RB006,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+72,RB007,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+73,RB008,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+74,RB009,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+75,RB010,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+76,RB011,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+77,RB012,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+78,RB013,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+79,RB014,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+80,RB015,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+81,RB016,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+82,RB017,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+83,RB018,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+84,RB019,10.0000,10.0000,"{""mv"": 300000, ""total"": 1000000}",rebalance
+85,SP5000,20.0000,22.0000,"{""stage"": ""retreat""}",financial_window
+86,SP5001,20.0000,22.0000,"{""stage"": ""retreat""}",financial_window
+87,SP5002,20.0000,22.0000,"{""stage"": ""retreat""}",financial_window
+88,SP5003,20.0000,22.0000,"{""stage"": ""retreat""}",financial_window
+89,SP5004,20.0000,22.0000,"{""stage"": ""retreat""}",financial_window
+90,SP5005,20.0000,22.0000,"{""stage"": ""retreat""}",financial_window
+91,C1000,100.0000,80.0000,"{""new_state"": ""exit""}",stop_loss
+92,C1001,100.0000,80.0000,"{""new_state"": ""exit""}",stop_loss
+93,C1002,100.0000,80.0000,"{""new_state"": ""exit""}",stop_loss
+94,C1003,100.0000,80.0000,"{""new_state"": ""exit""}",stop_loss
+95,C1004,100.0000,80.0000,"{""new_state"": ""exit""}",stop_loss
+96,C2000,100.0000,135.0000,"{""mv"": 300000, ""total"": 1000000}",take_profit
+97,C2001,100.0000,135.0000,"{""mv"": 300000, ""total"": 1000000}",take_profit
+98,C2002,100.0000,135.0000,"{""mv"": 300000, ""total"": 1000000}",take_profit
+99,C3000,100.0000,80.0000,"{""new_state"": ""exit"", ""mv"": 300000, ""total"": 1000000}",stop_loss
+100,C3001,100.0000,80.0000,"{""new_state"": ""exit"", ""mv"": 300000, ""total"": 1000000}",stop_loss

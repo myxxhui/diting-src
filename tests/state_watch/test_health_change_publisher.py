@@ -79,7 +79,7 @@ class TestPublishHealthChange:
             health_score=45.0,
             prev_score=70.0,
         )
-        assert result == b"1779999999-0"
+        assert result == "1779999999-0"
 
     async def test_returns_none_on_redis_error(self):
         mock_redis = AsyncMock()

@@ -38,7 +38,33 @@ async def session_factory():
 def test_level_map_red_count():
     reds = [t for t, lv in ALERT_LEVEL_MAP.items() if lv == AlertLevel.RED]
     oranges = [t for t, lv in ALERT_LEVEL_MAP.items() if lv == AlertLevel.ORANGE]
-    assert len(reds) == 5 and len(oranges) == 3
+    assert len(reds) == 6 and len(oranges) == 4
+
+
+def test_map_sell_signal_rebalance_red():
+    event = {
+        "symbol": "601138",
+        "name": "工业富联",
+        "signal_type": "rebalance",
+        "advice": "建议减仓 30%",
+    }
+    alert = map_event_to_alert("default", "events:exit:sell_signal", event)
+    assert alert is not None
+    assert alert.alert_type == AlertType.REBALANCE
+    assert alert.level == AlertLevel.RED
+    assert "🔴" in alert.payload.get("email_subject", "")
+
+
+def test_map_sell_signal_financial_window_orange():
+    event = {
+        "symbol": "601138",
+        "name": "工业富联",
+        "signal_type": "financial_window",
+        "advice": "财报窗口建议持有",
+    }
+    alert = map_event_to_alert("default", "events:exit:sell_signal", event)
+    assert alert.alert_type == AlertType.FINANCIAL_WINDOW
+    assert alert.level == AlertLevel.ORANGE
 
 
 def test_map_event_reject():

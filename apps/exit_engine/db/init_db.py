@@ -10,15 +10,20 @@ from apps.exit_engine.db.session import get_engine
 from apps.exit_engine.models.audit import ExitAuditORM  # noqa: F401
 from apps.exit_engine.models.buffer import PendingSignalORM  # noqa: F401
 from apps.exit_engine.models.event_log import EventLogORM  # noqa: F401
+from apps.exit_engine.models.failed_publish import FailedStreamPublishORM  # noqa: F401
 from apps.exit_engine.models.position import Base as PositionBase
 from apps.exit_engine.models.position import HoldingORM  # noqa: F401
 from apps.exit_engine.models.protocol_log import ProtocolLogORM  # noqa: F401
+from apps.exit_engine.models.sell_signal_record import SellSignalRecordORM  # noqa: F401
 
 
 def init() -> None:
     os.makedirs("data", exist_ok=True)
     PositionBase.metadata.create_all(bind=get_engine())
-    print("✅ exit_engine.db 初始化完成 (tables: holdings, exit_audit_logs, pending_signals, protocol_logs, event_logs)")
+    print(
+        "✅ exit_engine.db 初始化完成 (tables: holdings, exit_audit_logs, pending_signals, "
+        "protocol_logs, event_logs, sell_signals, failed_stream_publish)"
+    )
 
 
 if __name__ == "__main__":
