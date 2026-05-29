@@ -1,0 +1,15 @@
+{
+  "case_id": "H022",
+  "symbol": "600121",
+  "company_name": "测试公司财务21",
+  "fraud_type": "收入确认",
+  "target_engine": "financial_fraud",
+  "fraud_start_year": 2020,
+  "exposure_date": "2022-05-15",
+  "ground_truth_decision": "reject",
+  "ground_truth_score": 0.85,
+  "evidence": [
+    "样例证据-22-financial_fraud"
+  ],
+  "notes": "synthetic fixture"
+}

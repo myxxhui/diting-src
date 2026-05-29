@@ -105,13 +105,22 @@ def _parse(data: dict[str, str]) -> dict[str, Any]:
 
 async def _main() -> None:
     from apps.copilot.events.handlers.health_change import handle_health_change
+    from apps.copilot.events.handlers.mapper_thesis import handle_mapper_thesis
+    from apps.copilot.events.handlers.thesis_proposed import handle_thesis_proposed
 
     await init_db()
     consumer = EventConsumer(
         redis_url=settings.redis_url,
-        streams=["events:monitor:health_change"],
+        streams=[
+            "events:monitor:health_change",
+            "events:thrust:thesis_proposed",
+            # The Mapper（D2 step_04）产出候选
+            "events:deep_strike:thesis_proposed",
+        ],
     )
     consumer.register("events:monitor:health_change", handle_health_change)
+    consumer.register("events:thrust:thesis_proposed", handle_thesis_proposed)
+    consumer.register("events:deep_strike:thesis_proposed", handle_mapper_thesis)
     logger.info("copilot event consumer started, listening %s", consumer.streams)
     await consumer.consume_forever()
 

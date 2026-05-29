@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>diting 持仓早报 · {{ ctx.period_label }}</title>
+  <style>
+    body { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; max-width: 820px; margin: 24px auto; color: #222; line-height: 1.5; }
+    h1 { font-size: 20px; margin-bottom: 4px; }
+    h2 { font-size: 15px; margin-top: 20px; border-bottom: 1px solid #eee; padding-bottom: 4px; }
+    .meta { color: #666; font-size: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 12px 0; }
+    .card { padding: 10px; border-radius: 8px; text-align: center; font-size: 13px; }
+    .card .num { font-size: 22px; font-weight: 600; }
+    .green { background: #dcfce7; } .yellow { background: #fef9c3; }
+    .orange { background: #ffedd5; } .red { background: #fee2e2; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+    th, td { border-bottom: 1px solid #eee; padding: 6px 8px; text-align: left; }
+    th { background: #f9fafb; }
+    .focus { background: #fffbeb; padding: 10px 12px; border-radius: 6px; margin-top: 10px; }
+    .demo { background: #fff3cd; color: #856404; padding: 6px 10px; border-radius: 4px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>📋 diting 持仓早报 · {{ ctx.period_label }}</h1>
+  <p class="meta">W1 健康度 + W2 市场阶段 · 生成于 {{ p.generated_at }}</p>
+  {% if ctx.is_demo %}<div class="demo">⚠️ 探针/阶段数据不足，请先运行 make watch-step04-all 与 watch-step09-classify-all</div>{% endif %}
+
+  <h2>总览</h2>
+  <p>活跃标的 <b>{{ p.active_count }}</b> 只</p>
+
+  <h3>健康度分布（W1）</h3>
+  <div class="grid">
+    {% for key, label in [('green','🟢 正常'), ('yellow','🟡 关注'), ('orange','🟠 警惕'), ('red','🔴 高危')] %}
+    <div class="card {{ key }}">
+      <div class="num">{{ p.color_distribution[key] }}</div>
+      <div>{{ label }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <h3>市场阶段分布（W2）</h3>
+  <div class="grid">
+    {% for ph, em in [('concept','⚪ 概念'), ('expectation','🟡 预期'), ('realization','🟢 兑现'), ('exhaustion','🔴 透支')] %}
+    <div class="card">
+      <div class="num">{{ p.phase_distribution.get(ph, 0) }}</div>
+      <div>{{ em }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if p.focus %}
+  <div class="focus">
+    <b>🔮 今日关注</b>
+    <ul>{% for line in p.focus %}<li>{{ line }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  {% if p.portfolio %}
+  <h2>真实持仓（portfolio）</h2>
+  <table>
+    <tr>
+      <th>标的</th><th>health</th><th>阶段</th><th>价格</th><th>日涨跌</th><th>备注</th>
+    </tr>
+    {% for r in p.portfolio %}
+    <tr>
+      <td>{{ r.name }}<br><small>{{ r.symbol }}</small></td>
+      <td>{{ r.health_score if r.health_score is not none else 'N/A' }} {{ ['🟢','🟡','🟠','🔴'][r.push_level] }}</td>
+      <td>{{ r.phase_label_zh }}<br><small>conf {{ '%.0f' % (r.phase_confidence * 100) if r.phase_confidence else '—' }}%</small></td>
+      <td>{{ r.last_close if r.last_close is not none else '—' }}</td>
+      <td>{% if r.pct_change_1d is not none %}{{ '%+.2f' % (r.pct_change_1d * 100) }}%{% else %}—{% endif %}</td>
+      <td><small>{{ (r.reasoning_tags or [])|join(', ') }}</small></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  {% if p.watchlist %}
+  <h2>关注标的（watchlist）</h2>
+  <table>
+    <tr><th>标的</th><th>health</th><th>阶段</th><th>价格</th><th>日涨跌</th></tr>
+    {% for r in p.watchlist %}
+    <tr>
+      <td>{{ r.name }}<br><small>{{ r.symbol }}</small></td>
+      <td>{{ r.health_score if r.health_score is not none else 'N/A' }}</td>
+      <td>{{ r.phase_label_zh }}</td>
+      <td>{{ r.last_close if r.last_close is not none else '—' }}</td>
+      <td>{% if r.pct_change_1d is not none %}{{ '%+.2f' % (r.pct_change_1d * 100) }}%{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  <p style="color:#999;font-size:11px;margin-top:24px;">
+    单股阶段切换与高危事件将另发即时邮件；本报告为开盘前合并体检。不构成投资建议。
+  </p>
+</body>
+</html>

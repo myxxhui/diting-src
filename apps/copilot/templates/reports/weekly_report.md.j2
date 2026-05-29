@@ -1,0 +1,11 @@
+## 📊 投资副驾驶 · 周报 {{ ctx.period_label }}
+{{ ctx.period_start }} ~ {{ ctx.period_end }}
+{% if ctx.is_demo %}> ⚠️ 演示模式{% endif %}
+
+**告警**：🔴 {{ p.alerts.red }} · 🟠 {{ p.alerts.orange }} · 合计 {{ p.alerts.total }}
+
+**推荐池**：新增 {{ p.thesis.new }} · 加入 {{ p.decisions.get('join', 0) }} · 待考虑 {{ p.decisions.get('consider', 0) }} · 不感兴趣 {{ p.decisions.get('not_interested', 0) }}
+
+**避险价值**：¥ {{ '%.2f' % p.avoided_loss }}
+
+**4 色变化**：🔴 {{ '%+d' % p.holdings_delta.delta.red }} · 🟠 {{ '%+d' % p.holdings_delta.delta.orange }} · 🟡 {{ '%+d' % p.holdings_delta.delta.yellow }} · 🟢 {{ '%+d' % p.holdings_delta.delta.green }}

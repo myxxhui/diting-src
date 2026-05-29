@@ -1,0 +1,13 @@
+<View>
+  <Header value="叙事一致性 NLI 三分类"/>
+  <Header value="前提（最新叙事）"/>
+  <Text name="premise" value="$premise"/>
+  <Header value="假设（旧叙事/事件）"/>
+  <Text name="hypothesis" value="$hypothesis"/>
+  <Choices name="nli_label" toName="premise" choice="single" showInLine="true">
+    <Choice value="entailment" hint="蕴含（一致）"/>
+    <Choice value="contradiction" hint="矛盾（叙事漂移）"/>
+    <Choice value="neutral" hint="中性（无关）"/>
+  </Choices>
+  <TextArea name="notes" toName="premise" placeholder="判断理由" rows="3"/>
+</View>

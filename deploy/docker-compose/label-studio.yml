@@ -1,0 +1,41 @@
+# C2 Label Studio · [Ref: 03_/05_维度五/stages/stage_1_启动期/steps/step_03]
+version: "3.8"
+services:
+  label-studio:
+    image: heartexlabs/label-studio:1.13.1
+    container_name: super-evo-label-studio
+    depends_on:
+      - ls-postgres
+    environment:
+      - DJANGO_DB=default
+      - POSTGRE_NAME=labelstudio
+      - POSTGRE_USER=labelstudio
+      - POSTGRE_PASSWORD=${SUPER_EVO_LS_PG_PASSWORD:-labelstudio-pass}
+      - POSTGRE_PORT=5432
+      - POSTGRE_HOST=ls-postgres
+      - LABEL_STUDIO_USERNAME=${SUPER_EVO_LS_ADMIN_EMAIL:-admin@diting.local}
+      - LABEL_STUDIO_PASSWORD=${SUPER_EVO_LS_ADMIN_PASSWORD:-LabelStudio-Admin-1234}
+      - LABEL_STUDIO_USER_TOKEN=${SUPER_EVO_LS_USER_TOKEN:-super-evo-token-dev}
+      - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=true
+    ports:
+      - "8081:8080"
+    volumes:
+      - super-evo-ls-data:/label-studio/data
+    restart: unless-stopped
+
+  ls-postgres:
+    image: postgres:15-alpine
+    container_name: super-evo-ls-postgres
+    environment:
+      - POSTGRES_DB=labelstudio
+      - POSTGRES_USER=labelstudio
+      - POSTGRES_PASSWORD=${SUPER_EVO_LS_PG_PASSWORD:-labelstudio-pass}
+    ports:
+      - "5433:5432"
+    volumes:
+      - super-evo-ls-pg-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  super-evo-ls-data:
+  super-evo-ls-pg-data:

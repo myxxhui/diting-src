@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>AI 投资副驾驶 · 月报 {{ ctx.period_label }}</title>
+  <link rel="stylesheet" href="monthly_report.css">
+</head>
+<body>
+
+<!-- 封面 -->
+<section class="cover">
+  <h1>AI 投资副驾驶</h1>
+  <h2>月度报告 · {{ ctx.period_label }}</h2>
+  <p class="period">{{ p.start }} ~ {{ p.end }}</p>
+  {% if ctx.is_demo %}<p class="demo">⚠️ 演示模式（数据不足）</p>{% endif %}
+  <p class="footer-note">生成时间 {{ ctx.period_end }} · 用户 {{ ctx.user_id }}</p>
+</section>
+
+<!-- 目录 -->
+<section class="toc">
+  <h3>目录</h3>
+  <ol>
+    <li>摘要</li>
+    <li>SCS 月度趋势</li>
+    <li>EV 月度趋势</li>
+    <li>8 象限归因分布</li>
+    <li>TOP 3 成功 / TOP 3 失败</li>
+    <li>用户行为分析</li>
+  </ol>
+</section>
+
+<!-- 1. 摘要 -->
+<section class="chapter">
+  <h2>1. 摘要</h2>
+  <table class="summary">
+    <tr><th>SCS（月末）</th><td>{{ '%.2f' % p.scs_summary.last }}</td></tr>
+    <tr><th>SCS 区间</th><td>{{ '%.2f' % p.scs_summary.min }} ~ {{ '%.2f' % p.scs_summary.max }}</td></tr>
+    <tr><th>避险价值</th><td class="ev">¥ {{ '%.2f' % p.ev_summary.avoided_loss }}</td></tr>
+    <tr><th>增益价值</th><td class="ev">¥ {{ '%.2f' % p.ev_summary.earned }}</td></tr>
+    <tr><th>红色告警</th><td>{{ p.alerts_overview.red }} 条</td></tr>
+    <tr><th>橙色告警</th><td>{{ p.alerts_overview.orange }} 条</td></tr>
+    <tr><th>推荐执行率</th><td>{{ '%.0f%%' % (p.behavior.exec_rate * 100) }}（{{ p.behavior.join }}/{{ p.behavior.total }}）</td></tr>
+  </table>
+</section>
+
+<!-- 2. SCS 趋势 -->
+<section class="chapter">
+  <h2>2. SCS 月度趋势</h2>
+  <table class="trend">
+    <tr><th>日期</th><th>SCS</th></tr>
+    {% for d in p.scs_trend %}
+    <tr><td>{{ d.date }}</td><td>{{ '%.2f' % d.scs }}</td></tr>
+    {% endfor %}
+  </table>
+</section>
+
+<!-- 3. EV 趋势 -->
+<section class="chapter">
+  <h2>3. EV 月度趋势</h2>
+  <table class="trend">
+    <tr><th>日期</th><th>避险</th><th>增益</th></tr>
+    {% for d in p.ev_trend %}
+    <tr><td>{{ d.date }}</td><td>{{ '%.2f' % d.avoided_loss }}</td><td>{{ '%.2f' % d.earned }}</td></tr>
+    {% endfor %}
+  </table>
+</section>
+
+<!-- 4. 8 象限 -->
+<section class="chapter">
+  <h2>4. 8 象限归因分布</h2>
+  <div class="chart">{{ octants_chart | safe }}</div>
+  <table class="octants">
+    <tr><th>象限</th><th>含义</th><th>笔数</th><th>累计盈亏</th></tr>
+    {% for label, meta in [
+      ('A', '系统建议买 + 用户买 + 盈利'),
+      ('B', '系统建议买 + 用户买 + 亏损'),
+      ('C', '系统建议卖 + 用户卖 + 避亏'),
+      ('D', '系统建议卖 + 用户未卖 + 亏损'),
+      ('E', '系统建议卖 + 用户卖 + 错过涨'),
+      ('F', '系统建议卖 + 用户未卖 + 盈利'),
+      ('G', '系统未建议 + 用户买 + 盈利'),
+      ('H', '系统未建议 + 用户买 + 亏损'),
+    ] %}
+    <tr>
+      <td>{{ label }}</td>
+      <td>{{ meta }}</td>
+      <td>{{ p.octants.counts[label].count }}</td>
+      <td>{{ '%+.2f' % p.octants.counts[label].pnl }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+
+<!-- 5. TOP 3 -->
+<section class="chapter">
+  <h2>5. TOP 3 成功推荐</h2>
+  {% if p.top_success %}
+  <table>
+    <tr><th>标的</th><th>象限</th><th>盈亏</th><th>说明</th></tr>
+    {% for t in p.top_success %}
+    <tr><td>{{ t.symbol }} {{ t.name }}</td><td>{{ t.octant }}</td><td class="green">¥{{ '%+.2f' % t.pnl }}</td><td>{{ t.note }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>本月暂无成功推荐数据。</p>{% endif %}
+
+  <h2>TOP 3 失败推荐</h2>
+  {% if p.top_failure %}
+  <table>
+    <tr><th>标的</th><th>象限</th><th>盈亏</th><th>说明</th></tr>
+    {% for t in p.top_failure %}
+    <tr><td>{{ t.symbol }} {{ t.name }}</td><td>{{ t.octant }}</td><td class="red">¥{{ '%+.2f' % t.pnl }}</td><td>{{ t.note }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>本月暂无失败推荐数据。</p>{% endif %}
+</section>
+
+<!-- 6. 用户行为 -->
+<section class="chapter">
+  <h2>6. 用户行为分析</h2>
+  <p>执行率：<b>{{ '%.0f%%' % (p.behavior.exec_rate * 100) }}</b>（决策 {{ p.behavior.total }} 次 / 加入 {{ p.behavior.join }} 次）。</p>
+</section>
+
+<p class="disclaimer">免责声明：本报告由 AI 投资副驾驶基于历史持仓与系统建议自动生成，仅作辅助决策参考，不构成任何投资建议。</p>
+
+</body>
+</html>

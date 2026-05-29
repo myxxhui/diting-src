@@ -1,0 +1,14 @@
+## 📋 持仓体检日报 · {{ ctx.period_label }}
+{% if ctx.is_demo %}> ⚠️ 演示模式（数据不足，已用占位数据生成报告）{% endif %}
+
+**4 色卡片**
+- 🔴 {{ p.color_delta.today.red }}（{{ '%+d' % p.color_delta.delta.red }}）
+- 🟠 {{ p.color_delta.today.orange }}（{{ '%+d' % p.color_delta.delta.orange }}）
+- 🟡 {{ p.color_delta.today.yellow }}（{{ '%+d' % p.color_delta.delta.yellow }}）
+- 🟢 {{ p.color_delta.today.green }}（{{ '%+d' % p.color_delta.delta.green }}）
+
+**今日告警**：🔴 {{ p.alerts.red }} 条 · 🟠 {{ p.alerts.orange }} 条 · 合计 **{{ p.alerts.total }}** 条
+
+**SCS 日变化**：{{ '%.2f' % p.scs_delta.today }}（{{ '%+.2f' % p.scs_delta.delta }}）
+
+**推荐执行率**：{{ '%.0f%%' % (p.exec_rate.rate * 100) }}（{{ p.exec_rate.join }}/{{ p.exec_rate.total }}）

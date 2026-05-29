@@ -1,0 +1,15 @@
+{
+  "case_id": "H023",
+  "symbol": "600122",
+  "company_name": "测试公司财务22",
+  "fraud_type": "应收异常",
+  "target_engine": "financial_fraud",
+  "fraud_start_year": 2021,
+  "exposure_date": "2023-06-15",
+  "ground_truth_decision": "pass",
+  "ground_truth_score": 0.35,
+  "evidence": [
+    "样例证据-23-financial_fraud"
+  ],
+  "notes": "synthetic fixture"
+}

@@ -1,0 +1,10 @@
+# D0/D3 维度（叙事 / 关联方）LoRA 训练配置
+# [Ref: 03_/05_维度五/stages/stage_1_启动期/steps/step_04 §7.1 B]
+# 任务：related_party 关联方风险判别
+
+task: related_party
+lora_name: narrative_lora_v1
+rank: 16
+lora_alpha: 32
+epochs: 3
+learning_rate: 2.0e-4

@@ -1,0 +1,48 @@
+### LLaMA-Factory 配置 — narrative_nli_lora_v1
+### Base: Qwen2.5-7B-Instruct  Rank=16  Alpha=32  Epochs=3
+### [Ref: 03_/03_维度三/.../step_05_叙事一致性NLI_LoRA.md §T1]
+
+model_name_or_path: Qwen/Qwen2.5-7B-Instruct
+
+method: lora
+lora_rank: 16
+lora_alpha: 32
+lora_target: all
+lora_dropout: 0.05
+
+finetuning_type: lora
+
+### 数据集
+dataset: narrative_nli_train
+dataset_dir: training/data/narrative_nli
+template: alpaca
+cutoff_len: 512
+train_on_prompt: false
+
+### 训练超参
+num_train_epochs: 3
+learning_rate: 2.0e-4
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 4
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+fp16: true
+
+### 评测
+val_size: 0.1                    # 内置验证集
+eval_strategy: steps
+eval_steps: 50
+save_steps: 100
+logging_steps: 10
+save_total_limit: 2
+
+### 输出
+output_dir: outputs/narrative_nli_lora_v1
+overwrite_output_dir: true
+
+### 可选监控
+# report_to: wandb
+# run_name: narrative_nli_lora_v1
+
+### 注意：启动期 GPU ≥16GB（QLoRA 可降至 8GB）
+### BLOCKED: GPU 不可用时走 D5 远程训练（P-step_04/05）

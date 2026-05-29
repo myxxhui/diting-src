@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8">
+<title>{{ thesis.symbol }} {{ thesis.name }} Thesis 卡</title>
+<style>
+  @page { size: A4; margin: 18mm; }
+  body { font-family: "PingFang SC","Microsoft YaHei",sans-serif; color:#111827; }
+  h1 { font-size:20pt; margin-bottom:4pt; }
+  .meta { color:#6b7280; font-size:9pt; margin-bottom:16pt; }
+  h2 { font-size:13pt; margin:14pt 0 4pt 0; color:#1f2937; border-bottom:1px solid #e5e7eb; padding-bottom:2pt; }
+  ul { margin:4pt 0 4pt 18pt; }
+  .anchor { background:#f3f4f6; padding:8pt; border-radius:4pt; }
+  .footer { margin-top:24pt; color:#6b7280; font-size:9pt; }
+</style></head>
+<body>
+  <h1>{{ thesis.symbol }} {{ thesis.name }}</h1>
+  <div class="meta">提议时间:{{ thesis.proposed_at }} · 操作建议:{{ thesis.action }} · thesis_id {{ thesis.thesis_id }}</div>
+
+  <h2>观点摘要</h2><p>{{ thesis.thesis_summary }}</p>
+
+  <h2>证据链（{{ thesis.evidence_chain|length }} 条）</h2>
+  <ul>{% for e in thesis.evidence_chain %}<li>{{ e }}</li>{% endfor %}</ul>
+
+  <h2>风险清单（{{ thesis.risks|length }} 条）</h2>
+  <ul>{% for r in thesis.risks %}<li>{{ r }}</li>{% endfor %}</ul>
+
+  <h2>估值锚点</h2>
+  <div class="anchor">
+    方法:<strong>{{ thesis.valuation_anchor.method }}</strong>
+    {% if thesis.valuation_anchor.get('target_price') %} · 目标价 ¥{{ thesis.valuation_anchor.target_price }}{% endif %}
+    {% if thesis.valuation_anchor.get('target_pe') %} · 目标 PE {{ thesis.valuation_anchor.target_pe }}x{% endif %}
+    {% if thesis.valuation_anchor.get('note') %}<br>{{ thesis.valuation_anchor.note }}{% endif %}
+  </div>
+
+  <div class="footer">由 AI 投资副驾驶生成 · 仅供参考,不构成投资建议。</div>
+</body></html>

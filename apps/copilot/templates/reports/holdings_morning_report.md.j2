@@ -1,0 +1,53 @@
+# diting 持仓早报 · {{ ctx.period_label }}
+
+W1 健康度 + W2 市场阶段 · {{ p.generated_at }}
+{% if ctx.is_demo %}
+> ⚠️ 演示模式：探针或阶段数据不足
+{% endif %}
+
+## 总览
+- 活跃标的：**{{ p.active_count }}** 只
+
+### 健康度（W1）
+| 档位 | 数量 |
+|------|------|
+| 🟢 正常 | {{ p.color_distribution.green }} |
+| 🟡 关注 | {{ p.color_distribution.yellow }} |
+| 🟠 警惕 | {{ p.color_distribution.orange }} |
+| 🔴 高危 | {{ p.color_distribution.red }} |
+
+### 市场阶段（W2）
+| 阶段 | 数量 |
+|------|------|
+| ⚪ 炒概念 | {{ p.phase_distribution.concept }} |
+| 🟡 炒预期 | {{ p.phase_distribution.expectation }} |
+| 🟢 炒业绩/兑现 | {{ p.phase_distribution.realization }} |
+| 🔴 利好透支 | {{ p.phase_distribution.exhaustion }} |
+
+{% if p.focus %}
+### 🔮 今日关注
+{% for line in p.focus %}
+- {{ line }}
+{% endfor %}
+{% endif %}
+
+{% if p.portfolio %}
+## 真实持仓
+| 标的 | health | 阶段 | 价格 | 日涨跌 |
+|------|--------|------|------|--------|
+{% for r in p.portfolio %}
+| {{ r.name }} {{ r.symbol }} | {{ r.health_score if r.health_score is not none else 'N/A' }} | {{ r.phase_label_zh }} | {{ r.last_close if r.last_close is not none else '—' }} | {% if r.pct_change_1d is not none %}{{ '%+.2f' % (r.pct_change_1d * 100) }}%{% else %}—{% endif %} |
+{% endfor %}
+{% endif %}
+
+{% if p.watchlist %}
+## 关注标的
+| 标的 | health | 阶段 | 价格 |
+|------|--------|------|------|
+{% for r in p.watchlist %}
+| {{ r.name }} {{ r.symbol }} | {{ r.health_score if r.health_score is not none else 'N/A' }} | {{ r.phase_label_zh }} | {{ r.last_close if r.last_close is not none else '—' }} |
+{% endfor %}
+{% endif %}
+
+---
+单股阶段切换与高危事件将另发即时邮件。

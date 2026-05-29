@@ -1,0 +1,15 @@
+{
+  "case_id": "H036",
+  "symbol": "601105",
+  "company_name": "测试公司股东5",
+  "fraud_type": "资金占用",
+  "target_engine": "shareholder_integrity",
+  "fraud_start_year": 2019,
+  "exposure_date": "2026-01-15",
+  "ground_truth_decision": "degrade",
+  "ground_truth_score": 0.58,
+  "evidence": [
+    "样例证据-36-shareholder_integrity"
+  ],
+  "notes": "synthetic fixture"
+}

@@ -1,0 +1,10 @@
+# D2 维度（deep_strike · 纵深进攻）LoRA 训练配置
+# [Ref: 03_/05_维度五/stages/stage_1_启动期/steps/step_04 §7.1 B]
+# 任务：thesis 生成 / shareholder 分析
+
+task: shareholder
+lora_name: thrust_lora_v1
+rank: 16
+lora_alpha: 32
+epochs: 3
+learning_rate: 2.0e-4

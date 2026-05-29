@@ -1,0 +1,33 @@
+# D3 step_09 · 市场阶段分类器阈值（配置驱动 · 勿写死在代码）
+# [Ref: diting-doc/.../step_09_市场阶段分类器MVP.md §3.5]
+
+classifier_version: rule_v1
+
+thresholds:
+  concept:
+    pct_chg_60d_max: 0.20
+    volume_ratio_5d_max: 1.5
+  expectation:
+    pct_chg_30d_min: 0.30
+    volume_ratio_5d_min: 1.5
+  exhaustion:
+    pct_chg_60d_min: 0.80
+    volume_ratio_5d_min: 2.5
+    pct_chg_5d_max: 0.0
+    media_news_count_7d_min: 30
+    pct_chg_3d_max: 0.0
+    post_realization_days: 10
+    pct_chg_5d_after_realization_max: -0.05
+  realization:
+    announcement_window_days: 5
+
+confidence:
+  full: 0.85
+  partial: 0.65
+  degraded: 0.45
+
+phase_labels_zh:
+  concept: "炒概念"
+  expectation: "炒预期"
+  realization: "炒业绩/兑现"
+  exhaustion: "利好透支"

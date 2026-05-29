@@ -1,0 +1,23 @@
+# Holdout 回归退化阈值配置
+# 任一指标退化超过 threshold 则触发 CI Block
+# [Ref: step_05 §3.5.3 C1]  ConfigMap: REGRESSION_THRESHOLD=0.05
+
+default:
+  recall: 0.05
+  precision: 0.05
+  f1: 0.05
+
+cryo:
+  recall: 0.05
+  precision: 0.05
+  f1: 0.05
+
+thrust:
+  recall: 0.05
+  precision: 0.05
+  f1: 0.05
+
+narrative:
+  recall: 0.05
+  precision: 0.05
+  f1: 0.05

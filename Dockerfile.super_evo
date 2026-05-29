@@ -1,0 +1,31 @@
+# super-evo（演进飞轮）API · Teacher 等服务
+# 与 W1/W2 蒸馏验证对齐：本机可先 `pytest`，容器内与 compose 见 deploy/docker-compose/super-evo-stack.yml
+# [Ref: 03_/05_维度五/.../step_01] [Ref: step_02 C1 Teacher]
+
+FROM python:3.11-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+# 部分 pyproject 依赖在源码编译时需要
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN mkdir -p /app/data
+
+COPY pyproject.toml README.md ./
+COPY apps ./apps
+COPY training ./training
+COPY scripts ./scripts
+
+RUN pip install --upgrade pip setuptools wheel \
+    && pip install -e .
+
+EXPOSE 8090
+
+CMD ["python", "-m", "uvicorn", "apps.super_evo.main:app", "--host", "0.0.0.0", "--port", "8090"]

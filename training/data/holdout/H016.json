@@ -1,0 +1,15 @@
+{
+  "case_id": "H016",
+  "symbol": "600115",
+  "company_name": "测试公司财务15",
+  "fraud_type": "收入确认",
+  "target_engine": "financial_fraud",
+  "fraud_start_year": 2019,
+  "exposure_date": "2026-08-15",
+  "ground_truth_decision": "reject",
+  "ground_truth_score": 0.85,
+  "evidence": [
+    "样例证据-16-financial_fraud"
+  ],
+  "notes": "synthetic fixture"
+}

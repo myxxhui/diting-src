@@ -1,4 +1,6 @@
 .env
+# 持仓 SoT 私有副本：禁止提交真实持仓
+data/config/my_holdings.yaml
 __pycache__/
 *.py[cod]
 *.egg-info/

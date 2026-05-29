@@ -1,0 +1,15 @@
+{
+  "case_id": "H030",
+  "symbol": "600129",
+  "company_name": "测试公司财务29",
+  "fraud_type": "在建工程",
+  "target_engine": "financial_fraud",
+  "fraud_start_year": 2018,
+  "exposure_date": "2020-04-15",
+  "ground_truth_decision": "degrade",
+  "ground_truth_score": 0.55,
+  "evidence": [
+    "样例证据-30-financial_fraud"
+  ],
+  "notes": "synthetic fixture"
+}

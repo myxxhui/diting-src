@@ -1,0 +1,45 @@
+{# 单张 thesis 卡片,可被 HTMX hx-swap=outerHTML 整体替换。 [Ref: step_04] #}
+<div class="thesis" id="thesis-{{ t.thesis_id }}">
+  <h3>{{ t.symbol }} {{ t.name }} <span class="badge {{ t.action }}">{{ t.action }}</span></h3>
+  <div class="meta">提议于 {{ t.proposed_at }} · thesis_id <code>{{ t.thesis_id }}</code></div>
+
+  <div class="section">
+    <h4>📝 观点摘要</h4>
+    <p>{{ t.thesis_summary }}</p>
+  </div>
+
+  <div class="section">
+    <h4>📊 证据链（{{ t.evidence_chain|length }}）</h4>
+    <ul>{% for e in t.evidence_chain %}<li>{{ e }}</li>{% endfor %}</ul>
+  </div>
+
+  <div class="section">
+    <h4>⚠️ 风险清单（{{ t.risks|length }}）</h4>
+    <ul>{% for r in t.risks %}<li>{{ r }}</li>{% endfor %}</ul>
+  </div>
+
+  <div class="section">
+    <h4>💰 估值锚点</h4>
+    <p>方法:<strong>{{ t.valuation_anchor.method }}</strong>
+    {% if t.valuation_anchor.get('target_price') %} · 目标价 ¥{{ t.valuation_anchor.target_price }}{% endif %}
+    {% if t.valuation_anchor.get('target_pe') %} · 目标 PE {{ t.valuation_anchor.target_pe }}x{% endif %}
+    </p>
+  </div>
+
+  {% if t.user_action %}
+    <div class="section"><strong>✅ 已操作:</strong> {{ t.user_action }}</div>
+  {% else %}
+    <div class="actions">
+      {% for label, code in [("✅ 加入","join"),("🤔 待考虑","consider"),("❌ 不感兴趣","not_interested")] %}
+      <button type="button" class="primary"
+              hx-post="/api/recommendations/{{ t.thesis_id }}/action"
+              hx-headers='{"Content-Type":"application/json"}'
+              hx-vals='{"action": "{{ code }}"}'
+              hx-target="#thesis-{{ t.thesis_id }}"
+              hx-swap="outerHTML">{{ label }}</button>
+      {% endfor %}
+      <a href="/api/recommendations/{{ t.thesis_id }}/pdf"
+         target="_blank" style="margin-left:auto;">📄 PDF 导出</a>
+    </div>
+  {% endif %}
+</div>

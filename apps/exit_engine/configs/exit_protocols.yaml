@@ -1,0 +1,23 @@
+# D4 exit_engine · 协议阈值配置（启动期 SP1）
+# [Ref: 03_/04_维度四/.../step_03_SP1止损协议.md §7.3.1]
+
+sp1_stop_loss:
+  enabled: true
+  threshold: -0.15
+  priority: 1
+  buffer_days: 0
+  sell_ratio: 1.0
+  skip_closed_market: true
+  advice_template: >-
+    建议立即止损。成本 {cost_price:.2f} 元，当前 {current_price:.2f} 元，
+    浮动 {pnl:+.2%}，已触发 {threshold:.0%} 止损线。（仅建议，须人工确认）
+
+sp2_take_profit:
+  enabled: true
+  take_profit_threshold: 0.30
+  take_profit_priority: 2
+  take_profit_buffer_days: 3
+  take_profit_sell_ratio: 1.0
+  advice_template: >-
+    建议分批止盈。成本 {cost_price:.2f} 元，当前 {current_price:.2f} 元，
+    浮动 {pnl:+.2%}，已连续 {streak}/{buffer_days} 个交易日达 {threshold:.0%} 止盈线。（仅建议，须人工确认）

@@ -1,0 +1,15 @@
+{
+  "case_id": "H025",
+  "symbol": "600124",
+  "company_name": "测试公司财务24",
+  "fraud_type": "收入确认",
+  "target_engine": "financial_fraud",
+  "fraud_start_year": 2018,
+  "exposure_date": "2025-08-15",
+  "ground_truth_decision": "reject",
+  "ground_truth_score": 0.85,
+  "evidence": [
+    "样例证据-25-financial_fraud"
+  ],
+  "notes": "synthetic fixture"
+}

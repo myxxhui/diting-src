@@ -1,0 +1,15 @@
+{
+  "case_id": "H024",
+  "symbol": "600123",
+  "company_name": "测试公司财务23",
+  "fraud_type": "在建工程",
+  "target_engine": "financial_fraud",
+  "fraud_start_year": 2022,
+  "exposure_date": "2024-07-15",
+  "ground_truth_decision": "degrade",
+  "ground_truth_score": 0.55,
+  "evidence": [
+    "样例证据-24-financial_fraud"
+  ],
+  "notes": "synthetic fixture"
+}

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MonitorFieldRedis",
+  "type": "object",
+  "required": [
+    "field_id",
+    "probe_id",
+    "metric_name",
+    "data_source_type",
+    "specific_target",
+    "alert_threshold",
+    "alert_threshold_struct",
+    "polling_frequency",
+    "mapped_logic_chain_nodes",
+    "status"
+  ],
+  "properties": {
+    "field_id": { "type": "string", "minLength": 3 },
+    "probe_id": { "type": "string", "enum": ["P5", "P6", "P7"] },
+    "metric_name": { "type": "string", "minLength": 2 },
+    "data_source_type": { "type": "string", "enum": ["STRUCT_DATA_API", "WEB_SCRAPING"] },
+    "source_api": { "type": ["string", "null"] },
+    "source_url": { "type": ["string", "null"] },
+    "specific_target": { "type": "string", "minLength": 2 },
+    "keywords": { "type": "array", "items": { "type": "string" } },
+    "alert_threshold": { "type": "string", "minLength": 4 },
+    "alert_threshold_struct": {
+      "type": "object",
+      "required": ["operator", "value", "window_days"],
+      "properties": {
+        "operator": { "type": "string", "enum": ["gt", "lt", "mom_pct", "yoy_pct", "sum_pct"] },
+        "value": { "type": "number" },
+        "window_days": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "polling_frequency": {
+      "type": "string",
+      "enum": ["daily", "monthly_after_release", "weekly"]
+    },
+    "mapped_logic_chain_nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "status": { "type": "string", "enum": ["active", "stale", "archived"] },
+    "thesis_card_id": { "type": "string" },
+    "symbol": { "type": "string", "pattern": "^[0-9]{6}$" },
+    "created_at": { "type": "string" },
+    "last_hit_at": { "type": ["string", "null"] }
+  }
+}

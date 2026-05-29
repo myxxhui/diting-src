@@ -1,0 +1,15 @@
+{
+  "case_id": "H010",
+  "symbol": "600109",
+  "company_name": "测试公司财务9",
+  "fraud_type": "收入确认",
+  "target_engine": "financial_fraud",
+  "fraud_start_year": 2018,
+  "exposure_date": "2020-02-15",
+  "ground_truth_decision": "reject",
+  "ground_truth_score": 0.85,
+  "evidence": [
+    "样例证据-10-financial_fraud"
+  ],
+  "notes": "synthetic fixture"
+}

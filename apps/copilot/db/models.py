@@ -1,20 +1,26 @@
-"""SQLAlchemy ORM 模型 - 启动期 W3 最小 schema。
+"""SQLAlchemy ORM 模型 - 启动期 copilot schema。
 
-四张表：users / holdings / value_snapshots / event_logs
+表：users / holdings / value_snapshots / event_logs / health_records / thesis_cards / user_decisions / daily_reports / weekly_reports
 
 [Ref: 03_/00_维度零/stages/stage_1_启动期/steps/step_02]
+[Ref: 03_/00_维度零/stages/stage_1_启动期/steps/step_04]
+[Ref: 03_/00_维度零/stages/stage_1_启动期/steps/step_07]
+[Ref: 03_/00_维度零/stages/stage_1_启动期/steps/step_08]
 """
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from sqlalchemy import (
     JSON,
+    Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -131,4 +137,111 @@ class HealthRecord(Base):
     __table_args__ = (
         UniqueConstraint("event_id", name="uq_health_event"),
         Index("ix_health_symbol_received", "symbol", "received_at"),
+    )
+
+
+class ThesisCard(Base):
+    """thesis 卡 - 5 必填字段全部入库。
+
+    [Ref: 03_/00_维度零/stages/stage_1_启动期/steps/step_04]
+    """
+
+    __tablename__ = "thesis_cards"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    thesis_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    thesis_summary: Mapped[str] = mapped_column(String(2048), nullable=False)
+    evidence_chain: Mapped[list] = mapped_column(JSON, nullable=False)
+    risks: Mapped[list] = mapped_column(JSON, nullable=False)
+    valuation_anchor: Mapped[dict] = mapped_column(JSON, nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    pass_event_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    proposed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("ix_thesis_symbol_proposed", "symbol", "proposed_at"),)
+
+
+class UserDecision(Base):
+    """用户对 thesis 卡的 3 选 1 决策。"""
+
+    __tablename__ = "user_decisions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_pk: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    thesis_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (UniqueConstraint("user_pk", "thesis_id", name="uq_user_thesis"),)
+
+
+class DailyReport(Base):
+    """日报持久化。
+
+    [Ref: 03_/00_维度零/stages/stage_1_启动期/steps/step_07]
+    """
+
+    __tablename__ = "daily_reports"
+    __table_args__ = (
+        UniqueConstraint("user_id", "report_date", name="uq_daily_user_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    report_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    summary: Mapped[dict] = mapped_column(JSON, nullable=False)
+    html_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    markdown: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class WeeklyReport(Base):
+    """周报持久化。
+
+    [Ref: 03_/00_维度零/stages/stage_1_启动期/steps/step_07]
+    """
+
+    __tablename__ = "weekly_reports"
+    __table_args__ = (
+        UniqueConstraint("user_id", "iso_year", "iso_week", name="uq_weekly_user_isoweek"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    iso_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    iso_week: Mapped[int] = mapped_column(Integer, nullable=False)
+    summary: Mapped[dict] = mapped_column(JSON, nullable=False)
+    html_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    markdown: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class AuditLog(Base):
+    """熔断等治理动作审计。
+
+    [Ref: 03_/00_维度零/stages/stage_1_启动期/steps/step_08]
+    """
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )

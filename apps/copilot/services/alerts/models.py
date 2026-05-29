@@ -29,6 +29,8 @@ class AlertType(str, enum.Enum):
     HEALTH_DROP = "health_drop"
     DEGRADE = "degrade"
     THESIS_INVALID = "thesis_invalid"
+    MARKET_PHASE_SHIFT = "market_phase_change"
+    MARKET_PHASE_EXHAUSTION = "market_phase_exhaustion"
 
 
 ALERT_LEVEL_MAP: dict[AlertType, AlertLevel] = {
@@ -38,6 +40,8 @@ ALERT_LEVEL_MAP: dict[AlertType, AlertLevel] = {
     AlertType.HEALTH_DROP: AlertLevel.RED,
     AlertType.DEGRADE: AlertLevel.ORANGE,
     AlertType.THESIS_INVALID: AlertLevel.ORANGE,
+    AlertType.MARKET_PHASE_SHIFT: AlertLevel.ORANGE,
+    AlertType.MARKET_PHASE_EXHAUSTION: AlertLevel.RED,
 }
 
 

@@ -1,0 +1,170 @@
+{
+  "cryo": {
+    "metrics": {
+      "recall": 0.0,
+      "precision": 0.0,
+      "f1": 0.0,
+      "n_cases": 50,
+      "per_class": {
+        "block": {
+          "recall": 0.0,
+          "precision": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fn": 25,
+          "fp": 0
+        },
+        "pass": {
+          "recall": 0.0,
+          "precision": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fn": 25,
+          "fp": 0
+        }
+      }
+    },
+    "inference_mode": "cpu_transformers_lora",
+    "n_cases": 50,
+    "expected_n": 50,
+    "samples": [
+      {
+        "id": "cryo_holdout_0047",
+        "pred": "根据您提供的信息，我将从以下几个方面进行综合分析：\n\n1. ",
+        "label": "block"
+      },
+      {
+        "id": "cryo_holdout_0027",
+        "pred": "根据您提供的信息，我将从三个角度进行综合分析：\n\n1. **",
+        "label": "block"
+      },
+      {
+        "id": "cryo_holdout_0030",
+        "pred": "hold",
+        "label": "pass"
+      },
+      {
+        "id": "cryo_holdout_0006",
+        "pred": "hold",
+        "label": "pass"
+      },
+      {
+        "id": "cryo_holdout_0036",
+        "pred": "hold",
+        "label": "pass"
+      }
+    ]
+  },
+  "thrust": {
+    "metrics": {
+      "recall": 0.0,
+      "precision": 0.0,
+      "f1": 0.0,
+      "n_cases": 30,
+      "per_class": {
+        "block": {
+          "recall": 0.0,
+          "precision": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fn": 15,
+          "fp": 0
+        },
+        "pass": {
+          "recall": 0.0,
+          "precision": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fn": 15,
+          "fp": 0
+        }
+      }
+    },
+    "inference_mode": "cpu_transformers_lora",
+    "n_cases": 30,
+    "expected_n": 30,
+    "samples": [
+      {
+        "id": "thrust_holdout_0007",
+        "pred": "根据提供的信息，我们可以对这个弹性信号进行综合分析：\n\n1.",
+        "label": "block"
+      },
+      {
+        "id": "thrust_holdout_0024",
+        "pred": "根据您提供的信息，我们可以进行以下分析：\n\n1. 弹性比率：",
+        "label": "pass"
+      },
+      {
+        "id": "thrust_holdout_0029",
+        "pred": "根据您提供的信息，我们可以从以下几个方面来分析该企业的弹性信",
+        "label": "block"
+      },
+      {
+        "id": "thrust_holdout_0014",
+        "pred": "根据您提供的信息，我们可以进行以下分析：\n\n1. 弹性比率：",
+        "label": "pass"
+      },
+      {
+        "id": "thrust_holdout_0011",
+        "pred": "根据您提供的信息，我们可以从以下几个方面来分析这个弹性信号，",
+        "label": "block"
+      }
+    ]
+  },
+  "narrative": {
+    "metrics": {
+      "recall": 0.0,
+      "precision": 0.0,
+      "f1": 0.0,
+      "n_cases": 30,
+      "per_class": {
+        "block": {
+          "recall": 0.0,
+          "precision": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fn": 15,
+          "fp": 0
+        },
+        "pass": {
+          "recall": 0.0,
+          "precision": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fn": 15,
+          "fp": 0
+        }
+      }
+    },
+    "inference_mode": "cpu_transformers_lora",
+    "n_cases": 30,
+    "expected_n": 30,
+    "samples": [
+      {
+        "id": "narrative_holdout_0007",
+        "pred": "根据提供的信息，关联方以高溢价购买资产或提供服务，并且交易价",
+        "label": "block"
+      },
+      {
+        "id": "narrative_holdout_0024",
+        "pred": "根据提供的信息，我们可以从以下几个方面来分析关联方交易是否存",
+        "label": "pass"
+      },
+      {
+        "id": "narrative_holdout_0029",
+        "pred": "根据提供的信息，关联方以高溢价购买资产或提供服务，并且交易价",
+        "label": "block"
+      },
+      {
+        "id": "narrative_holdout_0014",
+        "pred": "根据提供的信息，我们可以从以下几个方面来分析关联方交易是否存",
+        "label": "pass"
+      },
+      {
+        "id": "narrative_holdout_0011",
+        "pred": "根据提供的信息，关联方以高溢价购买资产或提供服务，并且交易价",
+        "label": "block"
+      }
+    ]
+  }
+}

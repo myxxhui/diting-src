@@ -1,0 +1,84 @@
+# Holdout 守门 CI workflow
+# 调用 HoldoutEvaluator；blocked=true → exit 1 阻断合并
+# [Ref: step_05 §7.1-E/F；§3.5.3 C2]
+# DECISION_PENDING: 真实 vLLM 推理需 GPU runner（标注见 N1）
+
+name: holdout-gate
+
+on:
+  pull_request:
+    branches: ["main", "release/**"]
+    paths:
+      - "apps/super_evo/**"
+      - "training/**"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  REGRESSION_THRESHOLD: "0.05"    # ConfigMap 等价，见 step_05 §3.5.3 C1
+  HOLDOUT_ROOT: "training/data/holdout"
+  INFERENCE_MODE: "mock"          # DECISION_PENDING: 改 vllm 需 GPU runner
+
+jobs:
+  holdout-gate:
+    name: Holdout 回归守门（tier-1 mock 评测）
+    runs-on: ubuntu-latest
+    # DECISION_PENDING: 真实 vLLM 评测需 self-hosted GPU runner，见下方注释
+    # runs-on: [self-hosted, gpu]  # 用户确认 GPU runner 后启用
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 生成 Holdout 锁库数据（如不存在）
+        run: |
+          if [ ! -f "training/data/holdout/cryo/holdout.jsonl" ]; then
+            PYTHONPATH=. python scripts/evo_step05_run.py generate-holdout
+          else
+            echo "Holdout 已存在，跳过生成"
+          fi
+
+      - name: leak check（H2：holdout 与训练集 0 重叠）
+        run: |
+          PYTHONPATH=. python scripts/evo_step05_run.py leak-check cryo
+          PYTHONPATH=. python scripts/evo_step05_run.py leak-check thrust
+          PYTHONPATH=. python scripts/evo_step05_run.py leak-check narrative
+
+      - name: Holdout pytest（≥10 tests）
+        run: |
+          PYTHONPATH=. python -m pytest tests/super_evo/test_holdout_evaluator.py -q
+
+      - name: 回归门模拟测试（C1/C2：blocked=true → exit 1）
+        run: |
+          # 验证 regression-sim 确实返回 exit 1
+          PYTHONPATH=. python scripts/evo_step05_run.py regression-sim cryo && exit 1 || echo "✅ regression-sim 正确返回 exit 1"
+
+      - name: Holdout 评测 D1（cryo）
+        # DECISION_PENDING: mode=mock（无 GPU）；真实 vLLM 需用户启用 GPU runner
+        run: |
+          PYTHONPATH=. python scripts/evo_step05_run.py evaluate cryo 0 mock
+        env:
+          INFERENCE_MODE: ${{ env.INFERENCE_MODE }}
+
+      - name: Holdout 评测 D2（thrust）
+        run: |
+          PYTHONPATH=. python scripts/evo_step05_run.py evaluate thrust 0 mock
+
+      - name: Holdout 评测 D3（narrative）
+        run: |
+          PYTHONPATH=. python scripts/evo_step05_run.py evaluate narrative 0 mock
+
+      - name: 输出评测摘要
+        if: always()
+        run: |
+          PYTHONPATH=. python scripts/evo_step05_run.py status

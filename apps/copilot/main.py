@@ -2,7 +2,8 @@
 
 [Ref: 03_/00_维度零/.../step_02]
 [Ref: 03_/00_维度零/.../step_03]
-[Ref: 03_/00_维度零/.../step_06 M4 价值账本]
+[Ref: 03_/00_维度零/stages/stage_1_启动期/steps/step_06 M4 价值账本]
+[Ref: 03_/00_维度零/stages/stage_1_启动期/steps/step_07 日报周报]
 """
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import redis.asyncio as redis
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -18,9 +20,13 @@ from fastapi.templating import Jinja2Templates
 from apps.copilot.config import settings
 from apps.copilot.db.database import AsyncSessionLocal, init_db
 from apps.copilot.modules.health_check import routes as health_routes
+from apps.copilot.modules.recommendation import routes as recommendation_routes
+from apps.copilot.routers import admin as admin_router
 from apps.copilot.routers import portfolio
+from apps.copilot.routers import reports as reports_router
 from apps.copilot.routers.alerts import router as alerts_router, view_router as alerts_view_router
 from apps.copilot.routers.value import router as value_router, view_router as value_view_router
+from apps.copilot.scheduler.jobs.report_jobs import register_report_jobs
 from apps.copilot.services.alerts.channels.email import EmailChannel
 from apps.copilot.services.alerts.channels.telegram import TelegramChannel
 from apps.copilot.services.alerts.channels.wechat import WechatChannel
@@ -55,6 +61,7 @@ async def lifespan(app: FastAPI):
             password=settings.smtp_password,
             sender=settings.smtp_from,
             recipient=settings.smtp_to,
+            use_ssl=settings.smtp_use_ssl,
         ),
     ]
     deduper = AlertDeduper(AsyncSessionLocal, window_seconds=settings.alert_dedup_window)
@@ -67,6 +74,15 @@ async def lifespan(app: FastAPI):
         sla,
     )
     app.state.alert_dispatcher = dispatcher
+
+    report_scheduler = AsyncIOScheduler()
+    register_report_jobs(
+        report_scheduler,
+        session_factory=AsyncSessionLocal,
+        alert_dispatcher=dispatcher,
+    )
+    report_scheduler.start()
+    app.state.report_scheduler = report_scheduler
 
     async def _arch_notifier(title: str, body: str) -> None:
         from apps.copilot.services.alerts.models import Alert, AlertType
@@ -127,6 +143,10 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    report_scheduler = getattr(app.state, "report_scheduler", None)
+    if report_scheduler:
+        report_scheduler.shutdown(wait=False)
+
     ledger = getattr(app.state, "ledger", None)
     if ledger and ledger.get("scheduler"):
         ledger["scheduler"].stop()
@@ -145,11 +165,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AI 投资副驾驶", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.include_router(portfolio.router)
+app.include_router(recommendation_routes.router)
 app.include_router(health_routes.router)
 app.include_router(alerts_router)
 app.include_router(alerts_view_router)
 app.include_router(value_router)
 app.include_router(value_view_router)
+app.include_router(reports_router.router)
+app.include_router(admin_router.router)
 
 
 @app.get("/health")

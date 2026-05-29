@@ -1,0 +1,15 @@
+{
+  "case_id": "H033",
+  "symbol": "601102",
+  "company_name": "测试公司股东2",
+  "fraud_type": "资金占用",
+  "target_engine": "shareholder_integrity",
+  "fraud_start_year": 2021,
+  "exposure_date": "2023-07-15",
+  "ground_truth_decision": "degrade",
+  "ground_truth_score": 0.58,
+  "evidence": [
+    "样例证据-33-shareholder_integrity"
+  ],
+  "notes": "synthetic fixture"
+}

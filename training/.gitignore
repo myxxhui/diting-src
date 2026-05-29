@@ -1,0 +1,4 @@
+# DVC / 数据缓存（按需调整）
+.cache/
+.pytest_cache/
+*.log

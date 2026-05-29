@@ -1,0 +1,21 @@
+<View>
+  <Header value="财务测谎 · 人工校验"/>
+  <Text name="input" value="$input"/>
+  <Header value="Teacher 输出（参考，可被覆盖）"/>
+  <Text name="teacher_output" value="$teacher_output"/>
+
+  <Header value="您的标注"/>
+  <Choices name="decision" toName="input" choice="single" showInLine="true">
+    <Choice value="reject" hint="拒绝（高风险，建议放弃）"/>
+    <Choice value="degrade" hint="降级（中风险，需关注）"/>
+    <Choice value="pass" hint="通过（低风险）"/>
+  </Choices>
+
+  <Rating name="risk_score" toName="input" maxRating="10" icon="star" size="small"
+          hint="0=无风险，10=严重风险（标注后请在备注中给出 0-1 之间的精确值，可选）"/>
+
+  <TextArea name="evidence" toName="input" placeholder="关键证据（每行一条）"
+            maxSubmissions="10" editable="true" perRegion="false" rows="4"/>
+
+  <TextArea name="notes" toName="input" placeholder="标注备注（可选）" rows="2"/>
+</View>

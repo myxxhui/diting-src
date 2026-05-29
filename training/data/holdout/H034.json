@@ -1,0 +1,15 @@
+{
+  "case_id": "H034",
+  "symbol": "601103",
+  "company_name": "测试公司股东3",
+  "fraud_type": "违规减持",
+  "target_engine": "shareholder_integrity",
+  "fraud_start_year": 2022,
+  "exposure_date": "2024-08-15",
+  "ground_truth_decision": "reject",
+  "ground_truth_score": 0.82,
+  "evidence": [
+    "样例证据-34-shareholder_integrity"
+  ],
+  "notes": "synthetic fixture"
+}

@@ -1,0 +1,15 @@
+{
+  "case_id": "H050",
+  "symbol": "603109",
+  "company_name": "测试公司关联9",
+  "fraud_type": "购销异常",
+  "target_engine": "related_party",
+  "fraud_start_year": 2018,
+  "exposure_date": "2020-06-15",
+  "ground_truth_decision": "reject",
+  "ground_truth_score": 0.88,
+  "evidence": [
+    "样例证据-50-related_party"
+  ],
+  "notes": "synthetic fixture"
+}

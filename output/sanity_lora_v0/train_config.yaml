@@ -1,0 +1,51 @@
+### 模型配置（由 trainer.py 在运行时按 lora_name 覆盖）
+model_name_or_path: models/Qwen2.5-7B-Instruct
+template: qwen
+trust_remote_code: true
+
+### LoRA 配置
+finetuning_type: lora
+lora_rank: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target: all
+
+### 数据配置
+dataset: financial_fraud_train
+eval_dataset: financial_fraud_val
+dataset_dir: training/data/llama_factory
+cutoff_len: 4096
+max_samples: 100000
+overwrite_cache: true
+preprocessing_num_workers: 4
+
+### 训练配置
+output_dir: output/sanity_lora_v0
+num_train_epochs: 1
+per_device_train_batch_size: 4
+per_device_eval_batch_size: 4
+gradient_accumulation_steps: 4
+learning_rate: 0.0002
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+weight_decay: 0.0
+max_grad_norm: 1.0
+fp16: true
+gradient_checkpointing: true
+
+### 评估 / 保存
+do_eval: true
+eval_strategy: steps
+eval_steps: 100
+save_strategy: steps
+save_steps: 100
+save_total_limit: 2
+load_best_model_at_end: true
+
+### 日志 / WandB
+logging_steps: 10
+report_to: wandb
+run_name: sanity_lora_v0
+
+### sanity（被 trainer.py 通过 max_steps 覆盖时启用）
+# max_steps: 50

@@ -23,6 +23,7 @@ class EmailChannel(BaseChannel):
         password: str | None,
         sender: str,
         recipient: str | None,
+        use_ssl: bool = False,
         timeout: float = 10.0,
     ):
         self._host = host
@@ -31,6 +32,7 @@ class EmailChannel(BaseChannel):
         self._password = password
         self._sender = sender
         self._recipient = recipient
+        self._use_ssl = use_ssl
         self._timeout = timeout
 
     async def send(self, alert: Alert) -> ChannelResult:
@@ -39,10 +41,15 @@ class EmailChannel(BaseChannel):
 
         msg = EmailMessage()
         emoji = "🔴" if alert.level == AlertLevel.RED else "🟠"
-        msg["Subject"] = (
-            f"[{emoji} {alert.level.value.upper()}] {alert.symbol} {alert.name} · "
-            f"{alert.alert_type.value}"
-        )
+        payload = alert.payload or {}
+        subject_override = payload.get("email_subject")
+        if subject_override:
+            msg["Subject"] = str(subject_override)
+        else:
+            msg["Subject"] = (
+                f"[{emoji} {alert.level.value.upper()}] {alert.symbol} {alert.name} · "
+                f"{alert.alert_type.value}"
+            )
         msg["From"] = self._sender
         msg["To"] = self._recipient
         msg.set_content(
@@ -52,8 +59,12 @@ class EmailChannel(BaseChannel):
             f"详情: {alert.message}\n"
             f"时间: {alert.created_at.isoformat()}\n"
         )
-        msg.add_alternative(
-            f"""<html><body>
+        html_override = payload.get("html_override")
+        if html_override:
+            msg.add_alternative(html_override, subtype="html")
+        else:
+            msg.add_alternative(
+                f"""<html><body>
 <h2>{emoji} {alert.level.value.upper()} 告警</h2>
 <p><strong>{alert.symbol}</strong> {alert.name}</p>
 <p>类型: <code>{alert.alert_type.value}</code></p>
@@ -70,7 +81,8 @@ class EmailChannel(BaseChannel):
                 port=self._port,
                 username=self._username,
                 password=self._password,
-                start_tls=True,
+                use_tls=self._use_ssl,
+                start_tls=not self._use_ssl,
                 timeout=self._timeout,
             )
             return ChannelResult(channel=self.name, ok=True, sent_at=self.now())

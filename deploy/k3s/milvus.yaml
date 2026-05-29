@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: milvus
+  namespace: diting
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: milvus
+  template:
+    metadata:
+      labels:
+        app: milvus
+    spec:
+      containers:
+        - name: milvus
+          image: milvusdb/milvus:v2.3.10
+          command: ["milvus", "run", "standalone"]
+          env:
+            - { name: ETCD_USE_EMBED, value: "true" }
+            - { name: ETCD_CONFIG_PATH, value: "/milvus/configs/embedEtcd.yaml" }
+            - { name: COMMON_STORAGETYPE, value: "local" }
+            - { name: MINIO_USE_EMBED, value: "true" }
+          ports:
+            - containerPort: 19530
+            - containerPort: 9091
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/milvus }
+      volumes:
+        - name: data
+          hostPath:
+            path: /data/milvus
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: milvus
+  namespace: diting
+spec:
+  selector:
+    app: milvus
+  ports:
+    - { name: grpc, port: 19530, targetPort: 19530 }
+    - { name: http, port: 9091, targetPort: 9091 }

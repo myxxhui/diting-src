@@ -1,0 +1,10 @@
+# D1 维度（cryo_guard · 极寒防御）LoRA 训练配置
+# [Ref: 03_/05_维度五/stages/stage_1_启动期/steps/step_04 §7.1 B]
+# 参考 _template_lora.yaml；任务：止损/极端风险判别
+
+task: financial_fraud   # Label Studio 任务类型（fraud + risk 复用）
+lora_name: cryo_lora_v1
+rank: 16
+lora_alpha: 32
+epochs: 3
+learning_rate: 2.0e-4

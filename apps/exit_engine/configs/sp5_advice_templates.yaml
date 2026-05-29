@@ -1,0 +1,20 @@
+# SP5 财报披露窗口 advice 模板（L3 §3.5.4 SP5-4）
+# [Ref: 03_/04_维度四/.../step_05_SP3_Thesis失效协议.md §3.5.4]
+
+stages:
+  left_accumulate:
+    emoji: "🌱"
+    advice: "潜伏期建议轻仓持有等待业绩"
+    action_hint: "watch"
+  main_wave:
+    emoji: "🚀"
+    advice: "主升浪建议持有"
+    action_hint: "hold"
+  retreat:
+    emoji: "🍂"
+    advice: "撤退期建议减仓"
+    action_hint: "begin_exit"
+
+priority: 3
+buffer_days: 0
+execute_mode: advisory

@@ -1,0 +1,13 @@
+# step_02 财报采集 YAML 示例 — 复制为 crawl_financial.yaml 后使用：
+#   export CRYO_CRAWL_CONFIG=training/data/config/crawl_financial.yaml
+# 或在 .env 中写 CRYO_CRAWL_CONFIG=...
+# 规则：已在 shell / .env 里设置的同名项优先生效，本文件用 _set_env_default 不覆盖。
+
+symbol_list: training/data/config/crawl_symbols.example.txt
+years: [2023, 2024]
+report_types: [annual]
+throttle_sec: 0.6
+# max_symbols: 5
+# mock: true
+# year_start: 2022
+# year_end: 2024

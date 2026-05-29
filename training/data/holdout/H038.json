@@ -1,0 +1,15 @@
+{
+  "case_id": "H038",
+  "symbol": "601107",
+  "company_name": "测试公司股东7",
+  "fraud_type": "质押风险",
+  "target_engine": "shareholder_integrity",
+  "fraud_start_year": 2021,
+  "exposure_date": "2028-03-15",
+  "ground_truth_decision": "pass",
+  "ground_truth_score": 0.38,
+  "evidence": [
+    "样例证据-38-shareholder_integrity"
+  ],
+  "notes": "synthetic fixture"
+}

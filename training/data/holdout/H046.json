@@ -1,0 +1,15 @@
+{
+  "case_id": "H046",
+  "symbol": "603105",
+  "company_name": "测试公司关联5",
+  "fraud_type": "担保链",
+  "target_engine": "related_party",
+  "fraud_start_year": 2019,
+  "exposure_date": "2026-02-15",
+  "ground_truth_decision": "degrade",
+  "ground_truth_score": 0.52,
+  "evidence": [
+    "样例证据-46-related_party"
+  ],
+  "notes": "synthetic fixture"
+}

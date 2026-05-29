@@ -1,0 +1,15 @@
+{
+  "case_id": "H027",
+  "symbol": "600126",
+  "company_name": "测试公司财务26",
+  "fraud_type": "在建工程",
+  "target_engine": "financial_fraud",
+  "fraud_start_year": 2020,
+  "exposure_date": "2027-01-15",
+  "ground_truth_decision": "degrade",
+  "ground_truth_score": 0.55,
+  "evidence": [
+    "样例证据-27-financial_fraud"
+  ],
+  "notes": "synthetic fixture"
+}

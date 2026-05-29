@@ -1,0 +1,50 @@
+# diting · 持仓 SoT（Single source of truth）模板
+#
+# 用法：
+#   1. cp data/config/my_holdings.example.yaml data/config/my_holdings.yaml
+#   2. 编辑 my_holdings.yaml 填入真实持仓 + 关注标的
+#   3. 在 .env 中写：MY_HOLDINGS_YAML=data/config/my_holdings.yaml
+#
+# role 字段（推荐显式填写）：
+#   portfolio  — 真实持仓：D4 卖出/盈亏；须 quantity + cost_price
+#   watchlist  — 关注标的：D1 采集 / D3 探针；quantity=0 即可
+#   未写 role 时：quantity>0 且 cost_price>0 → portfolio，否则 watchlist
+#
+# 安全：真实持仓 yaml 已在 .gitignore，禁止提交。
+
+holdings:
+  # 示例·真实持仓
+  - symbol: "601138"
+    name: "工业富联"
+    active: true
+    role: portfolio
+    quantity: 0
+    cost_price: 0
+    opened_at: "2024-01-01"
+    segment: "示例·科技"
+    notes: "示例；请替换为你的真实股数与成本"
+
+  - symbol: "601088"
+    name: "中国神华"
+    active: true
+    role: portfolio
+    quantity: 0
+    cost_price: 0
+    opened_at: "2024-01-01"
+    segment: "示例·能源"
+    notes: "示例；请替换为你的真实股数与成本"
+
+  # 示例·关注标的
+  - symbol: "300308"
+    name: "中际旭创"
+    active: true
+    role: watchlist
+    quantity: 0
+    cost_price: 0
+    opened_at: "2024-01-01"
+    segment: "示例·光模块"
+    notes: "自选关注；非真实持仓"
+
+defaults:
+  crawl_years: [2022, 2023, 2024, 2025]
+  throttle_sec: 0.6

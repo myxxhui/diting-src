@@ -1,0 +1,15 @@
+<View>
+  <Header value="Thesis 卡片 · 5 必填完整性评分"/>
+  <Text name="input" value="$input"/>
+  <Header value="5 必填项打勾"/>
+  <Choices name="five_required" toName="input" choice="multiple" showInLine="true">
+    <Choice value="narrative" hint="叙事链路"/>
+    <Choice value="catalyst" hint="催化剂"/>
+    <Choice value="moat" hint="护城河"/>
+    <Choice value="risk" hint="风险"/>
+    <Choice value="exit" hint="退出条件"/>
+  </Choices>
+  <Rating name="completeness" toName="input" maxRating="5" icon="star"
+          hint="0-5 分整体完整度"/>
+  <TextArea name="notes" toName="input" placeholder="缺失/不通顺/逻辑漏洞" rows="3"/>
+</View>

@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: diting
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm
+  template:
+    metadata:
+      labels:
+        app: vllm
+    spec:
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.4.3
+          args:
+            - "--model=/models/Qwen2.5-7B-Instruct"
+            - "--enable-lora"
+            - "--max-lora-rank=16"
+            - "--max-loras=4"
+            - "--gpu-memory-utilization=0.85"
+            - "--port=8000"
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - { name: models, mountPath: /models }
+            - { name: loras, mountPath: /loras }
+      volumes:
+        - name: models
+          hostPath: { path: /data/models, type: DirectoryOrCreate }
+        - name: loras
+          hostPath: { path: /data/loras, type: DirectoryOrCreate }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  namespace: diting
+spec:
+  selector:
+    app: vllm
+  ports:
+    - { port: 8000, targetPort: 8000 }

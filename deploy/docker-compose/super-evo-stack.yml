@@ -1,0 +1,50 @@
+# super-evo：MinIO + Redis + Teacher API 一体起（本地/CI）
+# 用法见同目录 README.md
+#
+version: "3.8"
+
+services:
+  minio:
+    image: minio/minio:RELEASE.2024-04-18T19-09-19Z
+    container_name: super-evo-minio
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${SUPER_EVO_MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${SUPER_EVO_MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - super-evo-minio-data:/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: super-evo-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - super-evo-redis-data:/data
+    restart: unless-stopped
+
+  super_evo_api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.super_evo
+    container_name: super-evo-api
+    ports:
+      - "8090:8090"
+    environment:
+      - SUPER_EVO_REDIS_URL=redis://redis:6379/5
+      - SUPER_EVO_MINIO_ENDPOINT=http://minio:9000
+      - SUPER_EVO_MINIO_ACCESS_KEY=${SUPER_EVO_MINIO_ACCESS_KEY:-minioadmin}
+      - SUPER_EVO_MINIO_SECRET_KEY=${SUPER_EVO_MINIO_SECRET_KEY:-minioadmin}
+      - SUPER_EVO_WANDB_MODE=disabled
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    depends_on:
+      - redis
+      - minio
+
+volumes:
+  super-evo-minio-data:
+  super-evo-redis-data:

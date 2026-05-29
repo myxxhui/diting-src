@@ -1,0 +1,15 @@
+{
+  "case_id": "H037",
+  "symbol": "601106",
+  "company_name": "测试公司股东6",
+  "fraud_type": "违规减持",
+  "target_engine": "shareholder_integrity",
+  "fraud_start_year": 2020,
+  "exposure_date": "2027-02-15",
+  "ground_truth_decision": "reject",
+  "ground_truth_score": 0.82,
+  "evidence": [
+    "样例证据-37-shareholder_integrity"
+  ],
+  "notes": "synthetic fixture"
+}

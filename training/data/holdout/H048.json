@@ -1,0 +1,15 @@
+{
+  "case_id": "H048",
+  "symbol": "603107",
+  "company_name": "测试公司关联7",
+  "fraud_type": "定价不公",
+  "target_engine": "related_party",
+  "fraud_start_year": 2021,
+  "exposure_date": "2028-04-15",
+  "ground_truth_decision": "pass",
+  "ground_truth_score": 0.32,
+  "evidence": [
+    "样例证据-48-related_party"
+  ],
+  "notes": "synthetic fixture"
+}

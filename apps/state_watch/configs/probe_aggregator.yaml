@@ -1,0 +1,44 @@
+# D3 state_watch · 探针 SLI 聚合权重与默认 SLI 模板
+# [Ref: 03_/03_维度三/stages/stage_1_启动期/steps/step_04 §7.1]
+
+weights:
+  financial: 0.35
+  news: 0.20
+  price: 0.25
+  event: 0.20
+
+default_slis:
+  financial:
+    - id: fin_revenue_yoy
+      metric: revenue_yoy
+      threshold: -0.5
+      operator: ">"
+      weight: 1.0
+      probe_type: financial
+    - id: fin_roe
+      metric: roe
+      threshold: 0.0
+      operator: ">"
+      weight: 1.0
+      probe_type: financial
+  news:
+    - id: news_count
+      metric: total_count_7d
+      threshold: 0
+      operator: ">="
+      weight: 1.0
+      probe_type: news
+  price:
+    - id: price_change_pct
+      metric: change_pct
+      threshold: -0.1
+      operator: ">"
+      weight: 1.0
+      probe_type: price
+  event:
+    - id: event_count
+      metric: event_count_7d
+      threshold: 0
+      operator: ">="
+      weight: 1.0
+      probe_type: event

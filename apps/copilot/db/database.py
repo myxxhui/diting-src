@@ -1,6 +1,7 @@
 """SQLAlchemy 2.0 异步引擎与会话工厂。
 
 [Ref: 03_/00_维度零/stages/stage_1_启动期/steps/step_02]
+[Ref: 03_/00_维度零/stages/stage_1_启动期/steps/step_07]
 [DNA: _System_DNA/00_co_pilot/dna_stage_1_启动期.yaml#tech_stack.database]
 """
 from collections.abc import AsyncGenerator
@@ -37,6 +38,12 @@ async_session_factory = AsyncSessionLocal
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionLocal() as session:
+        yield session
+
+
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
+    """单会话 async-for 片段（日报/周报 job、CLI）。"""
     async with AsyncSessionLocal() as session:
         yield session
 

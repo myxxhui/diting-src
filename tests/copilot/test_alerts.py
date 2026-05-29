@@ -38,7 +38,7 @@ async def session_factory():
 def test_level_map_red_count():
     reds = [t for t, lv in ALERT_LEVEL_MAP.items() if lv == AlertLevel.RED]
     oranges = [t for t, lv in ALERT_LEVEL_MAP.items() if lv == AlertLevel.ORANGE]
-    assert len(reds) == 4 and len(oranges) == 2
+    assert len(reds) == 5 and len(oranges) == 3
 
 
 def test_map_event_reject():
@@ -87,6 +87,18 @@ def test_map_event_thesis_invalid_orange():
 
 def test_map_event_stop_loss_red():
     event = {"symbol": "300104", "name": "乐视网", "signal_type": "stop_loss", "advice": "止损"}
+    mp_event = {
+        "symbol": "601138",
+        "name": "工业富联",
+        "prev_market_phase": "realization",
+        "market_phase": "exhaustion",
+        "market_phase_confidence": 0.85,
+        "advice": "建议评估止盈",
+    }
+    mp_alert = map_event_to_alert("u1", "events:monitor:market_phase_change", mp_event)
+    assert mp_alert is not None
+    assert mp_alert.alert_type.value == "market_phase_exhaustion"
+
     alert = map_event_to_alert("u1", "events:exit:sell_signal", event)
     assert alert.alert_type == AlertType.STOP_LOSS
     assert alert.level == AlertLevel.RED

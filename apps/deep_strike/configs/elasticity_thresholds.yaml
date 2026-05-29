@@ -1,0 +1,30 @@
+# 业绩弹性闸门阈值（4档市值分层）
+# [Ref: 03_/02_维度二_纵深进攻/stages/stage_1_启动期/steps/step_04_利润截留扫描仪剧本.md §3.5.4 M2]
+# [DNA: _System_DNA/02_deep_strike/elasticity_gate.yaml#thresholds]
+#
+# 禁止在代码中硬编码这些阈值；Mapper 从此文件读取。
+# market_cap_yuan: 市值上限（元）；extra_large 无上限（null）
+# min_elasticity: elasticity_ratio 最低要求
+
+tiers:
+  small_cap:
+    label: "小盘股（< 50亿）"
+    max_market_cap_yuan: 5_000_000_000
+    min_elasticity: 0.10
+
+  mid_cap:
+    label: "中盘股（50~200亿）"
+    max_market_cap_yuan: 20_000_000_000
+    min_elasticity: 0.05
+
+  large_cap:
+    label: "大盘股（200~1000亿）"
+    max_market_cap_yuan: 100_000_000_000
+    min_elasticity: 0.02
+
+  extra_large:
+    label: "超大盘（≥ 1000亿）"
+    max_market_cap_yuan: null
+    min_elasticity: 0.01
+    # M4: extra_large 段 elasticity < 0.01 直接丢弃，dropped_reason='base_dilution'
+    dilution_guard: true

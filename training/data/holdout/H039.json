@@ -1,0 +1,15 @@
+{
+  "case_id": "H039",
+  "symbol": "601108",
+  "company_name": "测试公司股东8",
+  "fraud_type": "资金占用",
+  "target_engine": "shareholder_integrity",
+  "fraud_start_year": 2022,
+  "exposure_date": "2029-04-15",
+  "ground_truth_decision": "degrade",
+  "ground_truth_score": 0.58,
+  "evidence": [
+    "样例证据-39-shareholder_integrity"
+  ],
+  "notes": "synthetic fixture"
+}

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>AI 投资副驾驶 · 周报 {{ ctx.period_label }}</title>
+  <style>
+    body { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; max-width: 760px; margin: 24px auto; color: #222; }
+    h1 { font-size: 22px; }
+    .demo { background: #fff3cd; color: #856404; padding: 6px 10px; border-radius: 4px; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border-bottom: 1px solid #eee; padding: 6px 8px; text-align: left; font-size: 13px; }
+    .ev { font-size: 22px; font-weight: 600; color: #16a34a; }
+  </style>
+</head>
+<body>
+  <h1>📊 投资副驾驶 · 周报 {{ ctx.period_label }}</h1>
+  <p>{{ ctx.period_start }} ~ {{ ctx.period_end }}</p>
+  {% if ctx.is_demo %}<div class="demo">⚠️ 演示模式</div>{% endif %}
+
+  <h3>1. 报文周期内告警汇总</h3>
+  <p>🔴 红色 <b>{{ p.alerts.red }}</b> · 🟠 橙色 <b>{{ p.alerts.orange }}</b> · 合计 <b>{{ p.alerts.total }}</b></p>
+  <table>
+    <tr><th>类型</th><th>次数</th></tr>
+    {% for k, v in p.alerts.by_type.items() %}
+    <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
+    {% endfor %}
+  </table>
+
+  <h3>2. 推荐池</h3>
+  <p>本周期新增 <b>{{ p.thesis.new }}</b> 条推荐。用户决策：加入 {{ p.decisions.get('join', 0) }} · 待考虑 {{ p.decisions.get('consider', 0) }} · 不感兴趣 {{ p.decisions.get('not_interested', 0) }}</p>
+
+  <h3>3. 避险价值</h3>
+  <p class="ev">¥ {{ '%.2f' % p.avoided_loss }}</p>
+
+  <h3>4. 4 色变化（周期首末日）</h3>
+  <table>
+    <tr><th></th><th>🔴</th><th>🟠</th><th>🟡</th><th>🟢</th></tr>
+    <tr><td>首日</td>{% for c in ['red','orange','yellow','green'] %}<td>{{ p.holdings_delta.open[c] }}</td>{% endfor %}</tr>
+    <tr><td>末日</td>{% for c in ['red','orange','yellow','green'] %}<td>{{ p.holdings_delta.close[c] }}</td>{% endfor %}</tr>
+    <tr><td>Δ</td>{% for c in ['red','orange','yellow','green'] %}<td>{{ '%+d' % p.holdings_delta.delta[c] }}</td>{% endfor %}</tr>
+  </table>
+
+  <p style="color:#999;font-size:11px;margin-top:24px;">周报由 AI 投资副驾驶自动生成，仅作辅助决策，不构成投资建议。</p>
+</body>
+</html>

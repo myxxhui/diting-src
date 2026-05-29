@@ -1,0 +1,12 @@
+<View>
+  <Header value="大股东诚信 · 人工校验"/>
+  <Text name="input" value="$input"/>
+  <Text name="teacher_output" value="$teacher_output"/>
+  <Choices name="decision" toName="input" choice="single" showInLine="true">
+    <Choice value="reject"/>
+    <Choice value="degrade"/>
+    <Choice value="pass"/>
+  </Choices>
+  <TextArea name="evidence" toName="input" placeholder="减持/质押/失信/资金占用 等" rows="4"/>
+  <TextArea name="notes" toName="input" placeholder="备注" rows="2"/>
+</View>

@@ -1,0 +1,38 @@
+@page {
+  size: A4;
+  margin: 18mm 16mm 16mm 16mm;
+  @bottom-center { content: counter(page) " / " counter(pages); font-size: 9pt; color: #999; }
+}
+
+body { font-family: 'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+       color: #1f2937; font-size: 11pt; line-height: 1.55; }
+
+.cover { text-align: center; padding-top: 40mm; page-break-after: always; }
+.cover h1 { font-size: 32pt; margin-bottom: 6mm; color: #0f172a; }
+.cover h2 { font-size: 20pt; color: #2563eb; font-weight: 500; }
+.cover .period { color: #6b7280; font-size: 12pt; margin-top: 8mm; }
+.cover .demo { color: #b45309; background: #fef3c7; padding: 4mm 6mm; border-radius: 4mm; margin: 8mm auto; display: inline-block; }
+.cover .footer-note { color: #9ca3af; font-size: 10pt; margin-top: 30mm; }
+
+.toc { page-break-after: always; }
+.toc h3 { font-size: 16pt; }
+.toc ol { font-size: 13pt; line-height: 2; }
+
+.chapter { page-break-before: always; }
+.chapter h2 { font-size: 16pt; color: #1d4ed8; border-bottom: 1pt solid #c7d2fe; padding-bottom: 2mm; }
+
+table { width: 100%; border-collapse: collapse; margin-top: 4mm; font-size: 10.5pt; }
+th, td { border: 0.5pt solid #e5e7eb; padding: 2.5mm 3mm; text-align: left; }
+th { background: #f3f4f6; font-weight: 600; }
+
+.summary th { width: 35%; }
+.summary .ev { color: #16a34a; font-weight: 600; }
+.trend td:first-child { width: 30%; color: #6b7280; }
+.octants td { vertical-align: top; }
+
+.green { color: #16a34a; }
+.red { color: #dc2626; }
+
+.chart { text-align: center; margin: 6mm 0; }
+
+.disclaimer { font-size: 9pt; color: #9ca3af; margin-top: 14mm; }

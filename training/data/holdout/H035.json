@@ -1,0 +1,15 @@
+{
+  "case_id": "H035",
+  "symbol": "601104",
+  "company_name": "测试公司股东4",
+  "fraud_type": "质押风险",
+  "target_engine": "shareholder_integrity",
+  "fraud_start_year": 2018,
+  "exposure_date": "2025-09-15",
+  "ground_truth_decision": "pass",
+  "ground_truth_score": 0.38,
+  "evidence": [
+    "样例证据-35-shareholder_integrity"
+  ],
+  "notes": "synthetic fixture"
+}

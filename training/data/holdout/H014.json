@@ -1,0 +1,15 @@
+{
+  "case_id": "H014",
+  "symbol": "600113",
+  "company_name": "测试公司财务13",
+  "fraud_type": "应收异常",
+  "target_engine": "financial_fraud",
+  "fraud_start_year": 2022,
+  "exposure_date": "2024-06-15",
+  "ground_truth_decision": "pass",
+  "ground_truth_score": 0.35,
+  "evidence": [
+    "样例证据-14-financial_fraud"
+  ],
+  "notes": "synthetic fixture"
+}

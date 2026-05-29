@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: diting
+  labels:
+    mode: stub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm
+  template:
+    metadata:
+      labels:
+        app: vllm
+    spec:
+      containers:
+        - name: vllm-stub
+          image: kennethreitz/httpbin:latest
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  namespace: diting
+spec:
+  selector:
+    app: vllm
+  ports:
+    - { port: 8000, targetPort: 80 }

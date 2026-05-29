@@ -28,6 +28,7 @@ UPSTREAM_STREAMS = [
     "events:cryo_guard:degrade",
     "events:exit:sell_signal",
     "events:monitor:health_change",
+    "events:monitor:market_phase_change",
 ]
 
 CONSUMER_GROUP = "copilot_alert_group"
@@ -152,6 +153,37 @@ def map_event_to_alert(user_id: str, stream: str, event: dict[str, Any]) -> Aler
             )
         return None
 
+    if stream == "events:monitor:market_phase_change":
+        new_phase = str(event.get("market_phase") or "")
+        prev_phase = str(event.get("prev_market_phase") or "")
+        conf = float(event.get("market_phase_confidence") or 0.0)
+        advice = str(event.get("advice") or "")
+        if new_phase == "exhaustion" and conf >= 0.65:
+            return Alert.new(
+                user_id=user_id,
+                alert_type=AlertType.MARKET_PHASE_EXHAUSTION,
+                symbol=symbol,
+                name=name,
+                message=f"市场阶段 → 利好透支（{prev_phase}→{new_phase}，置信度 {conf:.0%}）。{advice}",
+                payload={
+                    **event,
+                    "email_subject": f"🔴 [diting] {name} {symbol} 进入利好透支 · 建议评估止盈",
+                },
+            )
+        if prev_phase and new_phase != prev_phase:
+            return Alert.new(
+                user_id=user_id,
+                alert_type=AlertType.MARKET_PHASE_SHIFT,
+                symbol=symbol,
+                name=name,
+                message=f"市场阶段切换：{prev_phase} → {new_phase}（置信度 {conf:.0%}）。{advice}",
+                payload={
+                    **event,
+                    "email_subject": f"[diting] {name} {symbol} 阶段切换 {prev_phase}→{new_phase}",
+                },
+            )
+        return None
+
     return None
 
 
@@ -178,8 +210,14 @@ class AlertDispatcher:
     def set_pause_check(self, fn: PauseCheck) -> None:
         self._pause_check = fn
 
-    async def dispatch(self, alert: Alert) -> dict[str, dict] | dict[str, bool]:
-        if self._pause_check is not None and alert.user_id != "architect":
+    async def dispatch(
+        self, alert: Alert, *, force: bool = False
+    ) -> dict[str, dict] | dict[str, bool]:
+        if (
+            not force
+            and self._pause_check is not None
+            and alert.user_id != "architect"
+        ):
             try:
                 if await self._pause_check():
                     logger.info("circuit breaker open, skip dispatch alert=%s", alert.alert_id)

@@ -30,3 +30,22 @@ def _clean_db():
     asyncio.run(_dispose())
     if _TEST_DB.exists():
         _TEST_DB.unlink()
+
+
+@pytest.fixture
+async def db_session():
+    from apps.copilot.db.database import AsyncSessionLocal, init_db
+
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        yield session
+
+
+@pytest.fixture
+async def fake_redis():
+    from fakeredis import aioredis
+
+    r = aioredis.FakeRedis(decode_responses=True)
+    yield r
+    await r.flushall()
+    await r.aclose()

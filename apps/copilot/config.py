@@ -3,6 +3,7 @@
 [Ref: 03_/00_维度零/.../step_01]
 [Ref: 03_/00_维度零/.../step_05 告警通道]
 [Ref: 03_/00_维度零/.../step_06 M4 价值账本]
+[Ref: 03_/00_维度零/.../step_07 日报周报]
 [DNA: _System_DNA/00_co_pilot/dna_stage_1_启动期.yaml#tech_stack]
 """
 from __future__ import annotations
@@ -13,7 +14,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class CopilotSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="COPILOT_")
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="COPILOT_", extra="ignore")
 
     service_name: str = "copilot"
     port: int = 8080
@@ -26,6 +27,7 @@ class CopilotSettings(BaseSettings):
         "events:cryo_guard:pass",
         "events:thrust:thesis_proposed",
         "events:monitor:health_change",
+        "events:monitor:market_phase_change",
         "events:exit:sell_signal",
         "events:flywheel:lora_updated",
     ]
@@ -35,6 +37,7 @@ class CopilotSettings(BaseSettings):
     telegram_chat_id: Optional[str] = None
     smtp_host: str = "smtp.resend.com"
     smtp_port: int = 587
+    smtp_use_ssl: bool = False  # 126/163 等：465 + SSL 设为 true
     smtp_username: Optional[str] = None
     smtp_password: Optional[str] = None
     smtp_from: str = "copilot@example.com"
@@ -49,6 +52,16 @@ class CopilotSettings(BaseSettings):
     monthly_cron_day: int = 1
     monthly_cron_hour: int = 9
     ledger_scheduler_enabled: bool = True
+
+    daily_report_time: str = "08:00"
+    # legacy = 原 Copilot 告警/SCS 日报；holdings_merged = W1 health + W2 market_phase 合并早报
+    daily_report_mode: str = "holdings_merged"
+    weekly_report_day: str = "sun"
+    weekly_report_time: str = "18:00"
+    report_user_ids: List[str] = ["default"]
+
+    architect_wechat_webhook: Optional[str] = None
+    admin_token: Optional[str] = None
 
 
 settings = CopilotSettings()
