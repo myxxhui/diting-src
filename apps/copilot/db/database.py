@@ -55,3 +55,13 @@ async def init_db() -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    from apps.copilot.db.migrate_step14 import migrate_step14
+    from apps.copilot.db.migrate_step15 import migrate_step15
+    from apps.copilot.db.migrate_step17 import migrate_step17
+    from apps.copilot.db.migrate_step18 import migrate_step18
+
+    await migrate_step14(engine)
+    await migrate_step15(engine)
+    await migrate_step17(engine)
+    await migrate_step18(engine)

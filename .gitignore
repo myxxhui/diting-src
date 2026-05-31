@@ -7,6 +7,7 @@ data/*.db
 
 # 原始财报 PDF（采集产出，体积大，不纳入版本控制）
 data/raw/
+data/cache/radar_t0/
 
 # Python 构建产物
 __pycache__/

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}系统设置 · AI 投资副驾驶{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>⚙️ 系统</h2>
+  <p style="color:#6b7280;">原平铺功能入口（持仓 CRUD、体检、推荐池、告警、健康检查）。</p>
+  <ul style="line-height:2;">
+    <li><a href="/holdings">持仓维护</a>（原「持仓管理」· Excel 导入）</li>
+    <li><a href="/health-dashboard">持仓体检</a></li>
+    <li><a href="/recommendations">推荐池</a></li>
+    <li><a href="/alerts">告警历史</a></li>
+    <li><a href="/health">健康检查</a></li>
+  </ul>
+</div>
+{% endblock %}

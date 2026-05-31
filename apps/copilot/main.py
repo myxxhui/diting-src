@@ -22,6 +22,7 @@ from apps.copilot.db.database import AsyncSessionLocal, init_db
 from apps.copilot.modules.health_check import routes as health_routes
 from apps.copilot.modules.recommendation import routes as recommendation_routes
 from apps.copilot.routers import admin as admin_router
+from apps.copilot.routers import planning_routes
 from apps.copilot.routers import portfolio
 from apps.copilot.routers import reports as reports_router
 from apps.copilot.routers.alerts import router as alerts_router, view_router as alerts_view_router
@@ -165,6 +166,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AI 投资副驾驶", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.include_router(portfolio.router)
+app.include_router(planning_routes.router)
 app.include_router(recommendation_routes.router)
 app.include_router(health_routes.router)
 app.include_router(alerts_router)

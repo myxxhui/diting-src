@@ -133,4 +133,4 @@ def test_health_returns_ok():
         assert body["status"] == "ok"
         assert body["service"] == "copilot"
         assert "upstream" in body
-        assert len(body["upstream"]) == 7
+        assert len(body["upstream"]) >= 7

@@ -1216,6 +1216,285 @@ copilot-step05-tier2-e2e: _ensure-deps
 	EXIT_REDIS_URL=$${EXIT_REDIS_URL:-$$(grep '^EXIT_REDIS_URL=' .env | cut -d= -f2-)} \
 	  $(RUNPY) scripts/copilot_step05_tier2_e2e.py --symbol 601138 --name 工业富联
 
+# ─── D0 copilot · step12（M6 行情解析与规划工作台）────────────────────────────
+# [Ref: 24_行情解析与规划工作台_需求实现表.md · 必做①~④]
+.PHONY: copilot-step12-prep copilot-step12-migrate copilot-step12-campaign copilot-step12-up
+.PHONY: copilot-step12-test copilot-step12-status copilot-step12-all copilot-step12-clean
+
+copilot-step12-prep: _ensure-deps
+	@echo "▶ [copilot-step12-prep] init_db + 等待 Redis PONG"
+	$(RUNPY) -c "import asyncio; from apps.copilot.db.database import init_db; asyncio.run(init_db()); print('✅ copilot.db')"
+	@docker start diting-redis-step07 2>/dev/null || docker run -d --name diting-redis-step07 -p 6379:6379 redis:7-alpine 2>/dev/null || true
+	COPILOT_REDIS_URL=redis://127.0.0.1:6379/0 $(RUNPY) -c "from apps.copilot.services.redis_wait import wait_for_sync_redis; wait_for_sync_redis(timeout_sec=90); print('✅ Redis PONG')"
+
+copilot-step12-migrate: copilot-step12-prep
+	@echo "▶ [copilot-step12-migrate] 建 campaigns 等 6 表"
+	$(RUNPY) -c "import asyncio; from apps.copilot.db.database import init_db; asyncio.run(init_db()); print('✅ 6 表已 create_all')"
+	@sqlite3 data/copilot.db ".tables" 2>/dev/null | tr ' ' '\n' | grep -E '^(campaigns|campaign_symbols|campaign_nodes|campaign_timeline|monitor_subscriptions|watchlist)$$' | sort -u
+
+copilot-step12-campaign: copilot-step12-migrate
+	@echo "▶ [copilot-step12-campaign] 持仓 SoT → campaign_symbols"
+	COPILOT_REDIS_URL=redis://127.0.0.1:6379/0 $(RUNPY) scripts/copilot_step12_campaign.py
+
+copilot-step12-up: copilot-step12-migrate
+	@echo "▶ [copilot-step12-up] /planning 应 200（需另开终端 uvicorn）"
+	@curl -sf http://127.0.0.1:8080/planning >/dev/null && echo "✅ /planning 200" || echo "⚠️ uvicorn 未起 · PYTHONPATH=. uvicorn apps.copilot.main:app --port 8080"
+
+copilot-step12-test: _ensure-deps
+	@echo "▶ [copilot-step12-test] pytest test_planning"
+	$(RUNPY) -m pytest tests/copilot/test_planning.py -v --tb=short
+
+copilot-step12-status: copilot-step12-migrate
+	@echo "▶ [copilot-step12-status]"
+	$(RUNPY) scripts/copilot_step12_status.py
+
+copilot-step12-clean:
+	@echo "▶ [copilot-step12-clean] 清 step12 demo 数据"
+	$(RUNPY) -c "\
+import asyncio; from sqlalchemy import delete; \
+from apps.copilot.db.database import AsyncSessionLocal, init_db; \
+from apps.copilot.db.models import Campaign, Watchlist; \
+async def main(): \
+  await init_db(); \
+  async with AsyncSessionLocal() as s: \
+    await s.execute(delete(Campaign)); await s.execute(delete(Watchlist)); await s.commit(); \
+    print('✅ campaigns 级联已清') \
+asyncio.run(main())"
+
+copilot-step12-all: copilot-step12-migrate copilot-step12-campaign copilot-step12-test copilot-step12-status
+	@echo "✅ [copilot-step12-all] tier-1+2 本机：6 表 + 持仓导入 + pytest"
+
+.PHONY: copilot-step12-tier2-verify copilot-step12-tier2-rollout
+copilot-step12-tier2-verify:
+	@echo "▶ [copilot-step12-tier2-verify] K3s NodePort ①~④ HTTP 验收"
+	$(RUNPY) scripts/copilot_step12_tier2_verify.py
+
+copilot-step12-tier2-rollout:
+	@echo "▶ [copilot-step12-tier2-rollout] 需在 diting-infra 执行 make copilot-step12-deploy"
+
+# ─── D0 copilot · step14（M8 行情雷达 + 三段流水线）──────────────────────────
+# [Ref: 24_ §9 ⑦ · step_14_行情雷达扫描与三段流水线.md]
+.PHONY: copilot-step14-prep copilot-step14-migrate copilot-step14-scan copilot-step14-test
+.PHONY: copilot-step14-status copilot-step14-all copilot-step14-clean copilot-step14-tier2-verify
+
+copilot-step14-prep: copilot-step12-prep
+	@echo "▶ [copilot-step14-prep] 校验 step_12 基座"
+
+copilot-step14-migrate: copilot-step14-prep
+	@echo "▶ [copilot-step14-migrate] 建 step14 五表 + 扩展列"
+	$(RUNPY) -c "import asyncio; from apps.copilot.db.database import init_db; asyncio.run(init_db()); print('✅ step14 migrate ok')"
+	@sqlite3 data/copilot.db ".tables" 2>/dev/null | tr ' ' '\n' | grep -E '^(stage_artifacts|workspace_artifacts|model_profile|radar_scans|radar_candidates)$$' | sort -u
+
+copilot-step14-scan: copilot-step14-migrate
+	@echo "▶ [copilot-step14-scan] 模式 C 扫描"
+	COPILOT_REDIS_URL=redis://127.0.0.1:6379/0 RADAR_SYMBOL=$${RADAR_SYMBOL:-601138} $(RUNPY) scripts/copilot_step14_scan.py
+
+copilot-step14-test: _ensure-deps
+	@echo "▶ [copilot-step14-test] pytest test_radar"
+	$(RUNPY) -m pytest tests/copilot/test_radar.py -v --tb=short
+
+copilot-step14-status: copilot-step14-migrate
+	@echo "▶ [copilot-step14-status]"
+	$(RUNPY) scripts/copilot_step14_status.py
+
+copilot-step14-clean:
+	@echo "▶ [copilot-step14-clean] 清 radar 扫描数据"
+	$(RUNPY) -c "\
+import asyncio; from sqlalchemy import delete; \
+from apps.copilot.db.database import AsyncSessionLocal, init_db; \
+from apps.copilot.db.models import RadarScan, StageArtifact, WorkspaceArtifact; \
+async def main(): \
+  await init_db(); \
+  async with AsyncSessionLocal() as s: \
+    await s.execute(delete(StageArtifact)); \
+    await s.execute(delete(WorkspaceArtifact)); \
+    await s.execute(delete(RadarScan)); \
+    await s.commit(); print('✅ radar 数据已清') \
+asyncio.run(main())"
+
+copilot-step14-all: copilot-step14-migrate copilot-step14-scan copilot-step14-test copilot-step14-status
+	@echo "✅ [copilot-step14-all] ⑦ 雷达 + 三段 artifact + promote 本机验收"
+
+copilot-step14-tier2-verify:
+	@echo "▶ [copilot-step14-tier2-verify] K3s 生产 ⑦ 雷达验收"
+	$(RUNPY) scripts/copilot_step14_tier2_verify.py
+
+copilot-step14-tier2-rollout:
+	@echo "▶ [copilot-step14-tier2-rollout] 需在 diting-infra 执行 make copilot-step14-deploy"
+
+# ── 雷达 T0 · 本机预拉缓存（持仓 SoT active 标的）────────────────────────────
+.PHONY: radar-t0-prefetch radar-t0-prefetch-with-t2 radar-t0-status radar-t0-clean
+
+radar-t0-prefetch: _ensure-deps
+	@echo "▶ [radar-t0-prefetch] 本机拉取持仓 SoT active 标的 T0 → data/cache/radar_t0/"
+	PYTHONPATH=. python3 scripts/radar_t0_prefetch.py
+
+radar-t0-prefetch-with-t2: _ensure-deps
+	@echo "▶ [radar-t0-prefetch-with-t2] T0+T1+Opus T2 → bundle；再 diting-infra make radar-t0-sync"
+	PYTHONPATH=. python3 scripts/radar_t0_prefetch.py --with-t2
+
+radar-t0-status:
+	@PYTHONPATH=. python3 -c "import json; from apps.copilot.modules.radar.t0_cache import status_summary; print(json.dumps(status_summary(), ensure_ascii=False, indent=2))"
+
+radar-t0-clean:
+	@rm -rf data/cache/radar_t0/*.json && echo "✅ radar T0 本地缓存已清"
+
+# ─── D0 copilot · step15（M9 滚动路线图双层锚定）────────────────────────────
+# [Ref: 24_ §9 ⑧ · step_15_滚动路线图双层锚定.md]
+.PHONY: copilot-step15-prep copilot-step15-migrate copilot-step15-timeline copilot-step15-regime
+.PHONY: copilot-step15-test copilot-step15-status copilot-step15-all copilot-step15-clean
+.PHONY: copilot-step15-tier2-verify
+
+copilot-step15-prep: copilot-step14-prep
+	@echo "▶ [copilot-step15-prep] 校验 step_14 雷达基座"
+
+copilot-step15-migrate: copilot-step15-prep
+	@echo "▶ [copilot-step15-migrate] timeline 扩展列 + regime_assessments"
+	$(RUNPY) -c "import asyncio; from apps.copilot.db.database import init_db; asyncio.run(init_db()); print('✅ step15 migrate ok')"
+	@sqlite3 data/copilot.db ".schema campaign_timeline" 2>/dev/null | grep -E "window_start|build_lead_days|sequence_no|feasibility_flags" | head -4
+	@sqlite3 data/copilot.db ".tables" 2>/dev/null | tr ' ' '\n' | grep regime_assessments || true
+
+copilot-step15-timeline: copilot-step15-migrate
+	@echo "▶ [copilot-step15-timeline] 2 标的入时间线 + 合理性"
+	COPILOT_REDIS_URL=redis://127.0.0.1:6379/0 $(RUNPY) scripts/copilot_step15_timeline.py
+
+copilot-step15-regime: copilot-step15-migrate
+	@echo "▶ [copilot-step15-regime] 生命周期判定 + regime 巡检"
+	COPILOT_REDIS_URL=redis://127.0.0.1:6379/0 $(RUNPY) scripts/copilot_step15_regime.py
+
+copilot-step15-test: _ensure-deps
+	@echo "▶ [copilot-step15-test] pytest test_roadmap"
+	$(RUNPY) -m pytest tests/copilot/test_roadmap.py -v --tb=short
+
+copilot-step15-status: copilot-step15-migrate
+	@echo "▶ [copilot-step15-status]"
+	$(RUNPY) scripts/copilot_step15_status.py
+
+copilot-step15-clean:
+	@echo "▶ [copilot-step15-clean] 清 step15 demo timeline/regime（保留 campaign）"
+	$(RUNPY) -c "\
+import asyncio; from sqlalchemy import delete; \
+from apps.copilot.db.database import AsyncSessionLocal, init_db; \
+from apps.copilot.db.models import CampaignTimeline, RegimeAssessment, MonitorSubscription; \
+async def main(): \
+  await init_db(); \
+  async with AsyncSessionLocal() as s: \
+    await s.execute(delete(MonitorSubscription).where(MonitorSubscription.pillar=='regime')); \
+    await s.execute(delete(RegimeAssessment)); \
+    await s.execute(delete(CampaignTimeline)); \
+    await s.commit(); print('✅ step15 demo 数据已清') \
+asyncio.run(main())"
+
+copilot-step15-all: copilot-step15-migrate copilot-step15-timeline copilot-step15-regime copilot-step15-test copilot-step15-status
+	@echo "✅ [copilot-step15-all] ⑧ 滚动路线图双层锚定本机验收"
+
+copilot-step15-tier2-verify:
+	@echo "▶ [copilot-step15-tier2-verify] K3s 生产 ⑧ 路线图验收"
+	$(RUNPY) scripts/copilot_step15_tier2_verify.py
+
+copilot-step15-tier2-rollout:
+	@echo "▶ [copilot-step15-tier2-rollout] 需在 diting-infra 执行 make copilot-step15-deploy"
+
+
+# ─── D0 copilot · step16（M10 规划中证伪与持续监控）────────────────────────────
+
+.PHONY: copilot-step16-prep copilot-step16-migrate copilot-step16-falsify
+.PHONY: copilot-step16-test copilot-step16-status copilot-step16-all copilot-step16-clean
+.PHONY: copilot-step16-tier2-verify
+
+copilot-step16-prep: copilot-step15-prep
+	@echo "▶ [copilot-step16-prep] 校验 step_14/15 基座"
+
+copilot-step16-migrate: copilot-step16-prep
+	@echo "▶ [copilot-step16-migrate] monitor_subscriptions falsify 列（step15 已含）"
+	$(RUNPY) -c "import asyncio; from apps.copilot.db.database import init_db; asyncio.run(init_db()); print('✅ step16 migrate ok')"
+
+copilot-step16-falsify: copilot-step16-migrate
+	@echo "▶ [copilot-step16-falsify] 建 4 类证伪任务 + 跑判定"
+	COPILOT_REDIS_URL=redis://127.0.0.1:6379/0 $(RUNPY) scripts/copilot_step16_falsify.py
+
+copilot-step16-test: _ensure-deps
+	@echo "▶ [copilot-step16-test] pytest test_falsify"
+	$(RUNPY) -m pytest tests/copilot/test_falsify.py -q
+
+copilot-step16-status: copilot-step16-migrate
+	@echo "▶ [copilot-step16-status]"
+	$(RUNPY) scripts/copilot_step16_status.py
+
+copilot-step16-all: copilot-step16-migrate copilot-step16-falsify copilot-step16-test copilot-step16-status
+	@echo "✅ [copilot-step16-all] ⑨ 规划中证伪与持续监控本机验收"
+
+copilot-step16-tier2-verify:
+	@echo "▶ [copilot-step16-tier2-verify] K3s 生产 ⑨ 证伪验收"
+	$(RUNPY) scripts/copilot_step16_tier2_verify.py
+
+# ─── M11 step17 执行中仓位指导 ──────────────────────────────────────────────
+.PHONY: copilot-step17-prep copilot-step17-migrate copilot-step17-advise
+.PHONY: copilot-step17-safety-scan copilot-step17-test copilot-step17-all
+.PHONY: copilot-step17-status copilot-step17-clean copilot-step17-audit
+
+copilot-step17-prep: copilot-step16-prep
+	@echo "▶ [copilot-step17-prep] 校验 step_16 基座 + holdings_sot"
+	$(RUNPY) -c "from apps.common.holdings_sot import load_holdings_sot; s=load_holdings_sot(); print('✅ holdings_sot:', len(s.holdings), '标的')"
+
+copilot-step17-migrate: copilot-step17-prep
+	@echo "▶ [copilot-step17-migrate] 建 execution_advices 表"
+	$(RUNPY) -c "import asyncio; from apps.copilot.db.database import init_db; asyncio.run(init_db()); print('✅ step17 migrate ok')"
+	$(RUNPY) -c "import sqlite3, os; db=os.environ.get('COPILOT_DB','data/copilot.db'); r=sqlite3.connect(db).execute('.tables' if False else 'SELECT name FROM sqlite_master WHERE type=\"table\" AND name=\"execution_advices\"').fetchone(); print('✅ execution_advices 表存在' if r else '❌ 表缺失')"
+
+copilot-step17-advise: copilot-step17-migrate
+	@echo "▶ [copilot-step17-advise] 生成第一只持仓 advisory 建议"
+	COPILOT_REDIS_URL=redis://127.0.0.1:6379/0 $(RUNPY) scripts/copilot_step17_advise.py
+
+copilot-step17-safety-scan: copilot-step17-migrate
+	@echo "▶ [copilot-step17-safety-scan] 盘后安全扫描门控 demo"
+	COPILOT_REDIS_URL=redis://127.0.0.1:6379/0 $(RUNPY) scripts/copilot_step17_safety_scan.py
+
+copilot-step17-audit:
+	@echo "▶ [copilot-step17-audit] no-auto-execute 审计（rg 应为 0）"
+	@rg -i "buy|qmt|auto_trade|order_id|webhook_target|立即|一键|下单" apps/copilot/modules/execution/ apps/copilot/templates/planning/ 2>/dev/null && echo "❌ 发现下单相关内容" || echo "✅ no-auto-execute 审计通过（0 命中）"
+
+copilot-step17-test: _ensure-deps
+	@echo "▶ [copilot-step17-test] pytest test_execution"
+	$(RUNPY) -m pytest tests/copilot/test_execution.py -q
+
+copilot-step17-status: copilot-step17-migrate
+	@echo "▶ [copilot-step17-status] 执行中 Campaign + 建议分布"
+	$(RUNPY) scripts/copilot_step17_status.py
+
+copilot-step17-clean:
+	@echo "▶ [copilot-step17-clean] 清空 execution_advices demo 数据"
+	$(RUNPY) -c "import asyncio, sqlalchemy.ext.asyncio as sa; from apps.copilot.db.database import engine; asyncio.run(engine.begin().__aenter__())" 2>/dev/null || true
+
+copilot-step17-all: copilot-step17-migrate copilot-step17-advise copilot-step17-audit copilot-step17-test copilot-step17-status
+	@echo "✅ [copilot-step17-all] ⑩ 执行中仓位指导本机验收"
+
+copilot-step16-tier2-rollout:
+	@echo "▶ [copilot-step16-tier2-rollout] 需在 diting-infra 执行 make copilot-step16-deploy"
+
+# ───────────── 四区漏斗（标的级重构）一键复现 ─────────────
+.PHONY: copilot-funnel-migrate copilot-funnel-cleanup copilot-funnel-test
+.PHONY: copilot-funnel-audit copilot-funnel-all
+
+copilot-funnel-migrate:
+	@echo "▶ [copilot-funnel-migrate] 建 campaign_symbols.funnel_stage + 唯一索引"
+	$(RUNPY) -c "import asyncio; from apps.copilot.db.database import init_db; asyncio.run(init_db()); print('✅ funnel migrate ok')"
+
+copilot-funnel-cleanup:
+	@echo "▶ [copilot-funnel-cleanup] 清空四区漏斗业务表并按 holdings_sot 重建（保留 SoT YAML）"
+	$(RUNPY) scripts/copilot_funnel_cleanup.py
+
+copilot-funnel-test: _ensure-deps
+	@echo "▶ [copilot-funnel-test] 漏斗联动 + feasibility 去重单测"
+	$(RUNPY) -m pytest tests/copilot/test_funnel.py tests/copilot/test_feasibility_dedup.py -q
+
+copilot-funnel-audit:
+	@echo "▶ [copilot-funnel-audit] no-auto-execute 审计（rg 应为 0）"
+	@rg -i "auto_trade|order_id|qmt|webhook_target|一键|下单" apps/copilot/modules/planning/funnel.py apps/copilot/templates/planning/ 2>/dev/null && echo "❌ 发现下单相关内容" || echo "✅ no-auto-execute 审计通过（0 命中）"
+
+copilot-funnel-all: copilot-funnel-migrate copilot-funnel-test copilot-funnel-audit
+	@echo "✅ [copilot-funnel-all] 四区漏斗标的级重构本机验收（清空重建用 copilot-funnel-cleanup 单独执行）"
+
 
 deep-strike-dev:
 	PYTHONPATH=. uvicorn apps.deep_strike.main:app --port 8082 --reload

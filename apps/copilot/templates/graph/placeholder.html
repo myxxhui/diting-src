@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}产业图谱 · AI 投资副驾驶{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>🕸️ 产业知识图谱</h2>
+  <p style="color:#6b7280;">启动期 Part A 轻量入口 · 完整 step_13 关系图可视化待扩展。</p>
+  {% if center %}
+  <p>中心标的：<strong>{{ center }}</strong></p>
+  <p><a href="/planning?view=radar">在行情雷达查看档案</a> ·
+     <a href="/api/campaigns/1/symbols/{{ center }}">6 维档案 JSON</a></p>
+  {% else %}
+  <p>选择中心标的（`?center=601138`）：</p>
+  <div hx-get="/api/radar/symbols" hx-trigger="load" hx-swap="innerHTML" hx-headers='{"Accept": "text/html"}'>
+    <p style="color:#9ca3af;">加载标的…</p>
+  </div>
+  {% endif %}
+  <p style="margin-top:16px;">生态位文本见各标的档案 <code>niche</code> 字段。</p>
+</div>
+{% endblock %}

@@ -38,6 +38,7 @@ Scene = Literal[
     "timer",
     "etl",
     "dry_run",
+    "radar_assess",
 ]
 
 Route = Literal["remote", "local", "mock"]
@@ -51,6 +52,7 @@ _SCENE_ROUTE: dict[Scene, Route] = {
     "timer": "remote",
     "etl": "local",
     "dry_run": "mock",
+    "radar_assess": "remote",
 }
 
 
