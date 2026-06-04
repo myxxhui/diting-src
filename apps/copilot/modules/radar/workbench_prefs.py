@@ -16,9 +16,14 @@ PREFS_FILENAME = "workbench_prefs.json"
 PREFS_STORAGE_KEY = "radar_workbench_prefs_v1"
 
 
-def _cache_root() -> Path:
+def radar_cache_root() -> Path:
+    """雷达 T0 缓存 / 工作台偏好 / 展示布局 共用目录（生产挂载 PVC）。"""
     raw = os.getenv("RADAR_T0_CACHE_DIR", "").strip()
     return Path(raw) if raw else Path("data/cache/radar_t0")
+
+
+def _cache_root() -> Path:
+    return radar_cache_root()
 
 
 def _prefs_path() -> Path:

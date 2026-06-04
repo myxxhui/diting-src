@@ -155,24 +155,90 @@
   </p>
   <div id="radar-scan-result" class="mb-4 min-h-[2rem]"
        hx-on::after-swap="this.scrollIntoView({behavior:'smooth', block:'start'})"></div>
+  <style>
+    #radar-dim-grid .radar-dim-details { cursor: grab; touch-action: pan-y; transition: box-shadow 0.15s ease; }
+    #radar-dim-grid .radar-dim-details:active { cursor: grabbing; }
+    #radar-dim-grid .radar-dim-details.radar-dim-dragging {
+      cursor: grabbing; opacity: 0.62; z-index: 40; position: relative;
+      box-shadow: 0 10px 28px rgba(79, 70, 229, 0.18);
+      outline: 2px solid rgb(165 180 252); outline-offset: 1px;
+    }
+    #radar-dim-grid .radar-dim-details.radar-dim-drop-target {
+      outline: 2px dashed rgb(129 140 248); outline-offset: 2px;
+    }
+    #radar-dim-grid .radar-dim-details summary { user-select: none; }
+    #radar-dim-grid .radar-dim-details .radar-dim-detail-body { cursor: auto; user-select: text; }
+  </style>
   <script>
     (function () {
       var LAYOUT_KEY = 'radar_scan_layout_v1';
       var LAYOUT_HDR = 'X-Radar-Display-Layout';
+      var LAYOUT_API = '/api/radar/display-layout';
       var schema = null;
+      var serverLayout = null;
+
+      function normalizeLayoutHidden(layout) {
+        if (!layout || !layout.hidden) return layout;
+        if (layout.hidden instanceof Set) layout.hidden = Array.from(layout.hidden);
+        return layout;
+      }
 
       function loadRadarLayout() {
+        if (serverLayout) return serverLayout;
         try {
           var raw = localStorage.getItem(LAYOUT_KEY);
           if (raw) return JSON.parse(raw);
         } catch (e) { /* ignore */ }
+        if (schema && schema.saved) return JSON.parse(JSON.stringify(schema.saved));
         return schema && schema.default ? JSON.parse(JSON.stringify(schema.default)) : null;
       }
 
+      function applyServerLayout(layout) {
+        if (!layout || !layout.order) return;
+        serverLayout = layout;
+        normalizeLayoutHidden(serverLayout);
+        try {
+          localStorage.setItem(LAYOUT_KEY, JSON.stringify(serverLayout));
+        } catch (e) { /* ignore */ }
+      }
+
+      function fetchRadarLayoutFromServer() {
+        return fetch(LAYOUT_API)
+          .then(function (r) {
+            if (!r.ok) throw new Error(String(r.status));
+            return r.json();
+          })
+          .then(function (data) {
+            if (data && data.order && data.order.length) applyServerLayout(data);
+            return data;
+          })
+          .catch(function () { return null; });
+      }
+
       function saveRadarLayout(obj) {
+        if (!obj) return;
+        normalizeLayoutHidden(obj);
+        serverLayout = obj;
         try {
           localStorage.setItem(LAYOUT_KEY, JSON.stringify(obj));
         } catch (e) { /* ignore */ }
+        fetch(LAYOUT_API, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(obj)
+        }).catch(function () { /* 离线时仅 localStorage */ });
+      }
+
+      function resetRadarLayoutRemote(defaultLayout) {
+        serverLayout = null;
+        try { localStorage.removeItem(LAYOUT_KEY); } catch (e) { /* ignore */ }
+        return fetch(LAYOUT_API, { method: 'DELETE' })
+          .then(function () {
+            if (defaultLayout) saveRadarLayout(defaultLayout);
+          })
+          .catch(function () {
+            if (defaultLayout) saveRadarLayout(defaultLayout);
+          });
       }
 
       document.body.addEventListener('htmx:configRequest', function (ev) {
@@ -291,52 +357,133 @@
       }
 
       window.radarInitDimDrag = function () {
-        var grid = document.getElementById('radar-dim-grid');
-        if (!grid) return;
+        if (window._radarDimPointerDragReady) return;
+        window._radarDimPointerDragReady = true;
         var dragCard = null;
-        grid.querySelectorAll('.radar-dim-drag-handle').forEach(function (handle) {
-          if (handle._dragInit) return;
-          handle._dragInit = true;
-          handle.addEventListener('dragstart', function (e) {
-            e.stopPropagation();
-            dragCard = handle.closest('.radar-dim-details');
-            if (dragCard) dragCard.classList.add('opacity-50');
-            e.dataTransfer.setData('text/plain', dragCard ? dragCard.getAttribute('data-dim-key') : '');
-            e.dataTransfer.effectAllowed = 'move';
-          });
-          handle.addEventListener('dragend', function () {
-            if (dragCard) dragCard.classList.remove('opacity-50');
-            dragCard = null;
-            grid.querySelectorAll('.ring-indigo-300').forEach(function (el) {
-              el.classList.remove('ring-2', 'ring-indigo-300');
-            });
-          });
-        });
-        if (grid._dropBound) return;
-        grid._dropBound = true;
-        grid.addEventListener('dragover', function (e) {
-          e.preventDefault();
-          var over = e.target.closest('.radar-dim-details');
-          grid.querySelectorAll('.radar-dim-details.ring-2').forEach(function (el) {
-            el.classList.remove('ring-2', 'ring-indigo-300');
-          });
-          if (over && over !== dragCard) over.classList.add('ring-2', 'ring-indigo-300');
-        });
-        grid.addEventListener('drop', function (e) {
-          e.preventDefault();
-          e.stopPropagation();
-          var target = e.target.closest('.radar-dim-details');
-          if (!dragCard || !target || dragCard === target) return;
-          var rect = target.getBoundingClientRect();
-          var midX = rect.left + rect.width / 2;
-          if (e.clientX >= midX) {
-            if (target.nextSibling) grid.insertBefore(dragCard, target.nextSibling);
-            else grid.appendChild(dragCard);
-          } else {
-            grid.insertBefore(dragCard, target);
+        var pointerId = null;
+        var startX = 0;
+        var startY = 0;
+        var dragging = false;
+        var suppressClick = false;
+        var moveRaf = 0;
+        var DRAG_THRESH = 8;
+
+        function gridEl() {
+          return document.getElementById('radar-dim-grid');
+        }
+
+        function listCards(grid) {
+          return Array.prototype.slice.call(
+            grid.querySelectorAll('.radar-dim-details[data-dim-key]')
+          );
+        }
+
+        function cardAtY(grid, clientY) {
+          var list = listCards(grid);
+          for (var i = 0; i < list.length; i++) {
+            var r = list[i].getBoundingClientRect();
+            if (clientY >= r.top && clientY <= r.bottom) return { card: list[i], rect: r };
           }
-          saveDimOrderFromGrid();
+          return null;
+        }
+
+        function clearDropMarkers(grid) {
+          grid.querySelectorAll('.radar-dim-drop-target').forEach(function (el) {
+            el.classList.remove('radar-dim-drop-target');
+          });
+        }
+
+        function reorderAtY(grid, clientY) {
+          if (!dragCard) return;
+          var hit = cardAtY(grid, clientY);
+          if (!hit || hit.card === dragCard) return;
+          var mid = hit.rect.top + hit.rect.height / 2;
+          if (clientY < mid) {
+            grid.insertBefore(dragCard, hit.card);
+          } else if (hit.card.nextSibling) {
+            grid.insertBefore(dragCard, hit.card.nextSibling);
+          } else {
+            grid.appendChild(dragCard);
+          }
+        }
+
+        function finishDrag(grid, save) {
+          if (!dragCard) return;
+          dragCard.classList.remove('radar-dim-dragging');
+          try { dragCard.releasePointerCapture(pointerId); } catch (err) { /* ignore */ }
+          clearDropMarkers(grid);
+          if (save) saveDimOrderFromGrid();
+          dragCard = null;
+          pointerId = null;
+          dragging = false;
+        }
+
+        document.addEventListener('pointerdown', function (e) {
+          if (e.button !== 0) return;
+          var grid = gridEl();
+          if (!grid) return;
+          var card = e.target.closest('.radar-dim-details');
+          if (!card || !grid.contains(card)) return;
+          if (e.target.closest('a, button, input, textarea, select, label')) return;
+          dragCard = card;
+          pointerId = e.pointerId;
+          startX = e.clientX;
+          startY = e.clientY;
+          dragging = false;
+          suppressClick = false;
         });
+
+        document.addEventListener('pointermove', function (e) {
+          if (!dragCard || e.pointerId !== pointerId) return;
+          var grid = gridEl();
+          if (!grid || !grid.contains(dragCard)) {
+            finishDrag(grid || document.createElement('div'), false);
+            return;
+          }
+          var dx = e.clientX - startX;
+          var dy = e.clientY - startY;
+          if (!dragging) {
+            if (Math.abs(dx) + Math.abs(dy) < DRAG_THRESH) return;
+            dragging = true;
+            suppressClick = true;
+            dragCard.classList.add('radar-dim-dragging');
+            try { dragCard.setPointerCapture(pointerId); } catch (err) { /* ignore */ }
+          }
+          e.preventDefault();
+          var y = e.clientY;
+          if (moveRaf) return;
+          moveRaf = requestAnimationFrame(function () {
+            moveRaf = 0;
+            clearDropMarkers(grid);
+            var hit = cardAtY(grid, y);
+            if (hit && hit.card !== dragCard) hit.card.classList.add('radar-dim-drop-target');
+            reorderAtY(grid, y);
+          });
+        });
+
+        document.addEventListener('pointerup', function (e) {
+          if (!dragCard || e.pointerId !== pointerId) return;
+          var grid = gridEl();
+          if (dragging && grid) finishDrag(grid, true);
+          else finishDrag(grid || document.createElement('div'), false);
+        });
+
+        document.addEventListener('pointercancel', function (e) {
+          if (!dragCard || e.pointerId !== pointerId) return;
+          var grid = gridEl();
+          finishDrag(grid || document.createElement('div'), false);
+        });
+
+        document.addEventListener('click', function (e) {
+          if (!suppressClick) return;
+          var grid = gridEl();
+          if (!grid) return;
+          if (e.target.closest('#radar-dim-grid .radar-dim-details')) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+          suppressClick = false;
+        }, true);
       };
 
       window.radarDimMenuToggle = function (ev) {
@@ -380,10 +527,11 @@
       };
 
       window.radarLayoutInit = function () {
-        fetch('/api/radar/display-layout/schema')
+        return fetch('/api/radar/display-layout/schema')
           .then(function (r) { return r.json(); })
           .then(function (data) {
             schema = data;
+            if (data.saved) applyServerLayout(data.saved);
             var guide = document.getElementById('radar-prompt-guide');
             if (guide && data.prompt_writing_guide) guide.textContent = data.prompt_writing_guide;
             var layout = loadRadarLayout();
@@ -420,10 +568,12 @@
             };
             var resetBtn = document.getElementById('radar-layout-reset-btn');
             if (resetBtn) resetBtn.onclick = function () {
-              saveRadarLayout(JSON.parse(JSON.stringify(data.default)));
-              window.radarLayoutInit();
-              window.radarLayoutReloadScan();
-              window.radarLayoutCloseModal();
+              var def = JSON.parse(JSON.stringify(data.default));
+              resetRadarLayoutRemote(def).then(function () {
+                window.radarLayoutInit();
+                window.radarLayoutReloadScan();
+                window.radarLayoutCloseModal();
+              });
             };
             var closeBtn = document.getElementById('radar-layout-modal-close');
             var backdrop = document.getElementById('radar-layout-modal-backdrop');
@@ -433,10 +583,12 @@
             if (menuOpen) menuOpen.onclick = function () { window.radarLayoutOpenModal(); };
             var menuReset = document.getElementById('radar-dim-menu-reset-layout');
             if (menuReset) menuReset.onclick = function () {
-              saveRadarLayout(JSON.parse(JSON.stringify(data.default)));
-              window.radarLayoutReloadScan();
-              var pop = document.getElementById('radar-dim-menu-pop');
-              if (pop) pop.classList.add('hidden');
+              var def = JSON.parse(JSON.stringify(data.default));
+              resetRadarLayoutRemote(def).then(function () {
+                window.radarLayoutReloadScan();
+                var pop = document.getElementById('radar-dim-menu-pop');
+                if (pop) pop.classList.add('hidden');
+              });
             };
           })
           .catch(function () { /* schema optional */ });
@@ -454,12 +606,14 @@
         var t = ev.detail && ev.detail.target;
         if (t && t.id === 'radar-scan-result') {
           processRadarHtmx(t);
+          if (t.querySelector('#radar-dim-grid') && typeof window.radarInitDimDrag === 'function') {
+            window.radarInitDimDrag();
+          }
           if (t.querySelector('#radar-scan-report')) {
             var m = (ev.detail.requestConfig && ev.detail.requestConfig.path) || '';
             var match = m.match(/\/api\/radar\/scans\/(\d+)/);
             if (match) window._radarLastScanId = match[1];
             window.radarScanInitDetailPanel(true);
-            window.radarInitDimDrag();
             if (typeof htmx !== 'undefined') {
               htmx.trigger('#radar-candidates-list', 'load');
             }
@@ -558,13 +712,21 @@
     };
 
     window.addEventListener('load', function () {
-      if (typeof window.radarLayoutInit === 'function') window.radarLayoutInit();
+      var layoutReady = (typeof fetchRadarLayoutFromServer === 'function')
+        ? fetchRadarLayoutFromServer()
+        : Promise.resolve();
+      layoutReady.finally(function () {
+        if (typeof window.radarLayoutInit === 'function') window.radarLayoutInit();
+      });
       if (typeof window.radarApplyWorkbenchPrefs === 'function') window.radarApplyWorkbenchPrefs();
+      if (typeof window.radarInitDimDrag === 'function') window.radarInitDimDrag();
       var input = document.getElementById('radar-query-input');
       var btn = document.getElementById('radar-collect-btn');
       var suggest = document.getElementById('radar-suggest-list');
       var form = document.getElementById('radar-scan-form');
       var suggestTimer = null;
+      var suggestSeq = 0;
+      var suggestItems = [];
 
       function sym() { return (input && input.value || '').trim(); }
 
@@ -572,11 +734,34 @@
         if (!suggest) return;
         suggest.classList.add('hidden');
         suggest.innerHTML = '';
+        suggestItems = [];
         if (input) input.setAttribute('aria-expanded', 'false');
       }
 
+      function showSuggestLoading() {
+        if (!suggest) return;
+        suggest.innerHTML = (
+          '<li class="px-3 py-2 text-xs text-gray-400 flex items-center gap-2">'
+          + '<svg class="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">'
+          + '<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>'
+          + '<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>'
+          + '搜索中…</li>'
+        );
+        suggest.classList.remove('hidden');
+        if (input) input.setAttribute('aria-expanded', 'true');
+      }
+
       function showSuggest(items) {
-        if (!suggest || !items.length) { hideSuggest(); return; }
+        suggestItems = items || [];
+        if (!suggest || !items.length) {
+          if (suggest && sym().length >= 1) {
+            suggest.innerHTML = '<li class="px-3 py-2 text-xs text-gray-400">无匹配，请输入 6 位代码</li>';
+            suggest.classList.remove('hidden');
+          } else {
+            hideSuggest();
+          }
+          return;
+        }
         suggest.innerHTML = items.map(function (it) {
           var pct = Math.round((it.score || 0) * 100);
           return (
@@ -600,10 +785,34 @@
 
       function fetchSuggest(q) {
         if (!q || q.length < 1) { hideSuggest(); return; }
+        var seq = ++suggestSeq;
+        showSuggestLoading();
         fetch('/api/radar/symbols/suggest?q=' + encodeURIComponent(q) + '&limit=8')
           .then(function (r) { return r.json(); })
-          .then(function (data) { showSuggest(data.items || []); })
-          .catch(function () { hideSuggest(); });
+          .then(function (data) {
+            if (seq !== suggestSeq) return;
+            showSuggest(data.items || []);
+          })
+          .catch(function () {
+            if (seq !== suggestSeq) return;
+            hideSuggest();
+          });
+      }
+
+      function applyTopSuggest() {
+        if (!suggestItems.length || !input) return false;
+        var top = suggestItems[0];
+        input.value = top.name || top.symbol;
+        hideSuggest();
+        return true;
+      }
+
+      function submitScanForm() {
+        if (typeof htmx !== 'undefined' && form) {
+          htmx.trigger(form, 'submit');
+        } else if (form) {
+          form.requestSubmit();
+        }
       }
 
       function pollCollect(jobId, box, collectBtn) {
@@ -685,19 +894,39 @@
         input.addEventListener('input', function () {
           clearTimeout(suggestTimer);
           var q = sym();
-          suggestTimer = setTimeout(function () { fetchSuggest(q); }, 280);
+          if (q.length < 1) { hideSuggest(); return; }
+          fetchSuggest(q);
+          suggestTimer = setTimeout(function () { fetchSuggest(q); }, 120);
+        });
+        input.addEventListener('focus', function () {
+          var q = sym();
+          if (q.length >= 1) fetchSuggest(q);
         });
         input.addEventListener('blur', function () {
-          setTimeout(hideSuggest, 180);
+          setTimeout(hideSuggest, 220);
         });
         input.addEventListener('keydown', function (e) {
           if (e.key === 'Enter') {
             e.preventDefault();
-            hideSuggest();
-            if (typeof htmx !== 'undefined' && form) {
-              htmx.trigger(form, 'submit');
-            } else if (form) {
-              form.requestSubmit();
+            var q = sym();
+            function finishEnter() {
+              if (suggest && !suggest.classList.contains('hidden') && suggestItems.length) {
+                applyTopSuggest();
+              }
+              submitScanForm();
+            }
+            if (q.length >= 1 && !suggestItems.length) {
+              fetchSuggest(q);
+              var waited = 0;
+              var timer = setInterval(function () {
+                waited += 80;
+                if (suggestItems.length || waited >= 720) {
+                  clearInterval(timer);
+                  finishEnter();
+                }
+              }, 80);
+            } else {
+              finishEnter();
             }
           } else if (e.key === 'Escape') {
             hideSuggest();
@@ -902,6 +1131,21 @@
     });
     document.body.addEventListener('htmx:responseError', function (ev) {
       var t = ev.detail && ev.detail.target;
+      if (t && t.id === 'radar-scan-result') {
+        var msg = '请求失败，请检查网络或稍后重试';
+        try {
+          var xhr = ev.detail.xhr;
+          if (xhr && xhr.responseText) {
+            var j = JSON.parse(xhr.responseText);
+            if (j.detail) msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
+          }
+        } catch (err) { /* ignore */ }
+        t.innerHTML = (
+          '<div class="rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-800">'
+          + '<p class="font-medium">扫描请求失败</p><p class="mt-1">' + msg + '</p></div>'
+        );
+        return;
+      }
       if (!t || !t.id || t.id.indexOf('panel-') !== 0) return;
       var sym = t.id.slice('panel-'.length);
       window.collapseFalsifyPanel(sym);

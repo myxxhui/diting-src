@@ -12,6 +12,7 @@ import re
 from functools import lru_cache
 from typing import Any
 
+from apps.common.domestic_http import without_outbound_proxy
 from apps.common.holdings_sot import load_holdings_sot
 
 logger = logging.getLogger(__name__)
@@ -82,16 +83,21 @@ def _merge_sot_into_map(out: dict[str, str]) -> None:
         pass
 
 
-@lru_cache(maxsize=1)
-def _code_name_map() -> dict[str, str]:
-    """code→中文名（轻量 code_name 表优先 · 失败再试全市场 spot · 进程内缓存）。"""
+_CODE_MAP_CACHE: dict[str, str] = {}
+_CODE_MAP_PINNED = False
+_MIN_PINNED_MAP = 800
+
+
+def _build_code_name_map() -> dict[str, str]:
+    """单次构建 code→中文名（不缓存半成品，避免仅 SoT 几条被 lru 永久固化）。"""
     out: dict[str, str] = {}
     _merge_sot_into_map(out)
 
     try:
-        import akshare as ak
+        with without_outbound_proxy():
+            import akshare as ak
 
-        df = ak.stock_info_a_code_name()
+            df = ak.stock_info_a_code_name()
         if df is not None and not df.empty:
             code_col = "code" if "code" in df.columns else "证券代码"
             name_col = "name" if "name" in df.columns else "证券简称"
@@ -103,7 +109,7 @@ def _code_name_map() -> dict[str, str]:
     except Exception as exc:  # noqa: BLE001
         logger.warning("stock_info_a_code_name 索引失败: %s", exc)
 
-    if len(out) < 1000:
+    if len(out) < _MIN_PINNED_MAP:
         try:
             for nm, (s, name) in _a_share_name_index().items():
                 if s not in out and _is_valid_chinese_name(name, s):
@@ -112,6 +118,36 @@ def _code_name_map() -> dict[str, str]:
             logger.warning("stock_zh_a_spot_em 索引失败: %s", exc)
 
     return out
+
+
+def _code_name_map(*, force_refresh: bool = False) -> dict[str, str]:
+    """code→中文名；全量表就绪后进程内复用，否则合并增量并允许重试拉取。"""
+    global _CODE_MAP_CACHE, _CODE_MAP_PINNED
+    if force_refresh:
+        _CODE_MAP_PINNED = False
+        _CODE_MAP_CACHE = {}
+        _a_share_name_index.cache_clear()
+
+    if _CODE_MAP_PINNED and _CODE_MAP_CACHE:
+        return _CODE_MAP_CACHE
+
+    built = _build_code_name_map()
+    merged = {**_CODE_MAP_CACHE, **built}
+    if len(merged) >= _MIN_PINNED_MAP:
+        _CODE_MAP_CACHE = merged
+        _CODE_MAP_PINNED = True
+        return merged
+
+    if len(merged) < _MIN_PINNED_MAP and not force_refresh:
+        _a_share_name_index.cache_clear()
+        merged = {**merged, **_build_code_name_map()}
+        if len(merged) >= _MIN_PINNED_MAP:
+            _CODE_MAP_CACHE = merged
+            _CODE_MAP_PINNED = True
+            return merged
+
+    _CODE_MAP_CACHE = merged
+    return merged
 
 
 def _resolve_name_single(sym: str) -> str:
@@ -154,9 +190,9 @@ def display_name_for_symbol(
 
 
 def warm_market_name_index() -> int:
-    """启动时后台预热 code→中文名表。"""
+    """启动时后台预热 code→中文名表（失败则下次 suggest 再试）。"""
     try:
-        return len(_code_name_map())
+        return len(_code_name_map(force_refresh=True))
     except Exception as exc:  # noqa: BLE001
         logger.warning("预热 A 股简称索引失败: %s", exc)
         return 0
@@ -168,6 +204,10 @@ def suggest_radar_symbols(query: str, *, limit: int = 8) -> list[dict[str, Any]]
     if not raw:
         return []
 
+    code_map = _code_name_map()
+    if len(code_map) < _MIN_PINNED_MAP:
+        code_map = _code_name_map(force_refresh=True)
+
     digits = re.sub(r"\D", "", raw)
     scored: dict[str, dict[str, Any]] = {}
 
@@ -178,6 +218,13 @@ def suggest_radar_symbols(query: str, *, limit: int = 8) -> list[dict[str, Any]]
         prev = scored.get(sym)
         if prev is None or score > prev["score"]:
             scored[sym] = {"symbol": sym, "name": name, "score": round(score, 3)}
+
+    from_sot = _resolve_from_sot(raw)
+    if from_sot:
+        _put(from_sot[0], from_sot[1], 1.0)
+    from_market = _resolve_from_akshare_name(raw)
+    if from_market:
+        _put(from_market[0], from_market[1], 1.0)
 
     if digits:
         for sym, (s, nm) in _iter_symbol_entries():
@@ -201,13 +248,24 @@ def suggest_radar_symbols(query: str, *, limit: int = 8) -> list[dict[str, Any]]
 
 
 def _iter_symbol_entries() -> list[tuple[str, tuple[str, str]]]:
-    """SoT + 内存 code 表（用于模糊建议，不强制拉 spot 全表）。"""
+    """SoT + 内存 code 表 + 简称索引（模糊建议用）。"""
     entries: list[tuple[str, tuple[str, str]]] = []
     seen: set[str] = set()
-    for sym, nm in _code_name_map().items():
+    cmap = _code_name_map()
+    if len(cmap) < _MIN_PINNED_MAP:
+        cmap = _code_name_map(force_refresh=True)
+    for sym, nm in cmap.items():
         if sym not in seen:
             entries.append((sym, (sym, nm)))
             seen.add(sym)
+    if len(seen) < _MIN_PINNED_MAP:
+        try:
+            for nm, (sym, name) in _a_share_name_index().items():
+                if sym not in seen and len(sym) == 6:
+                    entries.append((sym, (sym, name)))
+                    seen.add(sym)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("简称索引补充失败: %s", exc)
     return entries
 
 
@@ -230,9 +288,10 @@ def _resolve_from_sot(raw: str) -> tuple[str, str] | None:
 @lru_cache(maxsize=1)
 def _a_share_name_index() -> dict[str, tuple[str, str]]:
     """全 A 股 简称→(symbol,name)；进程内缓存。"""
-    import akshare as ak
+    with without_outbound_proxy():
+        import akshare as ak
 
-    df = ak.stock_zh_a_spot_em()
+        df = ak.stock_zh_a_spot_em()
     if df is None or df.empty:
         return {}
     name_col = "名称" if "名称" in df.columns else ("name" if "name" in df.columns else None)

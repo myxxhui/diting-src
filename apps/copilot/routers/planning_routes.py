@@ -58,6 +58,12 @@ from apps.copilot.modules.planning.service import (
 from apps.copilot.modules.radar.schema import DIMENSIONS, MARKET_PHASE_LABELS
 from apps.copilot.modules.radar.display_layout import (
     LAYOUT_HEADER,
+    layout_to_jsonable,
+    load_saved_layout,
+    reset_saved_layout,
+    resolve_layout_for_request,
+    save_saved_layout,
+    default_layout,
     layout_schema_payload,
     ordered_display_metas,
     parse_layout_from_header,
@@ -464,6 +470,10 @@ async def api_create_radar_scan(
     try:
         sym, name = resolve_radar_query(query_text)
     except RadarSymbolResolveError as exc:
+        if request.headers.get("hx-request") or "text/html" in request.headers.get(
+            "accept", ""
+        ):
+            return HTMLResponse(_render_radar_resolve_error_html(str(exc)))
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     scan = RadarScan(input_type="symbol", query_text=sym, status="running")
@@ -504,6 +514,31 @@ async def api_radar_display_layout_schema():
     return layout_schema_payload()
 
 
+@router.get("/api/radar/display-layout")
+async def api_get_radar_display_layout():
+    """已持久化的九维展示顺序（PVC display_layout.json）。"""
+    saved = load_saved_layout()
+    if saved:
+        return layout_to_jsonable(saved)
+    return layout_to_jsonable(default_layout())
+
+
+@router.put("/api/radar/display-layout")
+async def api_put_radar_display_layout(request: Request):
+    try:
+        body = await request.json()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="需要 JSON 请求体") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="无效 JSON")
+    return save_saved_layout(body)
+
+
+@router.delete("/api/radar/display-layout")
+async def api_delete_radar_display_layout():
+    return layout_to_jsonable(reset_saved_layout())
+
+
 @router.get("/api/radar/workbench-prefs")
 async def api_get_radar_workbench_prefs():
     """扫描台默认选项 + 缓存策略（服务端 JSON 热加载）。"""
@@ -534,7 +569,7 @@ async def api_delete_radar_workbench_prefs():
 
 def _layout_from_request(request: Request) -> dict[str, Any]:
     raw = request.headers.get(LAYOUT_HEADER) or request.headers.get("X-Radar-Display-Layout")
-    return parse_layout_from_header(raw)
+    return resolve_layout_for_request(raw)
 
 
 @router.get("/api/radar/scans/{scan_id}")
@@ -621,6 +656,10 @@ async def api_radar_collect_by_query(
         redis_client = _sync_redis()
         _job_id, state = _start_radar_collect(query_text, redis_client)
     except RadarSymbolResolveError as exc:
+        if request.headers.get("hx-request") or "text/html" in request.headers.get(
+            "accept", ""
+        ):
+            return HTMLResponse(_render_radar_resolve_error_html(str(exc)))
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
@@ -638,6 +677,10 @@ async def api_radar_collect_t0(
         redis_client = _sync_redis()
         _job_id, state = _start_radar_collect(symbol, redis_client)
     except RadarSymbolResolveError as exc:
+        if request.headers.get("hx-request") or "text/html" in request.headers.get(
+            "accept", ""
+        ):
+            return HTMLResponse(_render_radar_resolve_error_html(str(exc)))
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
@@ -1539,9 +1582,8 @@ def _render_dimension_card(meta: dict, dim: dict) -> str:
         f"[&::-webkit-details-marker]:hidden'>"
         f"<div class='flex items-center justify-between gap-2'>"
         f"<span class='text-sm font-semibold text-gray-800 flex items-center gap-1.5 min-w-0'>"
-        f"<span class='radar-dim-drag-handle shrink-0 cursor-grab active:cursor-grabbing "
-        f"text-gray-300 hover:text-indigo-500 text-xs select-none px-0.5' title='拖动排序' "
-        f"draggable='true' onclick='event.preventDefault();event.stopPropagation();'>⠿</span>"
+        f"<span class='radar-dim-grip shrink-0 text-gray-300 text-xs select-none px-0.5' "
+        f"aria-hidden='true' title='按住本卡任意处拖动排序'>⠿</span>"
         f"<span class='text-gray-400 text-[10px] group-open:rotate-90 transition-transform "
         f"inline-block shrink-0'>▸</span>"
         f"{meta['emoji']} {meta['label']}</span>"
@@ -1551,10 +1593,10 @@ def _render_dimension_card(meta: dict, dim: dict) -> str:
         f"<p class='text-[10px] text-blue-500/80 mt-1.5 ml-4 group-open:hidden'>"
         f"点击标题展开 · 推理过程与证据</p>"
         f"<p class='text-[10px] text-gray-400 mt-1.5 ml-4 hidden group-open:block'>"
-        f"点击标题收起</p>"
+        f"按住卡片拖动排序 · 点击标题收起</p>"
         f"</summary>"
-        f"<div class='px-3 pb-3 pt-0 ml-4 mr-1 border-t border-gray-100 bg-gray-50/40 "
-        f"rounded-b-md'>{detail_body}</div>"
+        f"<div class='radar-dim-detail-body px-3 pb-3 pt-0 ml-4 mr-1 border-t border-gray-100 "
+        f"bg-gray-50/40 rounded-b-md'>{detail_body}</div>"
         f"</details>"
     )
 
@@ -1617,7 +1659,7 @@ def _render_candidate_report(
         + f"</div></div>"
     )
 
-    layout = layout or parse_layout_from_header(None)
+    layout = layout or resolve_layout_for_request(None)
     display_metas = ordered_display_metas(layout)
     dim_count = len(display_metas)
 
@@ -1716,6 +1758,17 @@ def _render_candidate_report(
         f"<div id='radar-scan-report' class='radar-scan-report' data-symbol='{sym_esc}'>"
         f"<div class='border border-gray-100 rounded-xl p-4 mb-3 bg-white shadow-sm'>"
         f"{header}{stale_note}{summary_strip}{detail_panel}{footer}</div></div>"
+    )
+
+
+def _render_radar_resolve_error_html(message: str) -> str:
+    """标的解析失败（HTMX 须返回 HTML，否则仅转圈无提示）。"""
+    return (
+        "<div class='rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-800'>"
+        "<p class='font-medium'>无法识别标的</p>"
+        f"<p class='mt-1'>{_esc(message)}</p>"
+        "<p class='mt-2 text-xs text-red-600'>请等待下拉建议出现并点选，或输入 6 位代码后再按回车。</p>"
+        "</div>"
     )
 
 

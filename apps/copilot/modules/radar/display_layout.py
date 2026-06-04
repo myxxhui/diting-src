@@ -1,19 +1,26 @@
 """行情雷达扫描结果 · 用户可配置展示模块（顺序 / 显隐 / 自定义维）。
 
-布局 JSON 由前端 localStorage 保存，经请求头 `X-Radar-Display-Layout` 传给 HTMX 渲染。
+布局持久化在 `RADAR_T0_CACHE_DIR/display_layout.json`（与 workbench_prefs 同 PVC），
+平台停机/机器重建后仍保留；前端 localStorage 仅作离线缓存。
+请求头 `X-Radar-Display-Layout` 可覆盖单次渲染，缺省读服务端已存布局。
+
+[Ref: 24_行情解析工作台 · 26_行情雷达与AI模型工作流]
 """
 from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from apps.copilot.modules.radar.schema import DIM_KEYS, DIMENSIONS, DIM_META
+from apps.copilot.modules.radar.workbench_prefs import radar_cache_root
 
 logger = logging.getLogger(__name__)
 
 LAYOUT_STORAGE_KEY = "radar_scan_layout_v1"
 LAYOUT_HEADER = "x-radar-display-layout"
+LAYOUT_FILENAME = "display_layout.json"
 
 DEFAULT_LAYOUT: dict[str, Any] = {
     "version": 1,
@@ -78,12 +85,87 @@ def parse_layout_from_header(raw: str | None) -> dict[str, Any]:
     return base
 
 
+def _layout_path() -> Path:
+    root = radar_cache_root()
+    root.mkdir(parents=True, exist_ok=True)
+    return root / LAYOUT_FILENAME
+
+
+def layout_to_jsonable(layout: dict[str, Any]) -> dict[str, Any]:
+    """API/磁盘序列化：hidden 统一为 list（接受 parse 后的 set）。"""
+    hidden = layout.get("hidden") or set()
+    if isinstance(hidden, set):
+        hidden_list = sorted(hidden)
+    else:
+        hidden_list = [str(k) for k in hidden]
+    return {
+        "version": layout.get("version", 1),
+        "order": [str(k) for k in (layout.get("order") or []) if k],
+        "hidden": hidden_list,
+        "custom": list(layout.get("custom") or []),
+        "show_summary": bool(layout.get("show_summary", True)),
+        "show_overall_in_detail": bool(layout.get("show_overall_in_detail", False)),
+        "max_visible": layout.get("max_visible"),
+    }
+
+
+def load_saved_layout() -> dict[str, Any] | None:
+    """读取 PVC/本地已存布局；不存在返回 None。"""
+    path = _layout_path()
+    if not path.is_file():
+        return None
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning("读取 display_layout 失败: %s", exc)
+        return None
+    return parse_layout_from_header(raw)
+
+
+def save_saved_layout(payload: dict[str, Any]) -> dict[str, Any]:
+    """校验并写入 display_layout.json。"""
+    to_parse = dict(payload)
+    hidden_in = to_parse.get("hidden")
+    if isinstance(hidden_in, set):
+        to_parse["hidden"] = sorted(hidden_in)
+    merged = parse_layout_from_header(json.dumps(to_parse, ensure_ascii=False))
+    out = layout_to_jsonable(merged)
+    path = _layout_path()
+    path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    logger.info("display_layout 已写入 %s", path)
+    return out
+
+
+def reset_saved_layout() -> dict[str, Any]:
+    path = _layout_path()
+    if path.is_file():
+        try:
+            path.unlink()
+        except OSError as exc:
+            logger.warning("删除 display_layout 失败: %s", exc)
+    return default_layout()
+
+
+def resolve_layout_for_request(header_raw: str | None) -> dict[str, Any]:
+    """单次请求：请求头优先，否则服务端持久化，最后默认。"""
+    if header_raw and str(header_raw).strip():
+        return parse_layout_from_header(header_raw)
+    saved = load_saved_layout()
+    if saved:
+        return saved
+    return default_layout()
+
+
 def layout_schema_payload() -> dict[str, Any]:
+    saved = load_saved_layout()
     return {
         "version": 1,
         "storage_key": LAYOUT_STORAGE_KEY,
         "header_name": LAYOUT_HEADER,
+        "persist_path": str(_layout_path()),
+        "persist_api": "/api/radar/display-layout",
         "default": default_layout(),
+        "saved": layout_to_jsonable(saved) if saved else None,
         "builtin_dimensions": DIMENSIONS,
         "prompt_writing_guide": PROMPT_WRITING_GUIDE,
     }

@@ -54,3 +54,37 @@ def test_resolve_unknown_name_raises():
 def test_resolve_empty_raises():
     with pytest.raises(RadarSymbolResolveError):
         resolve_radar_query("   ")
+
+
+def test_code_name_map_not_pinned_when_only_sot(monkeypatch):
+    """首次仅加载到 SoT 时不应永久缓存，避免全市场简称搜不到。"""
+    import apps.copilot.modules.radar.symbol_resolve as sr
+
+    sr._CODE_MAP_CACHE = {}
+    sr._CODE_MAP_PINNED = False
+    sr._a_share_name_index.cache_clear()
+
+    monkeypatch.setattr(sr, "_build_code_name_map", lambda: {"002837": "英维克"})
+    m1 = sr._code_name_map()
+    assert m1.get("002837") == "英维克"
+    assert sr._CODE_MAP_PINNED is False
+
+    monkeypatch.setattr(
+        sr,
+        "_build_code_name_map",
+        lambda: {"002837": "英维克", "300502": "新易盛"},
+    )
+    m2 = sr._code_name_map(force_refresh=True)
+    assert m2.get("300502") == "新易盛"
+
+
+def test_suggest_exact_name_via_market(monkeypatch):
+    import apps.copilot.modules.radar.symbol_resolve as sr
+
+    monkeypatch.setattr(sr, "_code_name_map", lambda **kw: {"300502": "新易盛"})
+    monkeypatch.setattr(sr, "_resolve_from_sot", lambda raw: None)
+    monkeypatch.setattr(
+        sr, "_resolve_from_akshare_name", lambda raw: ("300502", "新易盛") if raw == "新易盛" else None
+    )
+    items = suggest_radar_symbols("新易盛", limit=3)
+    assert items and items[0]["symbol"] == "300502"

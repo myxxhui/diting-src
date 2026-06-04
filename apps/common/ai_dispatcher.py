@@ -18,6 +18,7 @@
 
 [Ref: 03_原子目标与规约/_共享规约/19_异构AI调度栈规约.md §七]
 [Ref: _System_DNA/02_deep_strike/dna_deep_strike_theme_sniffer.yaml::remote_large_model]
+[Ref: 26_行情雷达与AI模型工作流 · 仅 Opus 走新加坡出口代理]
 """
 from __future__ import annotations
 
@@ -29,6 +30,18 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
+
+
+def anthropic_https_proxy_url() -> str:
+    """仅 Anthropic/Opus 使用的出口代理（勿设进程级 HTTPS_PROXY）。"""
+    return (
+        os.getenv("ANTHROPIC_HTTPS_PROXY")
+        or os.getenv("anthropic_https_proxy")
+        or os.getenv("HTTPS_PROXY")
+        or os.getenv("https_proxy")
+        or ""
+    ).strip()
+
 
 Scene = Literal[
     "scorer_policy",
@@ -130,7 +143,7 @@ class AIDispatcher:
                 import anthropic  # noqa: PLC0415
 
                 http_client: Any = None
-                proxy = (os.getenv("HTTPS_PROXY") or os.getenv("https_proxy") or "").strip()
+                proxy = anthropic_https_proxy_url()
                 if proxy:
                     import httpx  # noqa: PLC0415
 
@@ -138,7 +151,7 @@ class AIDispatcher:
                         proxy=proxy,
                         timeout=httpx.Timeout(120.0, connect=30.0),
                     )
-                    logger.info("[AIDispatcher] Anthropic 客户端使用 HTTPS_PROXY")
+                    logger.info("[AIDispatcher] Anthropic 客户端使用 ANTHROPIC_HTTPS_PROXY")
                 self._anthropic_client = anthropic.Anthropic(
                     api_key=self._anthropic_key,
                     base_url=self._anthropic_base,
@@ -297,10 +310,7 @@ class AIDispatcher:
         try:
             import httpx  # noqa: PLC0415
 
-            proxy = (os.getenv("HTTPS_PROXY") or os.getenv("https_proxy") or "").strip()
             client_kw: dict[str, Any] = {"timeout": httpx.Timeout(120.0, connect=30.0)}
-            if proxy:
-                client_kw["proxy"] = proxy
             payload = {
                 "model": model,
                 "messages": messages,
@@ -380,7 +390,7 @@ class AIDispatcher:
             logger.warning("[AIDispatcher] remote 调用失败: %s", exc)
             if scene == "radar_assess":
                 raise RuntimeError(
-                    f"Opus API 不可达：{exc}；请配置 HTTPS_PROXY 或本机预拉后 sync 缓存"
+                    f"Opus API 不可达：{exc}；请配置 ANTHROPIC_HTTPS_PROXY 或本机预拉后 sync 缓存"
                 ) from exc
             logger.warning("[AIDispatcher] remote 调用失败 → mock 降级")
             return self._call_mock(messages)
