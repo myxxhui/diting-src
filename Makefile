@@ -12,7 +12,7 @@ venv:
 	@if [ ! -x .venv/bin/python3 ]; then \
 	  (command -v python3.9 >/dev/null 2>&1 && python3.9 -m venv .venv) || python3 -m venv .venv; \
 	fi
-	.venv/bin/pip install -q -e .
+	.venv/bin/pip install -q -e ".[copilot,dev,workspace,pdf-verify]"
 	@echo "✅ deps 就绪 · $$(.venv/bin/python3 --version)"
 
 _ensure-deps:
@@ -415,19 +415,29 @@ COPILOT_IMAGE_TAG ?= latest
 ACR_IMAGE_COPILOT := $(ACR_REGISTRY)/$(ACR_REPO_COPILOT):$(COPILOT_IMAGE_TAG)
 ACR_IMAGE_COPILOT_LATEST := $(ACR_REGISTRY)/$(ACR_REPO_COPILOT):latest
 DOCKER_PLATFORM ?= linux/amd64
+# 加速：BuildKit + pip 层缓存；默认只推 git sha，不推 :latest
+DOCKER_BUILDKIT ?= 1
+export DOCKER_BUILDKIT
+PUSH_COPILOT_LATEST ?= 0
 
-.PHONY: build-copilot-image push-copilot-image copilot-image-all
+.PHONY: build-copilot-image push-copilot-image push-copilot-image-only copilot-image-all
 build-copilot-image:
 	@root="$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))"; \
 	cd "$$root" && docker build --platform $(DOCKER_PLATFORM) -f Dockerfile.copilot -t diting-copilot:latest .
 	@echo "build-copilot-image: diting-copilot:latest OK ($(DOCKER_PLATFORM))"
 
-push-copilot-image: build-copilot-image
+# 仅推送已构建的本地镜像（默认只推 $(COPILOT_IMAGE_TAG)；PUSH_COPILOT_LATEST=1 时额外推 latest）
+push-copilot-image-only:
 	@if [ -z "$(DITING_ACR_PASSWORD)" ]; then echo "错误: 请 export DITING_ACR_PASSWORD 或在 Makefile 赋值"; exit 1; fi; \
 	echo "$(DITING_ACR_PASSWORD)" | docker login $(ACR_REGISTRY) -u $(ACR_USERNAME) --password-stdin || exit 1; \
 	docker tag diting-copilot:latest $(ACR_IMAGE_COPILOT) && docker push $(ACR_IMAGE_COPILOT) && \
-	docker tag diting-copilot:latest $(ACR_IMAGE_COPILOT_LATEST) && docker push $(ACR_IMAGE_COPILOT_LATEST) && \
-	echo "push-copilot-image: $(ACR_IMAGE_COPILOT) + :latest OK"
+	echo "push-copilot-image: $(ACR_IMAGE_COPILOT) OK"; \
+	if [ "$(PUSH_COPILOT_LATEST)" = "1" ]; then \
+	  docker tag diting-copilot:latest $(ACR_IMAGE_COPILOT_LATEST) && docker push $(ACR_IMAGE_COPILOT_LATEST) && \
+	  echo "push-copilot-image: $(ACR_IMAGE_COPILOT_LATEST) OK"; \
+	fi
+
+push-copilot-image: build-copilot-image push-copilot-image-only
 
 copilot-image-all: push-copilot-image
 

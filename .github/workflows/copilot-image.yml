@@ -1,0 +1,59 @@
+# Copilot 镜像 CI：构建并推送 ACR（仅 git sha tag）
+# 本地部署：diting-infra 执行 make copilot-helm-upgrade 或 make copilot-deploy-fast
+# [Ref: Dockerfile.copilot · pyproject [copilot] extra]
+name: copilot-image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/copilot/**"
+      - "apps/common/**"
+      - "Dockerfile.copilot"
+      - "pyproject.toml"
+      - "scripts/copilot_k8s*.sh"
+      - "scripts/copilot_k8s*.py"
+      - ".github/workflows/copilot-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ACR_REGISTRY: crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com
+  ACR_REPO: titan-core/diting-copilot
+  DOCKER_PLATFORM: linux/amd64
+
+jobs:
+  build-push:
+    name: 构建并推送 Copilot 镜像
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 计算镜像 tag
+        id: meta
+        run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: 登录 ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.DITING_ACR_PASSWORD }}
+
+      - name: 构建并推送（仅 sha，不推 latest）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.copilot
+          platforms: ${{ env.DOCKER_PLATFORM }}
+          push: true
+          tags: ${{ env.ACR_REGISTRY }}/${{ env.ACR_REPO }}:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=copilot-image
+          cache-to: type=gha,mode=max,scope=copilot-image
+
+      - name: 摘要
+        run: |
+          echo "✅ 已推送 ${{ env.ACR_REGISTRY }}/${{ env.ACR_REPO }}:${{ steps.meta.outputs.tag }}"
+          echo "本地升级: cd diting-infra && COPILOT_IMAGE_TAG=${{ steps.meta.outputs.tag }} make copilot-helm-upgrade"

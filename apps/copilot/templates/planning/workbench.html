@@ -48,57 +48,61 @@
         hx-swap="innerHTML"
         hx-indicator="#radar-scan-loading">
     <input type="hidden" name="input_type" value="symbol">
-    <div class="flex flex-wrap gap-2 items-end">
-      <div class="relative min-w-[12rem] flex-1 max-w-xs">
+    <div class="radar-scan-toolbar flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+      <div class="relative w-40 shrink-0 sm:w-44">
         <label class="block text-xs text-gray-500 mb-1">标的</label>
         <input type="text" name="query_text" id="radar-query-input" value="601138" maxlength="32"
-               class="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 w-full"
+               class="block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900"
                placeholder="代码 / 简称"
                autocomplete="off"
                aria-autocomplete="list"
                aria-controls="radar-suggest-list"
                aria-expanded="false">
         <ul id="radar-suggest-list" role="listbox"
-            class="hidden absolute left-0 top-full z-20 mt-1 w-full max-h-48 overflow-y-auto
+            class="hidden absolute left-0 top-full z-20 mt-1 w-44 max-h-48 overflow-y-auto
                    bg-white border border-gray-200 rounded-lg shadow-lg text-sm"></ul>
       </div>
-      <div class="flex flex-wrap items-end gap-2 pb-0.5">
+      <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:gap-2.5">
         <input type="hidden" name="enable_t0" id="radar-h-t0" value="false">
         <button type="button" id="radar-btn-t0" data-stage="t0" title="与 T2 组合：T0+T2 或 T0+T1+T2"
-                class="radar-stage-btn px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                class="radar-stage-btn shrink-0 px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
           T0
         </button>
         <input type="hidden" name="enable_t1" id="radar-h-t1" value="false">
-        <button type="button" id="radar-btn-t1" data-stage="t1" title="须 T0+T2：完整链路 T0+T1+T2"
-                class="radar-stage-btn px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
-          T1
-        </button>
-        <select name="t1_mode" id="radar-t1-mode" disabled
-                class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-700 bg-gray-50 disabled:opacity-40">
-          <option value="rule">规则</option>
-          <option value="deepseek">DeepSeek</option>
-        </select>
+        <div class="flex shrink-0 items-center gap-1.5">
+          <button type="button" id="radar-btn-t1" data-stage="t1" title="须 T0+T2：完整链路 T0+T1+T2"
+                  class="radar-stage-btn px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
+            T1
+          </button>
+          <select name="t1_mode" id="radar-t1-mode" disabled
+                  class="h-[2.125rem] shrink-0 rounded-lg border border-gray-200 px-2 text-xs text-gray-700 bg-gray-50 disabled:opacity-40">
+            <option value="rule">规则</option>
+            <option value="deepseek">DeepSeek</option>
+          </select>
+        </div>
         <input type="hidden" name="enable_t2" id="radar-h-t2" value="false">
-        <details id="radar-t2-details" class="inline-block align-bottom">
+        <details id="radar-t2-details" class="radar-t2-details shrink-0">
           <summary id="radar-t2-summary" title="必选其一：仅 T2 / T0+T2 / T0+T1+T2"
-                   class="radar-stage-btn list-none cursor-pointer px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                   class="radar-stage-btn list-none cursor-pointer px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
             T2
           </summary>
           <select name="t2_model" id="radar-t2-model"
-                  class="mt-1 block text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-800 w-36 max-w-full">
+                  class="radar-t2-model-select h-[2.125rem] rounded-lg border border-gray-200 px-2 text-xs text-gray-800 bg-white">
             {% for mid, label in radar_chat_models|default([]) %}
             <option value="{{ mid }}">{{ label }}</option>
             {% endfor %}
           </select>
         </details>
-        <label class="flex items-center gap-1 text-xs text-gray-600 cursor-pointer pb-1">
+      </div>
+      <div class="flex shrink-0 items-center gap-3 pb-0.5 sm:ml-auto">
+        <label class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer whitespace-nowrap">
           <input type="hidden" name="force_refresh" value="false">
           <input type="checkbox" name="force_refresh" value="true"
                  class="rounded border-gray-300 text-amber-600 focus:ring-amber-500">
           刷新
         </label>
         <button type="submit" id="radar-scan-submit-btn"
-                class="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700
+                class="shrink-0 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700
                        disabled:opacity-50 disabled:cursor-wait">
           分析
         </button>
@@ -111,8 +115,26 @@
       border-color: rgb(37 99 235);
       color: #fff;
     }
-    #radar-t2-summary::-webkit-details-marker { display: none; }
-    #radar-t2-summary::marker { content: ''; }
+    /* T2：summary 与模型下拉同一行，避免叠到下一行 */
+    .radar-t2-details {
+      display: inline-flex;
+      flex-wrap: nowrap;
+      align-items: center;
+      gap: 0.375rem;
+    }
+    .radar-t2-details > summary {
+      list-style: none;
+    }
+    .radar-t2-details > summary::-webkit-details-marker { display: none; }
+    .radar-t2-details > summary::marker { content: ''; }
+    .radar-t2-details:not([open]) .radar-t2-model-select {
+      display: none;
+    }
+    .radar-t2-details[open] .radar-t2-model-select {
+      display: block;
+      min-width: 7.5rem;
+      max-width: 9.5rem;
+    }
   </style>
   {# 维度 ⋯ 菜单与配置弹窗（固定于雷达工作区，HTMX 换结果后仍可用） #}
   <div id="radar-dim-menu-pop"
