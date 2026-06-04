@@ -15,7 +15,7 @@ _TTL_SEC = 1800
 _MEMORY: dict[int, dict[str, Any]] = {}
 
 def scan_step_order() -> list[tuple[str, str, int]]:
-    """与 run_radar_pipeline 一致；T1 文案随 RADAR_T1_MODE / DEEPSEEK_API_KEY 变化。"""
+    """全链路默认步骤（未传组合时回退）。"""
     from apps.copilot.modules.radar.model_router import t1_step_label
 
     return [
@@ -25,6 +25,16 @@ def scan_step_order() -> list[tuple[str, str, int]]:
         ("t2", "T2 Opus 维度模板推理", 75),
         ("persist", "写入缓存与候选库", 92),
         ("done", "分析完成", 100),
+    ]
+
+
+def _steps_from_state(state: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = state.get("steps")
+    if isinstance(raw, list) and raw:
+        return raw
+    return [
+        {"id": sid, "label": label, "pct": pct}
+        for sid, label, pct in scan_step_order()
     ]
 
 
@@ -70,7 +80,21 @@ def init_scan(
     *,
     symbol: str = "",
     name: str = "",
+    enable_t0: bool = False,
+    enable_t1: bool = False,
+    enable_t2: bool = True,
+    t1_mode: str | None = None,
+    t2_model: str | None = None,
 ) -> dict[str, Any]:
+    from apps.copilot.modules.radar.stage_presets import (
+        combo_label as _combo_label,
+        scan_steps_for_combo,
+        workflow_summary,
+    )
+
+    steps = scan_steps_for_combo(
+        enable_t0, enable_t1, enable_t2, t1_mode=t1_mode, t2_model=t2_model
+    )
     payload = {
         "scan_id": scan_id,
         "status": "running",
@@ -83,6 +107,16 @@ def init_scan(
         "steps_done": [],
         "error": None,
         "result": None,
+        "enable_t0": enable_t0,
+        "enable_t1": enable_t1,
+        "enable_t2": enable_t2,
+        "t1_mode": t1_mode or "rule",
+        "t2_model": t2_model or "",
+        "combo": _combo_label(enable_t0, enable_t1, enable_t2),
+        "workflow_summary": workflow_summary(
+            enable_t0, enable_t1, enable_t2, t2_model=t2_model
+        ),
+        "steps": steps,
     }
     _save(redis_client, scan_id, payload)
     return payload
@@ -110,10 +144,11 @@ def update_scan(
     if pct is not None:
         cur["pct"] = min(100, max(0, int(pct)))
     elif append_done:
-        for sid, label, bound in scan_step_order():
-            if sid == step:
-                cur["pct"] = bound
-                cur["step_label"] = label
+        for s in _steps_from_state(cur):
+            if s.get("id") == step:
+                cur["pct"] = int(s.get("pct") or 0)
+                if step_label is None:
+                    cur["step_label"] = str(s.get("label") or step)
                 break
     if detail:
         cur["detail"] = detail[:300]
@@ -168,6 +203,16 @@ def make_progress_callback(
     scan_id: int,
 ) -> Callable[[str, str, int | None, str], None]:
     def _cb(step: str, label: str, pct: int | None = None, detail: str = "") -> None:
+        cur = load(redis_client, scan_id) or {}
+        planned_ids = {str(s.get("id")) for s in _steps_from_state(cur)}
+        if step not in planned_ids and step not in ("done", "error"):
+            return
+        if pct is None:
+            from apps.copilot.modules.radar.stage_presets import pct_for_step
+
+            mapped = pct_for_step(_steps_from_state(cur), step)
+            if mapped is not None:
+                pct = mapped
         update_scan(
             redis_client,
             scan_id,

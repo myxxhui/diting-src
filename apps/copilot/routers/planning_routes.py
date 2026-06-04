@@ -511,7 +511,17 @@ async def api_create_radar_scan(
     scan_id = scan.id
     await session.commit()
 
-    init_scan_progress(redis_client, scan_id, symbol=sym, name=name)
+    init_scan_progress(
+        redis_client,
+        scan_id,
+        symbol=sym,
+        name=name,
+        enable_t0=t0_on,
+        enable_t1=t1_on,
+        enable_t2=t2_on,
+        t1_mode=t1_mode,
+        t2_model=t2_model,
+    )
     asyncio.create_task(
         run_scan_job(
             scan_id,
@@ -1805,6 +1815,8 @@ def _render_radar_resolve_error_html(message: str) -> str:
 
 def _render_scan_progress_panel(state: dict) -> str:
     """深度扫描进度（运行中由 HTMX 轮询 GET /api/radar/scans/{id}）。"""
+    from apps.copilot.modules.radar.scan_progress import _steps_from_state
+
     scan_id = int(state.get("scan_id") or 0)
     status = state.get("status") or "running"
     sym = _esc(state.get("symbol") or "")
@@ -1813,9 +1825,17 @@ def _render_scan_progress_panel(state: dict) -> str:
     step_label = _esc(state.get("step_label") or "分析进行中…")
     detail = _esc(state.get("detail") or "")
     steps_done = set(state.get("steps_done") or [])
+    combo = _esc(state.get("combo") or "")
+    workflow = _esc(
+        state.get("workflow_summary")
+        or "流程：按所选阶段执行；完成后自动展示研报。"
+    )
+    title_combo = f"{combo} · " if combo else ""
 
     step_rows: list[str] = []
-    for sid, label, _bound in SCAN_STEP_ORDER:
+    for s in _steps_from_state(state):
+        sid = str(s.get("id") or "")
+        label = str(s.get("label") or sid)
         if sid == "done":
             continue
         if status == "done" or sid in steps_done:
@@ -1864,7 +1884,7 @@ def _render_scan_progress_panel(state: dict) -> str:
         f"<div class='rounded-xl border border-blue-100 bg-blue-50/40 p-4'{poll_attrs}>"
         f"<div class='flex flex-wrap items-center justify-between gap-2 mb-2'>"
         f"<span class='text-sm font-semibold text-gray-800'>"
-        f"🔭 深度分析 · {name} <span class='font-mono text-gray-500'>{sym}</span></span>"
+        f"🔭 {title_combo}{name} <span class='font-mono text-gray-500'>{sym}</span></span>"
         f"<span class='inline-flex items-center gap-2 text-xs text-blue-700'>"
         f"<svg class='animate-spin h-4 w-4' fill='none' viewBox='0 0 24 24'>"
         f"<circle class='opacity-25' cx='12' cy='12' r='10' stroke='currentColor' stroke-width='4'></circle>"
@@ -1873,8 +1893,7 @@ def _render_scan_progress_panel(state: dict) -> str:
         f"<div class='h-2 rounded-full bg-gray-100 overflow-hidden mb-2'>"
         f"<div class='h-full {bar_color} transition-all duration-500' style='width:{pct}%'></div></div>"
         f"<p class='text-sm text-gray-700 mb-2'>{step_label}{detail_html}</p>"
-        f"<p class='text-[11px] text-gray-500 mb-2'>"
-        f"流程：T0 采集 → T1 压缩 → T2 Opus 维度推理；完成后自动展示研报。</p>"
+        f"<p class='text-[11px] text-gray-500 mb-2'>{workflow}</p>"
         f"<ul class='space-y-1 border-t border-gray-100 pt-2'>{''.join(step_rows)}</ul>"
         f"{footer}</div>"
     )

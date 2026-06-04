@@ -4,7 +4,9 @@ import pytest
 from apps.copilot.modules.radar.stage_presets import (
     RADAR_STAGE_COMBO_MSG,
     combo_label,
+    scan_steps_for_combo,
     validate_radar_stage_combo,
+    workflow_summary,
 )
 
 
@@ -40,3 +42,20 @@ def test_combo_label():
     assert combo_label(False, False, True) == "仅 T2"
     assert combo_label(True, False, True) == "T0+T2"
     assert combo_label(True, True, True) == "T0+T1+T2"
+
+
+def test_scan_steps_t2_only():
+    ids = [s["id"] for s in scan_steps_for_combo(False, False, True)]
+    assert ids == ["resolve", "t0", "t1", "t2", "persist", "done"]
+    assert "仅 T2" in workflow_summary(False, False, True)
+
+
+def test_scan_steps_t0_t2():
+    ids = [s["id"] for s in scan_steps_for_combo(True, False, True)]
+    assert "t0" in ids and "t2" in ids
+    assert "t1" not in ids
+
+
+def test_scan_steps_full():
+    ids = [s["id"] for s in scan_steps_for_combo(True, True, True)]
+    assert ids == ["resolve", "t0", "t1", "t2", "persist", "done"]

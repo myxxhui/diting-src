@@ -134,8 +134,6 @@ async def run_radar_pipeline(
             latency_ms=int((time.perf_counter() - t1_start) * 1000),
         )
     else:
-        if progress_cb is not None:
-            progress_cb("t1", "T1 已跳过", 45, "")
         t1_payload = {"matrix": {}, "unavailable": [], "skipped": True, "status": "skipped"}
         if enable_t2 and cached_bundle:
             prev = cached_bundle.get("t1_distilled")
@@ -145,6 +143,13 @@ async def run_radar_pipeline(
             prev = t0_raw.get("t1_distilled")
             if isinstance(prev, dict) and prev.get("matrix"):
                 t1_payload = prev
+        if progress_cb is not None:
+            if enable_t2 and t1_payload.get("matrix"):
+                progress_cb("t1", "加载缓存事实矩阵（T1）", 38, "")
+            elif enable_t2:
+                progress_cb("t1", "加载缓存事实矩阵（T1）", 38, "")
+            else:
+                progress_cb("t1", "T1 已跳过", 45, "")
 
     if progress_cb is not None:
         if enable_t2:
