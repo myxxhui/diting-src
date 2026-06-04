@@ -257,3 +257,16 @@ def test_collect_valuation_em_fallback(monkeypatch):
     out = scanner._collect_valuation("601138")
     assert out["status"] == "ok"
     assert out["pe_percentile"] == 55.0
+
+
+def test_utc_naive_for_db_from_aware_iso():
+    from apps.copilot.modules.radar.persistence import utc_naive_for_db
+
+    bundle = {
+        **SAMPLE_T0,
+        "collected_at": "2026-06-04T03:02:29+00:00",
+    }
+    dt = utc_naive_for_db(t0_cache._parse_collected_at(bundle))
+    assert dt is not None
+    assert dt.tzinfo is None
+    assert dt.year == 2026 and dt.hour == 3

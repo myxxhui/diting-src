@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# K8s 启动：初始化 SQLite + 从挂载 SoT 导入持仓，再拉起 uvicorn
+# K8s 启动：初始化 DB（PostgreSQL 或 SQLite）+ 从挂载 SoT 导入持仓，再拉起 uvicorn
 set -euo pipefail
 cd /app
 export PYTHONPATH=/app

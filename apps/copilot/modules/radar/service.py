@@ -31,7 +31,8 @@ from apps.copilot.modules.planning.funnel import (
 from apps.copilot.modules.radar.persistence import recent_analysis_days, sync_bundle_to_db
 from apps.copilot.modules.planning.monitor import ensure_three_pillars
 from apps.copilot.modules.radar.model_router import DEFAULT_PROFILES
-from apps.copilot.modules.radar.context_matrix import build_context_matrix
+from apps.copilot.modules.radar.model_router import t1_step_label
+from apps.copilot.modules.radar.t1_distill import build_t1_payload
 from apps.copilot.modules.radar.pipeline import run_radar_pipeline
 from apps.copilot.modules.radar.scanner import collect_t0_live, t1_to_candidate_fields
 from apps.copilot.modules.radar.symbol_resolve import (
@@ -80,6 +81,28 @@ async def ensure_model_profiles(session: AsyncSession) -> None:
     await session.flush()
 
 
+async def latest_scan_id_for_symbol(session: AsyncSession, symbol: str) -> int | None:
+    """候选池点击加载：取该标的最近一次已完成扫描 id。"""
+    sym = (symbol or "").zfill(6)[-6:]
+    if not sym:
+        return None
+    cid = await session.scalar(
+        select(RadarCandidate.scan_id)
+        .where(RadarCandidate.symbol == sym, RadarCandidate.scan_id.isnot(None))
+        .order_by(RadarCandidate.id.desc())
+        .limit(1)
+    )
+    if cid:
+        return int(cid)
+    sid = await session.scalar(
+        select(RadarScan.id)
+        .where(RadarScan.query_text == sym, RadarScan.status == "done")
+        .order_by(RadarScan.id.desc())
+        .limit(1)
+    )
+    return int(sid) if sid else None
+
+
 async def create_symbol_scan(
     session: AsyncSession,
     *,
@@ -87,6 +110,8 @@ async def create_symbol_scan(
     redis_client: Any = None,
     enable_t2: bool = True,
     force_refresh: bool = False,
+    progress_cb: Any = None,
+    scan_id: int | None = None,
 ) -> dict[str, Any]:
     """模式 C：模糊标的深度分析（默认含 T2 Opus 9 维）。"""
     try:
@@ -94,17 +119,31 @@ async def create_symbol_scan(
     except RadarSymbolResolveError as exc:
         raise ValueError(str(exc)) from exc
 
-    scan = RadarScan(
-        input_type="symbol",
-        query_text=sym,
-        status="running",
-    )
-    session.add(scan)
-    await session.flush()
+    if progress_cb is not None:
+        progress_cb("resolve", f"已解析 {sym} · {name}", 8, "")
 
-    candidate = RadarCandidate(scan_id=scan.id, symbol=sym, name=name)
-    session.add(candidate)
-    await session.flush()
+    if scan_id is not None:
+        scan = await session.get(RadarScan, scan_id)
+        if scan is None:
+            raise ValueError(f"scan {scan_id} not found")
+        candidate = await session.scalar(
+            select(RadarCandidate).where(RadarCandidate.scan_id == scan_id).limit(1)
+        )
+        if candidate is None:
+            candidate = RadarCandidate(scan_id=scan.id, symbol=sym, name=name)
+            session.add(candidate)
+            await session.flush()
+    else:
+        scan = RadarScan(
+            input_type="symbol",
+            query_text=sym,
+            status="running",
+        )
+        session.add(scan)
+        await session.flush()
+        candidate = RadarCandidate(scan_id=scan.id, symbol=sym, name=name)
+        session.add(candidate)
+        await session.flush()
 
     pipe = await run_radar_pipeline(
         session,
@@ -116,6 +155,7 @@ async def create_symbol_scan(
         enable_t2=enable_t2,
         force_refresh_t0=force_refresh,
         force_refresh_t2=force_refresh and enable_t2,
+        progress_cb=progress_cb,
     )
 
     version_id: str | None = None
@@ -172,10 +212,67 @@ async def create_symbol_scan(
         "cost": cost,
     }
 
+    if progress_cb is not None:
+        progress_cb("persist", "写入缓存与候选库", 92, "")
+
     await upsert_funnel_symbol(session, sym, name, stage="radar_intake")
     await touch_last_analyzed(session, sym)
     await session.flush()
+
+    if progress_cb is not None:
+        progress_cb("done", "分析完成", 100, "")
+
     return await get_scan(session, scan.id)
+
+
+async def run_scan_job(
+    scan_id: int,
+    query_text: str,
+    *,
+    enable_t2: bool,
+    force_refresh: bool,
+    redis_client: Any,
+) -> None:
+    """后台执行深度扫描（独立 DB 会话 · Redis 进度供 HTMX 轮询）。"""
+    from apps.copilot.db.database import AsyncSessionLocal
+    from apps.copilot.modules.radar.scan_progress import fail_scan, finish_scan, make_progress_callback
+
+    cb = make_progress_callback(redis_client, scan_id)
+    async with AsyncSessionLocal() as session:
+        try:
+            await create_symbol_scan(
+                session,
+                query_text=query_text,
+                redis_client=redis_client,
+                enable_t2=enable_t2,
+                force_refresh=force_refresh,
+                progress_cb=cb,
+                scan_id=scan_id,
+            )
+            await session.commit()
+            finish_scan(redis_client, scan_id, {"scan_id": scan_id})
+        except Exception as exc:  # noqa: BLE001
+            await session.rollback()
+            logger.exception("scan job %s failed", scan_id)
+            try:
+                async with AsyncSessionLocal() as session2:
+                    scan = await session2.get(RadarScan, scan_id)
+                    if scan:
+                        scan.status = "error"
+                        from apps.copilot.modules.radar.errors import friendly_scan_error
+
+                        friendly = friendly_scan_error(exc)
+                        scan.summary_json = {
+                            "error": friendly,
+                            "error_code": type(exc).__name__,
+                        }
+                        await session2.commit()
+            except Exception:  # noqa: BLE001
+                pass
+            from apps.copilot.modules.radar.errors import friendly_scan_error
+
+            friendly = friendly_scan_error(exc)
+            fail_scan(redis_client, scan_id, friendly)
 
 
 async def collect_symbol_t0_only(
@@ -195,8 +292,8 @@ async def collect_symbol_t0_only(
     if progress_cb is not None:
         progress_cb("resolve", f"已解析 {sym} · {name}", 8, "")
         t0_raw = await collect_t0_live(sym, name=name, on_step=progress_cb)
-        progress_cb("t1", "T1 事实矩阵压缩", 88, "构建上下文矩阵…")
-        t1_payload = build_context_matrix(t0_raw)
+        progress_cb("t1", t1_step_label(), 88, "构建上下文矩阵…")
+        t1_payload = await build_t1_payload(t0_raw)
         pipe = {
             "t0_raw": t0_raw,
             "t1_distilled": t1_payload,
@@ -448,6 +545,10 @@ async def list_recent_candidates(
         d["funnel_symbol_id"] = fr.id if fr else None
         d["already_promoted"] = stage in ("planning", "roadmap", "executing")
         d["in_scan_pool"] = stage in ("radar_intake", "roadmap", "planning")
+        if not d.get("scan_id"):
+            lid = await latest_scan_id_for_symbol(session, sym)
+            if lid:
+                d["scan_id"] = lid
         out.append(d)
         if len(out) >= limit:
             break

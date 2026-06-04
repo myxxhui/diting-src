@@ -19,6 +19,7 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.copilot.db.datetime_util import utc_now_naive
 from apps.copilot.db.models import Campaign, CampaignSymbol
 
 CONTAINER_THEME = "行情解析漏斗"
@@ -183,7 +184,7 @@ async def hide_symbol_ui(
         row = await upsert_funnel_symbol(
             session, sym, name or sym, stage="radar_intake"
         )
-    row.ui_removed_at = datetime.now(timezone.utc)
+    row.ui_removed_at = utc_now_naive()
     await session.flush()
     return row
 
@@ -226,7 +227,7 @@ async def demote_symbol_one_stage(
 async def touch_last_analyzed(session: AsyncSession, symbol: str) -> None:
     row = await get_funnel_symbol(session, symbol)
     if row:
-        row.last_analyzed_at = datetime.now(timezone.utc)
+        row.last_analyzed_at = utc_now_naive()
         await session.flush()
 
 

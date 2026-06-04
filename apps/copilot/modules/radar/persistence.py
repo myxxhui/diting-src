@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.copilot.db.datetime_util import as_utc_aware, utc_naive_for_db, utc_now_naive
 from apps.copilot.db.models import RadarSymbolVersion
 from apps.copilot.modules.radar.t0_cache import (
     T0_KEYS,
@@ -76,7 +77,7 @@ async def sync_bundle_to_db(session: AsyncSession, bundle: dict[str, Any]) -> st
         version_id = make_version_id(collected)
 
     ok_parts, t2_status, cost_yuan = _bundle_stats(bundle)
-    collected = _parse_collected_at(bundle)
+    collected = utc_naive_for_db(_parse_collected_at(bundle)) or utc_now_naive()
 
     existing = await session.scalar(
         select(RadarSymbolVersion).where(
@@ -168,11 +169,11 @@ async def load_latest_bundle_db(
         return None
     bundle = row.bundle_json
     if max_age_hours is not None:
-        collected = _parse_collected_at(bundle)
+        collected = _parse_collected_at(bundle) or row.collected_at
         if collected is None:
             return None
         age_h = (
-            datetime.now(timezone.utc) - collected.astimezone(timezone.utc)
+            datetime.now(timezone.utc) - as_utc_aware(collected)
         ).total_seconds() / 3600.0
         if age_h > max_age_hours:
             return None
@@ -192,7 +193,7 @@ async def list_versions_db(session: AsyncSession, symbol: str) -> list[dict[str,
     for row in rows:
         bundle = row.bundle_json if isinstance(row.bundle_json, dict) else {}
         collected = row.collected_at or _parse_collected_at(bundle)
-        if collected and collected.replace(tzinfo=timezone.utc) < cutoff:
+        if collected and as_utc_aware(collected) < cutoff:
             continue
         summary = _version_summary(bundle, row.version_id, is_latest=len(out) == 0)
         summary["storage"] = "db"

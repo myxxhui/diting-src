@@ -40,9 +40,10 @@ Scene = Literal[
     "dry_run",
     "radar_assess",
     "radar_chat",
+    "radar_distill",
 ]
 
-Route = Literal["remote", "local", "mock"]
+Route = Literal["remote", "deepseek", "local", "mock"]
 
 # 场景 → 路由映射（共享规约 19 §三）
 _SCENE_ROUTE: dict[Scene, Route] = {
@@ -55,6 +56,7 @@ _SCENE_ROUTE: dict[Scene, Route] = {
     "dry_run": "mock",
     "radar_assess": "remote",
     "radar_chat": "remote",
+    "radar_distill": "deepseek",
 }
 
 
@@ -73,6 +75,15 @@ class AIResponse:
 
 class BudgetExceededError(RuntimeError):
     """单日预算软上限触发。"""
+
+
+def _estimate_deepseek_cost_yuan(tokens_in: int, tokens_out: int) -> float:
+    """DeepSeek 近似成本（元）· 可用 env 覆盖单价。"""
+    usd_cny = float(os.getenv("RADAR_USD_CNY", "7.2"))
+    in_m = float(os.getenv("RADAR_DEEPSEEK_IN_USD_PER_MTOK", "0.27"))
+    out_m = float(os.getenv("RADAR_DEEPSEEK_OUT_USD_PER_MTOK", "1.10"))
+    usd = (tokens_in / 1_000_000.0) * in_m + (tokens_out / 1_000_000.0) * out_m
+    return round(usd * usd_cny, 4)
 
 
 class AIDispatcher:
@@ -185,6 +196,14 @@ class AIDispatcher:
                 model_override=model_override,
                 scene=scene,
             )
+        elif route == "deepseek":
+            resp = self._call_deepseek(
+                messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                model_override=model_override,
+                scene=scene,
+            )
         elif route == "local":
             resp = self._call_local(messages, max_tokens=max_tokens, temperature=temperature)
         else:
@@ -193,12 +212,17 @@ class AIDispatcher:
         latency_ms = int((time.perf_counter() - t0) * 1000)
 
         cost = 0.0
-        if route == "remote":
+        if route in ("remote", "deepseek"):
             from apps.copilot.modules.radar.schema import estimate_cost_yuan
 
-            cost = estimate_cost_yuan(resp.get("tokens_in", 0), resp.get("tokens_out", 0))
+            if route == "deepseek":
+                cost = _estimate_deepseek_cost_yuan(
+                    resp.get("tokens_in", 0), resp.get("tokens_out", 0)
+                )
+            else:
+                cost = estimate_cost_yuan(resp.get("tokens_in", 0), resp.get("tokens_out", 0))
             if cost <= 0:
-                cost = 0.5
+                cost = 0.05 if route == "deepseek" else 0.5
             self._record_spend(cost)
 
         logger.info(
@@ -247,6 +271,68 @@ class AIDispatcher:
 
     def _record_spend(self, cost: float) -> None:
         self._daily_spent += cost
+
+    def _call_deepseek(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+        temperature: float,
+        model_override: str | None = None,
+        *,
+        scene: Scene = "dry_run",
+    ) -> dict:
+        key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+        if not key:
+            if scene == "radar_distill":
+                raise RuntimeError("未配置 DEEPSEEK_API_KEY；T1 DeepSeek 压缩不可用")
+            return self._call_mock(messages)
+
+        base = (os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").rstrip("/")
+        model = (model_override or "").strip()
+        if model.startswith("deepseek:"):
+            model = model.split(":", 1)[1]
+        if not model:
+            model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip() or "deepseek-chat"
+
+        try:
+            import httpx  # noqa: PLC0415
+
+            proxy = (os.getenv("HTTPS_PROXY") or os.getenv("https_proxy") or "").strip()
+            client_kw: dict[str, Any] = {"timeout": httpx.Timeout(120.0, connect=30.0)}
+            if proxy:
+                client_kw["proxy"] = proxy
+            payload = {
+                "model": model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            }
+            with httpx.Client(**client_kw) as client:
+                r = client.post(
+                    f"{base}/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+                r.raise_for_status()
+                data = r.json()
+            choice = (data.get("choices") or [{}])[0]
+            text = (choice.get("message") or {}).get("content") or ""
+            usage = data.get("usage") or {}
+            return {
+                "text": text,
+                "model": f"deepseek:{model}",
+                "tokens_in": int(usage.get("prompt_tokens") or 0),
+                "tokens_out": int(usage.get("completion_tokens") or 0),
+                "raw": data,
+            }
+        except Exception as exc:
+            logger.warning("[AIDispatcher] DeepSeek 调用失败: %s", exc)
+            if scene == "radar_distill":
+                raise RuntimeError(f"DeepSeek API 不可达：{exc}") from exc
+            return self._call_mock(messages)
 
     def _call_remote(
         self,

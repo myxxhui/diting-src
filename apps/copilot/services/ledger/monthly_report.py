@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import and_, func, select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from apps.copilot.db.dialect import dialect_insert
 
 from apps.copilot.services.ledger.ev import EVCalculator
 from apps.copilot.services.ledger.models import AttributionRecord, MonthlyReport
@@ -108,7 +108,7 @@ class MonthlyReportGenerator:
             pdf_path = html_path
 
         async with self._sf() as session:
-            stmt = sqlite_insert(MonthlyReport).values(
+            stmt = dialect_insert(MonthlyReport).values(
                 user_id=user_id,
                 year=year,
                 month=month,

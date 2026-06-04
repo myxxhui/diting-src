@@ -83,17 +83,23 @@ from apps.copilot.modules.radar.symbol_resolve import (
     suggest_radar_symbols,
 )
 from apps.copilot.modules.radar.t0_cache import file_retention_hours, retention_days
-from apps.copilot.db.models import AssetState, RadarCandidate
+from apps.copilot.db.models import AssetState, RadarCandidate, RadarScan
 from apps.copilot.modules.radar.collect_progress import (
     COLLECT_STEP_ORDER,
     load as load_collect_job,
     new_job_id,
 )
 from apps.copilot.modules.radar.collect_progress import init_job as init_collect_job
+from apps.copilot.modules.radar.scan_progress import (
+    SCAN_STEP_ORDER,
+    init_scan as init_scan_progress,
+    load as load_scan_progress,
+)
 from apps.copilot.modules.radar.service import (
     collect_symbol_t0_only,
     create_symbol_scan,
     run_collect_job,
+    run_scan_job,
     ensure_model_profiles,
     get_scan,
     list_candidate_artifacts,
@@ -456,19 +462,40 @@ async def api_create_radar_scan(
     await ensure_model_profiles(session)
     redis_client = _sync_redis()
     try:
-        result = await create_symbol_scan(
-            session,
-            query_text=query_text,
-            redis_client=redis_client,
+        sym, name = resolve_radar_query(query_text)
+    except RadarSymbolResolveError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    scan = RadarScan(input_type="symbol", query_text=sym, status="running")
+    session.add(scan)
+    await session.flush()
+    session.add(RadarCandidate(scan_id=scan.id, symbol=sym, name=name))
+    await session.flush()
+    scan_id = scan.id
+    await session.commit()
+
+    init_scan_progress(redis_client, scan_id, symbol=sym, name=name)
+    asyncio.create_task(
+        run_scan_job(
+            scan_id,
+            query_text,
             enable_t2=t2_on,
             force_refresh=force_refresh,
+            redis_client=redis_client,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    await session.commit()
+    )
+
     if request.headers.get("hx-request"):
-        return _render_scan_html(result, layout=_layout_from_request(request))
-    return result
+        state = load_scan_progress(redis_client, scan_id) or {
+            "scan_id": scan_id,
+            "status": "running",
+            "symbol": sym,
+            "name": name,
+            "pct": 0,
+            "step_label": "已提交分析任务…",
+        }
+        return HTMLResponse(_render_scan_progress_panel(state))
+    return {"id": scan_id, "status": "running", "symbol": sym}
 
 
 @router.get("/api/radar/display-layout/schema")
@@ -521,7 +548,12 @@ async def api_get_radar_scan(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if "text/html" in request.headers.get("accept", "") or request.headers.get("hx-request"):
-        return _render_scan_html(result, layout=_layout_from_request(request))
+        redis_client = _sync_redis()
+        return _render_scan_html(
+            result,
+            layout=_layout_from_request(request),
+            redis_client=redis_client,
+        )
     return result
 
 
@@ -1134,11 +1166,14 @@ def _render_radar_candidates_html(items: list, *, flash: str = "") -> HTMLRespon
         if scan_id:
             title = (
                 f"<button type='button' "
-                f"class='hover:text-blue-700 hover:underline cursor-pointer text-left "
+                f"class='radar-candidate-load hover:text-blue-700 hover:underline cursor-pointer text-left "
                 f"bg-transparent border-0 p-0' "
-                f"title='查看最近一次深度分析报告' "
+                f"title='加载深度分析报告' "
+                f"data-scan-id='{int(scan_id)}' "
                 f"hx-get='/api/radar/scans/{int(scan_id)}' "
-                f"hx-target='#radar-scan-result' hx-swap='innerHTML'>"
+                f"hx-target='#radar-scan-result' hx-swap='innerHTML' "
+                f"hx-indicator='#radar-scan-loading' "
+                f"hx-headers='{{\"Accept\":\"text/html\",\"HX-Request\":\"true\"}}'>"
                 f"{title_inner}</button>"
             )
         else:
@@ -1684,10 +1719,126 @@ def _render_candidate_report(
     )
 
 
-def _render_scan_html(scan: dict, *, layout: dict[str, Any] | None = None) -> HTMLResponse:
+def _render_scan_progress_panel(state: dict) -> str:
+    """深度扫描进度（运行中由 HTMX 轮询 GET /api/radar/scans/{id}）。"""
+    scan_id = int(state.get("scan_id") or 0)
+    status = state.get("status") or "running"
+    sym = _esc(state.get("symbol") or "")
+    name = _esc(state.get("name") or "")
+    pct = int(state.get("pct") or 0)
+    step_label = _esc(state.get("step_label") or "分析进行中…")
+    detail = _esc(state.get("detail") or "")
+    steps_done = set(state.get("steps_done") or [])
+
+    step_rows: list[str] = []
+    for sid, label, _bound in SCAN_STEP_ORDER:
+        if sid == "done":
+            continue
+        if status == "done" or sid in steps_done:
+            icon, cls = "✅", "text-emerald-700"
+        elif state.get("step") == sid and status == "running":
+            icon, cls = "⏳", "text-blue-700 font-medium"
+        else:
+            icon, cls = "○", "text-gray-400"
+        step_rows.append(
+            f"<li class='flex items-center gap-2 text-xs {cls}'>"
+            f"<span class='w-4 text-center'>{icon}</span><span>{_esc(label)}</span></li>"
+        )
+
+    poll_attrs = ""
+    if status == "running" and scan_id:
+        poll_attrs = (
+            f" id='radar-scan-progress' data-scan-id='{scan_id}' data-running='1'"
+            f" hx-get='/api/radar/scans/{scan_id}'"
+            f" hx-trigger='every 2s'"
+            f" hx-target='#radar-scan-result'"
+            f" hx-swap='innerHTML'"
+            f" hx-indicator='#radar-scan-loading'"
+        )
+    elif status == "error":
+        poll_attrs = f" id='radar-scan-progress' data-scan-id='{scan_id}' data-error='1'"
+    else:
+        poll_attrs = f" id='radar-scan-progress' data-scan-id='{scan_id}' data-done='1'"
+
+    bar_color = "bg-blue-500"
+    if status == "done":
+        bar_color = "bg-emerald-500"
+    elif status == "error":
+        bar_color = "bg-red-400"
+
+    detail_html = f' <span class="text-gray-400">— {detail}</span>' if detail else ""
+    footer = ""
+    if status == "error":
+        err = _esc(state.get("error") or "未知错误")
+        footer = (
+            f"<div class='rounded-lg border border-red-200 bg-red-50 px-3 py-2 mt-2'>"
+            f"<p class='text-sm font-semibold text-red-900'>扫描未完成</p>"
+            f"<p class='text-sm text-red-800 mt-1'>{err}</p></div>"
+        )
+
+    return (
+        f"<div class='rounded-xl border border-blue-100 bg-blue-50/40 p-4'{poll_attrs}>"
+        f"<div class='flex flex-wrap items-center justify-between gap-2 mb-2'>"
+        f"<span class='text-sm font-semibold text-gray-800'>"
+        f"🔭 深度分析 · {name} <span class='font-mono text-gray-500'>{sym}</span></span>"
+        f"<span class='inline-flex items-center gap-2 text-xs text-blue-700'>"
+        f"<svg class='animate-spin h-4 w-4' fill='none' viewBox='0 0 24 24'>"
+        f"<circle class='opacity-25' cx='12' cy='12' r='10' stroke='currentColor' stroke-width='4'></circle>"
+        f"<path class='opacity-75' fill='currentColor' d='M4 12a8 8 0 018-8v8H4z'></path></svg>"
+        f"{pct}%</span></div>"
+        f"<div class='h-2 rounded-full bg-gray-100 overflow-hidden mb-2'>"
+        f"<div class='h-full {bar_color} transition-all duration-500' style='width:{pct}%'></div></div>"
+        f"<p class='text-sm text-gray-700 mb-2'>{step_label}{detail_html}</p>"
+        f"<p class='text-[11px] text-gray-500 mb-2'>"
+        f"流程：T0 采集 → T1 压缩 → T2 Opus 维度推理；完成后自动展示研报。</p>"
+        f"<ul class='space-y-1 border-t border-gray-100 pt-2'>{''.join(step_rows)}</ul>"
+        f"{footer}</div>"
+    )
+
+
+def _render_scan_html(
+    scan: dict,
+    *,
+    layout: dict[str, Any] | None = None,
+    redis_client: Any = None,
+) -> HTMLResponse:
     """雷达扫描结果 HTMX 片段：人类可读 9 维深度研报卡 + 成本 + 溯源。"""
-    if scan.get("status") != "done":
-        return HTMLResponse("<p class='text-sm text-gray-500 py-2'>扫描进行中…</p>")
+    status = scan.get("status")
+    scan_id = scan.get("id")
+    if status == "running":
+        state = load_scan_progress(redis_client, int(scan_id)) if redis_client and scan_id else None
+        if not state:
+            state = {
+                "scan_id": scan_id,
+                "status": "running",
+                "symbol": scan.get("query_text") or "",
+                "name": "",
+                "pct": 5,
+                "step_label": "任务排队中…",
+            }
+        return HTMLResponse(_render_scan_progress_panel(state))
+    if status == "error":
+        summary = scan.get("summary_json") or {}
+        err = _esc(summary.get("error") or "分析失败")
+        hint = ""
+        if summary.get("error_code"):
+            hint = (
+                f"<p class='text-[10px] text-red-500/80 mt-1'>"
+                f"技术标识：{_esc(summary.get('error_code'))}</p>"
+            )
+        return HTMLResponse(
+            f"<div class='rounded-lg border border-red-200 bg-red-50 px-4 py-3 mb-2'>"
+            f"<p class='text-sm font-semibold text-red-900 mb-1'>扫描未完成</p>"
+            f"<p class='text-sm text-red-800'>{err}</p>{hint}</div>"
+        )
+    if status != "done":
+        return HTMLResponse(_render_scan_progress_panel({
+            "scan_id": scan_id,
+            "status": "running",
+            "step_label": "扫描进行中…",
+            "pct": 10,
+            "symbol": scan.get("query_text") or "",
+        }))
     summary = scan.get("summary_json") or {}
     vid = summary.get("cache_version_id")
     blocks = [

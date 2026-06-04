@@ -23,6 +23,9 @@ _STEP18_COLUMNS = (
 
 
 async def migrate_step18(engine: AsyncEngine) -> None:
+    if not engine.url.get_backend_name().startswith("sqlite"):
+        logger.info("migrate_step18: skip（PostgreSQL 由 create_all 建表）")
+        return
     async with engine.begin() as conn:
         for table, col, ddl in _STEP18_COLUMNS:
             rows = await conn.execute(text(f"PRAGMA table_info({table})"))

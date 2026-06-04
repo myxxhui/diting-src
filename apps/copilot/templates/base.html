@@ -39,6 +39,9 @@
       margin-right: 12px;
       letter-spacing: 0.02em;
       flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
     }
     nav.site-nav .nav-main {
       display: flex;
@@ -56,6 +59,15 @@
       border-radius: 6px;
       transition: background 0.15s, color 0.15s;
       white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    nav.site-nav a .nav-ico {
+      font-size: 1rem;
+      line-height: 1;
+      flex-shrink: 0;
+      opacity: 0.92;
     }
     nav.site-nav a:hover {
       background: #374151;
@@ -104,18 +116,28 @@
 </head>
 <body class="bg-gray-100 min-h-screen" hx-headers='{"Accept":"text/html","HX-Request":"true"}'>
   {% set _path = request.url.path %}
+  {# 导航图标与 DNA navigation_ia_v2 / step_11 一致 [Ref: 03_/00_维度零/04_前端开发与用户体验 §2.1.0] #}
+  {% macro nav_link(href, label, icon, active=false) %}
+  <a href="{{ href }}" class="{% if active %}nav-active{% endif %}">
+    <span class="nav-ico" aria-hidden="true">{{ icon }}</span>
+    <span>{{ label }}</span>
+  </a>
+  {% endmacro %}
   <nav class="site-nav">
-    <span class="nav-brand">AI 投资副驾驶</span>
+    <span class="nav-brand"><span class="nav-ico" aria-hidden="true">✈️</span> AI 投资副驾驶</span>
     <div class="nav-main">
-      <a href="/" class="{% if _path == '/' %}nav-active{% endif %}">总览</a>
-      <a href="/portfolio-guard" class="{% if _path.startswith('/portfolio-guard') %}nav-active{% endif %}">持仓监管</a>
-      <a href="/planning" class="{% if _path.startswith('/planning') %}nav-active{% endif %}">行情解析及规划</a>
-      <a href="/graph" class="{% if _path.startswith('/graph') %}nav-active{% endif %}">产业图谱</a>
-      <a href="/value" class="{% if _path.startswith('/value') %}nav-active{% endif %}">价值账本</a>
-      <a href="/audit" class="{% if _path.startswith('/audit') %}nav-active{% endif %}">审计</a>
-      <a href="/opus" class="{% if _path.startswith('/opus') %}nav-active{% endif %}">Opus 对话</a>
+      {{ nav_link('/', '总览', '🏠', _path == '/') }}
+      {{ nav_link('/portfolio-guard', '持仓监管', '🛡️', _path.startswith('/portfolio-guard')) }}
+      {{ nav_link('/planning', '行情解析及规划', '📡', _path.startswith('/planning')) }}
+      {{ nav_link('/graph', '产业图谱', '🕸️', _path.startswith('/graph')) }}
+      {{ nav_link('/value', '价值账本', '📒', _path.startswith('/value')) }}
+      {{ nav_link('/audit', '审计', '🔍', _path.startswith('/audit')) }}
+      {{ nav_link('/opus', 'Opus 对话', '💬', _path.startswith('/opus')) }}
     </div>
-    <a href="/settings" class="nav-settings {% if _path.startswith('/settings') or _path.startswith('/system') %}nav-active{% endif %}">设置</a>
+    <a href="/settings" class="nav-settings {% if _path.startswith('/settings') or _path.startswith('/system') %}nav-active{% endif %}">
+      <span class="nav-ico" aria-hidden="true">⚙️</span>
+      <span>设置</span>
+    </a>
   </nav>
   <main>
     {% block content %}{% endblock %}

@@ -7,8 +7,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-
+from apps.copilot.db.dialect import dialect_insert
 from apps.copilot.services.ledger.models import ResponseKind, UserResponse
 
 
@@ -59,7 +58,7 @@ class UserResponseRecorder:
     async def _upsert(self, **kw) -> int:
         kw.setdefault("response_ts", datetime.now(timezone.utc))
         async with self._sf() as session:
-            stmt = sqlite_insert(UserResponse).values(**kw)
+            stmt = dialect_insert(UserResponse).values(**kw)
             stmt = stmt.on_conflict_do_update(
                 index_elements=["user_id", "ref_id", "kind"],
                 set_={

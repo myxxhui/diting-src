@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS execution_advices (
 
 
 async def migrate_step17(engine: AsyncEngine) -> None:
+    if not engine.url.get_backend_name().startswith("sqlite"):
+        logger.info("migrate_step17: skip（PostgreSQL 由 create_all 建表）")
+        return
     async with engine.begin() as conn:
         await conn.execute(text(_CREATE_SQL))
         logger.info("migrate_step17: execution_advices table ensured")

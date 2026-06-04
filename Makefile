@@ -411,7 +411,9 @@ ACR_REGISTRY ?= crpi-7vifw4ok9jkcxr60.cn-hongkong.personal.cr.aliyuncs.com
 ACR_REPO_COPILOT ?= titan-core/diting-copilot
 ACR_USERNAME ?= sean_hui
 DITING_ACR_PASSWORD ?=
-ACR_IMAGE_COPILOT := $(ACR_REGISTRY)/$(ACR_REPO_COPILOT):latest
+COPILOT_IMAGE_TAG ?= latest
+ACR_IMAGE_COPILOT := $(ACR_REGISTRY)/$(ACR_REPO_COPILOT):$(COPILOT_IMAGE_TAG)
+ACR_IMAGE_COPILOT_LATEST := $(ACR_REGISTRY)/$(ACR_REPO_COPILOT):latest
 DOCKER_PLATFORM ?= linux/amd64
 
 .PHONY: build-copilot-image push-copilot-image copilot-image-all
@@ -424,7 +426,8 @@ push-copilot-image: build-copilot-image
 	@if [ -z "$(DITING_ACR_PASSWORD)" ]; then echo "错误: 请 export DITING_ACR_PASSWORD 或在 Makefile 赋值"; exit 1; fi; \
 	echo "$(DITING_ACR_PASSWORD)" | docker login $(ACR_REGISTRY) -u $(ACR_USERNAME) --password-stdin || exit 1; \
 	docker tag diting-copilot:latest $(ACR_IMAGE_COPILOT) && docker push $(ACR_IMAGE_COPILOT) && \
-	echo "push-copilot-image: $(ACR_IMAGE_COPILOT) OK"
+	docker tag diting-copilot:latest $(ACR_IMAGE_COPILOT_LATEST) && docker push $(ACR_IMAGE_COPILOT_LATEST) && \
+	echo "push-copilot-image: $(ACR_IMAGE_COPILOT) + :latest OK"
 
 copilot-image-all: push-copilot-image
 

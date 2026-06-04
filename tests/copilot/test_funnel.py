@@ -17,6 +17,7 @@ from apps.copilot.modules.planning.funnel import (
     get_funnel_symbol,
     list_funnel_symbols,
     set_stage,
+    touch_last_analyzed,
     upsert_funnel_symbol,
 )
 
@@ -102,6 +103,20 @@ async def test_view_filter_no_overlap():
         assert "601088" in exec_syms and "601088" not in plan_syms
         # 四区互斥：交集为空
         assert plan_syms.isdisjoint(exec_syms)
+
+
+@pytest.mark.asyncio
+async def test_touch_last_analyzed_naive_utc():
+    """PostgreSQL TIMESTAMP WITHOUT TIME ZONE 须写入 naive UTC（asyncpg 兼容）。"""
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        await upsert_funnel_symbol(session, "601138", "工业富联", stage="radar_intake")
+        await session.commit()
+        await touch_last_analyzed(session, "601138")
+        await session.commit()
+        row = await get_funnel_symbol(session, "601138")
+        assert row.last_analyzed_at is not None
+        assert row.last_analyzed_at.tzinfo is None
 
 
 @pytest.mark.asyncio

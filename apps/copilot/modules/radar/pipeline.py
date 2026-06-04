@@ -11,7 +11,8 @@ from typing import Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.copilot.db.models import StageArtifact, WorkspaceArtifact
-from apps.copilot.modules.radar.context_matrix import build_context_matrix
+from apps.copilot.modules.radar.model_router import t1_step_label
+from apps.copilot.modules.radar.t1_distill import build_t1_payload
 from apps.copilot.modules.radar.model_router import radar_t2_enabled, resolve_model
 from apps.copilot.modules.radar.scanner import collect_t0_raw
 from apps.copilot.modules.radar.persistence import load_latest_bundle_db
@@ -40,8 +41,12 @@ async def run_radar_pipeline(
     enable_t2: bool = True,
     force_refresh_t0: bool = False,
     force_refresh_t2: bool = False,
+    progress_cb: Any = None,
 ) -> dict[str, Any]:
     """跑完整三段流水线并落库；enable_t2=False 时仅 T0+T1（快速扫描）。"""
+    if progress_cb is not None:
+        progress_cb("t0", "T0 采集行情与公司资料", 20, symbol)
+
     t0_start = time.perf_counter()
     t0_raw = await collect_t0_raw(
         symbol,
@@ -60,13 +65,17 @@ async def run_radar_pipeline(
         latency_ms=int((time.perf_counter() - t0_start) * 1000),
     )
 
+    if progress_cb is not None:
+        hit = "（缓存命中）" if t0_raw.get("cache_hit") else ""
+        progress_cb("t1", f"{t1_step_label()}{hit}", 45, "")
+
     t1_start = time.perf_counter()
     t1_profile = resolve_model("radar", "t1_distill")
     cached_t1 = t0_raw.get("t1_distilled") if t0_raw.get("cache_hit") else None
     if isinstance(cached_t1, dict) and cached_t1.get("matrix"):
         t1_payload = cached_t1
     else:
-        t1_payload = build_context_matrix(t0_raw)
+        t1_payload = await build_t1_payload(t0_raw)
     t1_art = await _save_artifact(
         session,
         stage="T1_distilled",
@@ -78,6 +87,12 @@ async def run_radar_pipeline(
         input_refs=[t0_art.id],
         latency_ms=int((time.perf_counter() - t1_start) * 1000),
     )
+
+    if progress_cb is not None:
+        if enable_t2:
+            progress_cb("t2", "T2 Opus 按 9 维模板推理", 58, "")
+        else:
+            progress_cb("t2", "T2 已跳过（仅 T0+T1 快速扫描）", 58, "")
 
     t2_start = time.perf_counter()
     t2_profile = resolve_model("radar", "t2_assess")
@@ -103,7 +118,11 @@ async def run_radar_pipeline(
         if t2_cached:
             t2_payload = t2_cached
             logger.info("T2 cache hit symbol=%s model=%s", symbol, t2_payload.get("model_id"))
+            if progress_cb is not None:
+                progress_cb("t2", "T2 使用历史 Opus 缓存", 72, "")
         else:
+            if progress_cb is not None:
+                progress_cb("t2", "T2 调用 Opus（build_opus_messages + 维度 schema）", 65, "")
             t2_payload = await run_t2_live(t1_payload, t0_raw, profile=t2_profile)
             if t2_payload.get("status") != "ok":
                 fb = find_ok_t2_verdict(symbol)

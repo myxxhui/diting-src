@@ -32,7 +32,7 @@ T0_KEYS = ("quote", "profile", "financials", "valuation")
 
 
 async def _prefetch_one(symbol: str, name: str, *, with_t2: bool) -> dict:
-    from apps.copilot.modules.radar.context_matrix import build_context_matrix
+    from apps.copilot.modules.radar.t1_distill import build_t1_payload
     from apps.copilot.modules.radar.pipeline import run_t2_live
     from apps.copilot.modules.radar.scanner import collect_t0_live
     from apps.copilot.modules.radar.t0_cache import save_cache
@@ -46,7 +46,7 @@ async def _prefetch_one(symbol: str, name: str, *, with_t2: bool) -> dict:
     t2_cost = None
 
     if with_t2:
-        t1 = build_context_matrix(t0)
+        t1 = await build_t1_payload(t0)
         bundle["t1_distilled"] = t1
         t2 = await run_t2_live(t1, t0)
         bundle["t2_verdict"] = t2

@@ -45,7 +45,8 @@
   <form id="radar-scan-form" class="flex flex-wrap gap-3 items-end mb-4"
         hx-post="/api/radar/scans"
         hx-target="#radar-scan-result"
-        hx-swap="innerHTML">
+        hx-swap="innerHTML"
+        hx-indicator="#radar-scan-loading">
     <input type="hidden" name="input_type" value="symbol">
     <div class="relative">
       <label class="block text-xs text-gray-500 mb-1">标的代码或简称</label>
@@ -66,14 +67,16 @@
              class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
       <span>深度推理 <span class="text-xs text-gray-400">（Opus · 默认见<a href="/settings#radar-prefs" class="text-blue-600 hover:underline">设置</a>）</span></span>
     </label>
+    <p class="text-xs text-gray-500 pb-1 col-span-full">流水线：T0 采集 → <strong>T1 DeepSeek</strong> 事实矩阵压缩 → T2 Opus 九维研报（可在设置中切换 T1 为规则模式）</p>
     <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer pb-2">
       <input type="hidden" name="force_refresh" value="false">
       <input type="checkbox" name="force_refresh" value="true"
              class="rounded border-gray-300 text-amber-600 focus:ring-amber-500">
       <span>强制刷新 <span class="text-xs text-gray-400">（忽略缓存 · 最新 T0+T2 · 新版本入库）</span></span>
     </label>
-    <button type="submit"
-            class="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700">
+    <button type="submit" id="radar-scan-submit-btn"
+            class="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700
+                   disabled:opacity-50 disabled:cursor-wait">
       启动扫描
     </button>
     <button type="button" id="radar-collect-btn"
@@ -142,6 +145,14 @@
       </div>
     </div>
   </div>
+  <p id="radar-scan-loading"
+     class="htmx-indicator text-sm text-blue-700 py-2 flex items-center gap-2 mb-2">
+    <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+    </svg>
+    正在分析，请稍候…
+  </p>
   <div id="radar-scan-result" class="mb-4 min-h-[2rem]"
        hx-on::after-swap="this.scrollIntoView({behavior:'smooth', block:'start'})"></div>
   <script>
@@ -441,12 +452,34 @@
 
       document.body.addEventListener('htmx:afterSwap', function (ev) {
         var t = ev.detail && ev.detail.target;
-        if (t && t.id === 'radar-scan-result' && t.querySelector('#radar-scan-report')) {
-          var m = (ev.detail.requestConfig && ev.detail.requestConfig.path) || '';
-          var match = m.match(/\/api\/radar\/scans\/(\d+)/);
-          if (match) window._radarLastScanId = match[1];
-          window.radarScanInitDetailPanel();
-          window.radarInitDimDrag();
+        if (t && t.id === 'radar-scan-result') {
+          processRadarHtmx(t);
+          if (t.querySelector('#radar-scan-report')) {
+            var m = (ev.detail.requestConfig && ev.detail.requestConfig.path) || '';
+            var match = m.match(/\/api\/radar\/scans\/(\d+)/);
+            if (match) window._radarLastScanId = match[1];
+            window.radarScanInitDetailPanel(true);
+            window.radarInitDimDrag();
+            if (typeof htmx !== 'undefined') {
+              htmx.trigger('#radar-candidates-list', 'load');
+            }
+          }
+        }
+      });
+
+      document.body.addEventListener('htmx:beforeRequest', function (ev) {
+        var elt = ev.detail && ev.detail.elt;
+        if (!elt) return;
+        if (elt.id === 'radar-scan-form' || elt.closest && elt.closest('#radar-scan-form')) {
+          var btn = document.getElementById('radar-scan-submit-btn');
+          if (btn) btn.disabled = true;
+        }
+      });
+      document.body.addEventListener('htmx:afterRequest', function (ev) {
+        var elt = ev.detail && ev.detail.elt;
+        if (elt && (elt.id === 'radar-scan-form' || (elt.closest && elt.closest('#radar-scan-form')))) {
+          var btn = document.getElementById('radar-scan-submit-btn');
+          if (btn) btn.disabled = false;
         }
       });
     })();
@@ -476,17 +509,19 @@
       }
     };
 
-    window.radarScanInitDetailPanel = function () {
+    window.radarScanInitDetailPanel = function (forceOpen) {
       var wrap = document.getElementById('radar-scan-report');
       var panel = document.getElementById('radar-scan-detail-panel');
       var btn = document.getElementById('radar-scan-toggle-btn');
       if (!panel) return;
       var sym = (wrap && wrap.getAttribute('data-symbol')) || '';
       var openPref = false;
-      try {
-        openPref = sessionStorage.getItem('radar-scan-fold-' + sym) === '0';
-      } catch (e) { /* ignore */ }
-      panel.open = openPref;
+      if (forceOpen !== true) {
+        try {
+          openPref = sessionStorage.getItem('radar-scan-fold-' + sym) === '0';
+        } catch (e) { /* ignore */ }
+      }
+      panel.open = forceOpen === true ? true : openPref;
       window.radarScanSyncToggleBtn();
       if (!panel._radarToggleBound) {
         panel._radarToggleBound = true;
@@ -678,13 +713,8 @@
 
       document.body.addEventListener('htmx:afterSwap', function (ev) {
         var t = ev.detail && ev.detail.target;
-        if (!t) return;
-        if (t.id === 'radar-candidates-list') {
+        if (t && t.id === 'radar-candidates-list') {
           processRadarHtmx(t);
-        }
-        if (t.id === 'radar-scan-result') {
-          processRadarHtmx(t);
-          window.radarScanInitDetailPanel();
         }
       });
 
@@ -697,8 +727,7 @@
     });
   </script>
   <div class="border-t border-gray-100 pt-4">
-    <h3 class="text-sm font-semibold text-gray-700 mb-1">扫描候选（待晋级 → 规划区）</h3>
-    <p class="text-[11px] text-gray-400 mb-2">点击标的名称 → 在上方加载最近一次 9 维深度研报</p>
+    <h3 class="text-sm font-semibold text-gray-700 mb-2">候选池</h3>
     <p id="radar-candidates-loading"
        class="htmx-indicator text-xs text-gray-400 py-1 flex items-center justify-center gap-2">
       <svg class="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
