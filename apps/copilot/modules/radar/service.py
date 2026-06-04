@@ -114,6 +114,7 @@ async def create_symbol_scan(
     t1_mode: str | None = None,
     t2_model: str | None = None,
     force_refresh: bool = False,
+    scan_origin: str = "workbench",
     progress_cb: Any = None,
     scan_id: int | None = None,
 ) -> dict[str, Any]:
@@ -163,18 +164,25 @@ async def create_symbol_scan(
         t2_model=t2_model,
         force_refresh_t0=force_refresh and enable_t0,
         force_refresh_t2=force_refresh and enable_t2,
+        scan_origin=scan_origin,
         progress_cb=progress_cb,
     )
 
     version_id: str | None = None
-    if force_refresh or not pipe.get("t2_from_cache") or not pipe.get("t0_cache_hit"):
+    fresh_write = force_refresh or scan_origin == "workbench"
+    if fresh_write or not pipe.get("t2_from_cache") or not pipe.get("t0_cache_hit"):
         bundle = build_bundle_from_pipeline(
             pipe,
-            source="scan_force_refresh" if force_refresh else "scan_live",
+            source="scan_force_refresh" if fresh_write else "scan_live",
         )
         # live Opus 失败时勿用 error T2 覆盖本机预拉并已 sync 的 ok 缓存（no-mock · 防污染）
         new_t2 = bundle.get("t2_verdict") or {}
-        if enable_t2 and new_t2.get("status") != "ok" and not force_refresh:
+        if (
+            enable_t2
+            and new_t2.get("status") != "ok"
+            and not fresh_write
+            and scan_origin != "workbench"
+        ):
             from apps.copilot.modules.radar.t2_resolve import resolve_ok_t2_verdict
 
             prior_t2 = await resolve_ok_t2_verdict(session, sym)
@@ -249,6 +257,7 @@ async def run_scan_job(
     t2_model: str | None,
     force_refresh: bool,
     redis_client: Any,
+    scan_origin: str = "workbench",
 ) -> None:
     """后台执行深度扫描（独立 DB 会话 · Redis 进度供 HTMX 轮询）。"""
     from apps.copilot.db.database import AsyncSessionLocal
@@ -267,6 +276,7 @@ async def run_scan_job(
                 t1_mode=t1_mode,
                 t2_model=t2_model,
                 force_refresh=force_refresh,
+                scan_origin=scan_origin,
                 progress_cb=cb,
                 scan_id=scan_id,
             )

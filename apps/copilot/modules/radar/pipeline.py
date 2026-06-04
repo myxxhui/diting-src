@@ -1,6 +1,7 @@
 """T0→T1→T2 三段流水线 + StageArtifact / WorkspaceArtifact 落库。
 
 [Ref: step_14 · 25_ §2/§3]
+工作台扫描（scan_origin=workbench）：索引框触发一律重新推演，不读 T0/T1/T2 推理缓存。
 """
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ from typing import Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.copilot.db.models import StageArtifact, WorkspaceArtifact
+from apps.copilot.modules.radar.display_layout import default_layout, load_saved_layout
 from apps.copilot.modules.radar.model_router import t1_step_label
 from apps.copilot.modules.radar.t1_distill import build_t1_payload
 from apps.copilot.modules.radar.model_router import radar_t2_enabled, resolve_model
@@ -23,6 +25,9 @@ from apps.copilot.modules.radar.t2_resolve import (
 )
 from apps.copilot.modules.radar.schema import (
     build_opus_messages,
+    build_opus_messages_freeform,
+    build_opus_messages_from_t0,
+    dimension_keys_from_layout,
     estimate_cost_yuan,
     parse_opus_verdict,
 )
@@ -31,29 +36,12 @@ from apps.copilot.modules.radar.stage_presets import validate_radar_stage_combo
 logger = logging.getLogger(__name__)
 
 
-def _bundle_to_t0_raw(bundle: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "symbol": bundle.get("symbol"),
-        "name": bundle.get("name") or bundle.get("symbol"),
-        "collected_at": bundle.get("collected_at"),
-        "quote": bundle.get("quote"),
-        "profile": bundle.get("profile"),
-        "financials": bundle.get("financials"),
-        "valuation": bundle.get("valuation"),
-        "cache_hit": True,
-        "source": bundle.get("source") or "cache",
-        "t1_distilled": bundle.get("t1_distilled"),
-    }
+def _resolve_layout(layout: dict[str, Any] | None) -> dict[str, Any]:
+    return layout or load_saved_layout() or default_layout()
 
 
-async def _load_cached_bundle(
-    session: AsyncSession,
-    symbol: str,
-) -> dict[str, Any] | None:
-    bundle = load_cached(symbol, require_fresh=False)
-    if bundle:
-        return bundle
-    return await load_latest_bundle_db(session, symbol)
+def _minimal_t0(symbol: str, name: str) -> dict[str, Any]:
+    return {"symbol": symbol, "name": name or symbol, "source": "resolve_only"}
 
 
 async def run_radar_pipeline(
@@ -71,18 +59,22 @@ async def run_radar_pipeline(
     t2_model: str | None = None,
     force_refresh_t0: bool = False,
     force_refresh_t2: bool = False,
+    scan_origin: str = "internal",
+    layout: dict[str, Any] | None = None,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
-    """按三种合法组合执行：仅 T2 / T0+T2 / T0+T1+T2。"""
+    """三种组合：仅 T2 / T0+T2 / T0+T1+T2。workbench 来源禁止用缓存做推理。"""
     validate_radar_stage_combo(enable_t0, enable_t1, enable_t2)
 
-    cached_bundle: dict[str, Any] | None = None
-    if not enable_t0:
-        cached_bundle = await _load_cached_bundle(session, symbol)
-        if not cached_bundle:
-            raise ValueError(
-                "未勾选 T0 且无本地/库内基础数据；请勾选 T0 或先对该标的执行过采集/扫描"
-            )
+    workbench_fresh = scan_origin == "workbench"
+    layout = _resolve_layout(layout)
+    dim_keys = dimension_keys_from_layout(layout)
+    t0_refresh = force_refresh_t0 or workbench_fresh
+    t2_refresh = force_refresh_t2 or workbench_fresh
+
+    t0_only = enable_t2 and not enable_t0 and not enable_t1
+    t0_t2 = enable_t0 and enable_t2 and not enable_t1
+    full_chain = enable_t0 and enable_t1 and enable_t2
 
     t0_art: StageArtifact | None = None
     if enable_t0:
@@ -93,7 +85,7 @@ async def run_radar_pipeline(
             symbol,
             name=name,
             redis_client=redis_client,
-            force_refresh=force_refresh_t0,
+            force_refresh=t0_refresh,
         )
         t0_art = await _save_artifact(
             session,
@@ -105,19 +97,25 @@ async def run_radar_pipeline(
             candidate_id=candidate_id,
             latency_ms=int((time.perf_counter() - t0_start) * 1000),
         )
-    else:
+    elif t0_only:
         if progress_cb is not None:
-            progress_cb("t0", "T0 使用缓存基础数据", 20, symbol)
-        t0_raw = _bundle_to_t0_raw(cached_bundle or {})
+            progress_cb("resolve", f"已解析 {symbol} · {name or symbol}", 12, "")
+        t0_raw = _minimal_t0(symbol, name)
+    else:
+        raise ValueError("当前阶段组合需要勾选 T0 或仅 T2")
 
     t1_art: StageArtifact | None = None
     if enable_t1:
         if progress_cb is not None:
-            hit = "（缓存命中）" if t0_raw.get("cache_hit") else ""
+            hit = "" if workbench_fresh else (
+                "（缓存命中）" if t0_raw.get("cache_hit") else ""
+            )
             progress_cb("t1", f"{t1_step_label(t1_mode=t1_mode)}{hit}", 45, "")
         t1_start = time.perf_counter()
         t1_profile = resolve_model("radar", "t1_distill", t1_mode=t1_mode)
-        cached_t1 = t0_raw.get("t1_distilled") if t0_raw.get("cache_hit") else None
+        cached_t1 = None
+        if not workbench_fresh and t0_raw.get("cache_hit"):
+            cached_t1 = t0_raw.get("t1_distilled")
         if isinstance(cached_t1, dict) and cached_t1.get("matrix"):
             t1_payload = cached_t1
         else:
@@ -135,19 +133,11 @@ async def run_radar_pipeline(
         )
     else:
         t1_payload = {"matrix": {}, "unavailable": [], "skipped": True, "status": "skipped"}
-        if enable_t2 and cached_bundle:
-            prev = cached_bundle.get("t1_distilled")
-            if isinstance(prev, dict) and prev.get("matrix"):
-                t1_payload = prev
-        elif enable_t2:
-            prev = t0_raw.get("t1_distilled")
-            if isinstance(prev, dict) and prev.get("matrix"):
-                t1_payload = prev
         if progress_cb is not None:
-            if enable_t2 and t1_payload.get("matrix"):
-                progress_cb("t1", "加载缓存事实矩阵（T1）", 38, "")
-            elif enable_t2:
-                progress_cb("t1", "加载缓存事实矩阵（T1）", 38, "")
+            if t0_t2:
+                progress_cb("t1", "T1 已跳过（T0 原始数据直供 T2）", 40, "")
+            elif t0_only:
+                progress_cb("t1", "T1 已跳过", 40, "")
             else:
                 progress_cb("t1", "T1 已跳过", 45, "")
 
@@ -160,7 +150,6 @@ async def run_radar_pipeline(
 
     t2_start = time.perf_counter()
     t2_profile = resolve_model("radar", "t2_assess")
-    t2_from_cache = False
     if not enable_t2:
         t2_payload = _t2_result(
             status="skipped",
@@ -169,49 +158,24 @@ async def run_radar_pipeline(
             detail="未勾选 T2",
         )
     else:
-        if not (t1_payload.get("matrix")):
-            raise ValueError("仅 T2 需要已有 T1 事实矩阵；请先勾选 T1 或对该标的完成 T1 扫描")
-        t2_cached = None
-        if not force_refresh_t2:
-            t2_cached = cached_t2_verdict(t0_raw)
-            if not t2_cached:
-                t2_cached = cached_t2_verdict(load_cached(symbol, require_fresh=True))
-            if not t2_cached:
-                t2_cached = cached_t2_verdict(load_cached(symbol, require_fresh=False))
-            if not t2_cached:
-                db_bundle = await load_latest_bundle_db(session, symbol)
-                t2_cached = cached_t2_verdict(db_bundle)
-        if t2_cached:
-            t2_payload = t2_cached
-            logger.info("T2 cache hit symbol=%s model=%s", symbol, t2_payload.get("model_id"))
-            if progress_cb is not None:
-                progress_cb("t2", "T2 使用历史 Opus 缓存", 72, "")
-        else:
-            if progress_cb is not None:
-                progress_cb("t2", "T2 调用 Opus（build_opus_messages + 维度 schema）", 65, "")
-            t2_payload = await run_t2_live(
-                t1_payload,
-                t0_raw,
-                profile=t2_profile,
-                model_override=t2_model,
-            )
-            if t2_payload.get("status") != "ok":
-                fb = find_ok_t2_verdict(symbol)
-                if not fb:
-                    fb = await find_ok_t2_verdict_db(session, symbol)
-                if fb:
-                    logger.info(
-                        "T2 live 失败，回退历史 ok 缓存 symbol=%s detail=%s",
-                        symbol,
-                        (t2_payload.get("detail") or "")[:80],
-                    )
-                    t2_payload = {
-                        **fb,
-                        "detail": (
-                            f"{t2_payload.get('detail') or 'live 失败'} · "
-                            "已展示历史 Opus 缓存（非编造）"
-                        ),
-                    }
+        t2_payload = await _run_t2_for_combo(
+            session,
+            symbol=symbol,
+            name=name or t0_raw.get("name") or symbol,
+            t0_raw=t0_raw,
+            t1_payload=t1_payload,
+            layout=layout,
+            dim_keys=dim_keys,
+            t0_only=t0_only,
+            t0_t2=t0_t2,
+            full_chain=full_chain,
+            workbench_fresh=workbench_fresh,
+            t2_refresh=t2_refresh,
+            profile=t2_profile,
+            model_override=t2_model,
+            progress_cb=progress_cb,
+        )
+
     t2_from_cache = bool(
         enable_t2
         and t2_payload.get("status") == "ok"
@@ -231,7 +195,7 @@ async def run_radar_pipeline(
             symbol=symbol,
             scan_id=scan_id,
             candidate_id=candidate_id,
-            input_refs=[t1_art.id] if t1_art else [],
+            input_refs=[t1_art.id] if t1_art else ([t0_art.id] if t0_art else []),
             latency_ms=int((time.perf_counter() - t2_start) * 1000),
             token_cost=float(t2_payload.get("token_cost") or 0.0),
         )
@@ -266,12 +230,105 @@ async def run_radar_pipeline(
         "t2_verdict": t2_payload,
         "t0_cache_hit": bool(t0_raw.get("cache_hit")),
         "t2_from_cache": t2_from_cache,
-        "force_refresh_t0": force_refresh_t0,
-        "force_refresh_t2": force_refresh_t2,
+        "force_refresh_t0": t0_refresh,
+        "force_refresh_t2": t2_refresh,
+        "scan_origin": scan_origin,
         "enable_t0": enable_t0,
         "enable_t1": enable_t1,
         "enable_t2": enable_t2,
     }
+
+
+async def _run_t2_for_combo(
+    session: AsyncSession,
+    *,
+    symbol: str,
+    name: str,
+    t0_raw: dict[str, Any],
+    t1_payload: dict[str, Any],
+    layout: dict[str, Any],
+    dim_keys: list[str],
+    t0_only: bool,
+    t0_t2: bool,
+    full_chain: bool,
+    workbench_fresh: bool,
+    t2_refresh: bool,
+    profile: dict[str, Any],
+    model_override: str | None,
+    progress_cb: Any,
+) -> dict[str, Any]:
+    if full_chain:
+        if not (t1_payload.get("matrix")):
+            raise ValueError("T0+T1+T2 需要 T1 事实矩阵；请检查 T1 步骤是否成功")
+        messages = build_opus_messages(symbol, name, t1_payload)
+        parse_keys = None
+        if progress_cb is not None:
+            progress_cb(
+                "t2",
+                "T2 基于 T1 事实矩阵推演（Opus + 维度 schema）",
+                65,
+                "",
+            )
+    elif t0_t2:
+        messages = build_opus_messages_from_t0(symbol, name, t0_raw, layout)
+        parse_keys = dim_keys
+        if progress_cb is not None:
+            progress_cb("t2", "T2 基于 T0 原始采集数据推演", 65, "")
+    elif t0_only:
+        messages = build_opus_messages_freeform(symbol, name, layout)
+        parse_keys = dim_keys
+        if progress_cb is not None:
+            progress_cb("t2", "T2 按布局维度主题自主推演（不读 T0/T1 缓存）", 65, "")
+    else:
+        raise ValueError("未识别的 T2 阶段组合")
+
+    if workbench_fresh or t2_refresh:
+        return await run_t2_live_messages(
+            messages,
+            t0_raw,
+            dim_keys=parse_keys,
+            profile=profile,
+            model_override=model_override,
+        )
+
+    t2_cached = cached_t2_verdict(t0_raw)
+    if not t2_cached:
+        t2_cached = cached_t2_verdict(load_cached(symbol, require_fresh=True))
+    if not t2_cached:
+        t2_cached = cached_t2_verdict(load_cached(symbol, require_fresh=False))
+    if not t2_cached:
+        db_bundle = await load_latest_bundle_db(session, symbol)
+        t2_cached = cached_t2_verdict(db_bundle)
+    if t2_cached:
+        logger.info("T2 cache hit symbol=%s", symbol)
+        if progress_cb is not None:
+            progress_cb("t2", "T2 使用历史 Opus 缓存", 72, "")
+        return t2_cached
+
+    if progress_cb is not None:
+        progress_cb("t2", "T2 调用 Opus 深度推演", 65, "")
+    t2_payload = await run_t2_live_messages(
+        messages,
+        t0_raw,
+        dim_keys=parse_keys,
+        profile=profile,
+        model_override=model_override,
+    )
+    if t2_payload.get("status") != "ok":
+        fb = find_ok_t2_verdict(symbol)
+        if not fb:
+            fb = await find_ok_t2_verdict_db(session, symbol)
+        if fb:
+            logger.info("T2 live 失败，回退历史 ok 缓存 symbol=%s", symbol)
+            t2_payload = {
+                **fb,
+                "detail": (
+                    f"{t2_payload.get('detail') or 'live 失败'} · "
+                    "已展示历史 Opus 缓存（非编造）"
+                ),
+                "stale_fallback": True,
+            }
+    return t2_payload
 
 
 async def _save_artifact(
@@ -337,24 +394,45 @@ async def run_t2_live(
     profile: dict[str, Any] | None = None,
     model_override: str | None = None,
 ) -> dict[str, Any]:
-    """本机预拉 --with-t2 与生产 live Opus 共用入口。"""
+    """本机预拉 --with-t2 与生产 live Opus 共用入口（T1 矩阵路径）。"""
     if profile is None:
         profile = resolve_model("radar", "t2_assess")
-    return await _run_t2(t1, t0, profile=profile, model_override=model_override)
+    symbol = t0.get("symbol") or ""
+    name = t0.get("name") or symbol
+    messages = build_opus_messages(symbol, name, t1)
+    return await run_t2_live_messages(
+        messages, t0, profile=profile, model_override=model_override
+    )
 
 
-async def _run_t2(
-    t1: dict[str, Any],
+async def run_t2_live_messages(
+    messages: list[dict[str, str]],
     t0: dict[str, Any],
     *,
+    dim_keys: list[str] | None = None,
+    profile: dict[str, Any] | None = None,
+    model_override: str | None = None,
+) -> dict[str, Any]:
+    """按已构建 messages 调用 Opus；dim_keys 为布局维度（None 则用内置 9 维解析）。"""
+    if profile is None:
+        profile = resolve_model("radar", "t2_assess")
+    return await _run_t2_messages(
+        messages,
+        t0,
+        dim_keys=dim_keys,
+        profile=profile,
+        model_override=model_override,
+    )
+
+
+async def _run_t2_messages(
+    messages: list[dict[str, str]],
+    t0: dict[str, Any],
+    *,
+    dim_keys: list[str] | None,
     profile: dict[str, Any],
     model_override: str | None = None,
 ) -> dict[str, Any]:
-    """T2 必开 Opus：输出 9 维结构化 deep_analysis + 真实 token 成本。
-
-    no-mock：Opus 不可达（降级 mock）/ 解析失败 / 预算超限 → status=error+detail，
-    绝不伪造内容；前端据此显示明确错误而非假数据。
-    """
     if not radar_t2_enabled():
         return _t2_result(
             status="disabled",
@@ -363,9 +441,6 @@ async def _run_t2(
             detail="RADAR_T2_ENABLED=false：未开启 Opus 深度推理",
         )
 
-    symbol = t0.get("symbol") or ""
-    name = t0.get("name") or symbol
-
     def _blocking_call() -> Any:
         from apps.common.ai_dispatcher import AIDispatcher, BudgetExceededError
 
@@ -373,7 +448,7 @@ async def _run_t2(
         try:
             return dispatcher.call(
                 "radar_assess",
-                messages=build_opus_messages(symbol, name, t1),
+                messages=messages,
                 max_tokens=4096,
                 temperature=0.2,
                 model_override=(model_override or "").strip() or None,
@@ -394,7 +469,6 @@ async def _run_t2(
             detail=f"Opus 调用失败：{str(exc)[:200]}",
         )
 
-    # 检测 AIDispatcher 静默降级到 mock（旧路径兜底）→ no-mock 显式报错
     if resp.model == "mock" or (resp.raw or {}).get("_dispatcher_mock"):
         return _t2_result(
             status="error",
@@ -408,7 +482,7 @@ async def _run_t2(
         )
 
     try:
-        deep = parse_opus_verdict(resp.text)
+        deep = parse_opus_verdict(resp.text, dim_keys)
     except Exception as exc:  # noqa: BLE001
         logger.warning("T2 Opus 输出解析失败: %s", exc)
         return _t2_result(

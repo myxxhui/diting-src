@@ -89,7 +89,7 @@ _SCHEMA_HINT = """输出严格如下 JSON 结构（不要 markdown 代码块）�
 
 
 def build_opus_messages(symbol: str, name: str, matrix: dict[str, Any]) -> list[dict[str, str]]:
-    """构建喂给 Opus 的 messages（system + user 含事实矩阵 + schema 约束）。"""
+    """T0+T1+T2：基于 T1 事实矩阵 + 固定 9 维 schema。"""
     facts = json.dumps(
         {"symbol": symbol, "name": name, "fact_matrix": matrix.get("matrix") or matrix},
         ensure_ascii=False,
@@ -100,6 +100,111 @@ def build_opus_messages(symbol: str, name: str, matrix: dict[str, Any]) -> list[
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user},
     ]
+
+
+def dimension_keys_from_layout(layout: dict[str, Any]) -> list[str]:
+    from apps.copilot.modules.radar.display_layout import ordered_display_metas
+
+    return [str(m["key"]) for m in ordered_display_metas(layout)]
+
+
+def _schema_hint_for_keys(dim_keys: list[str]) -> str:
+    lines = [
+        "输出严格如下 JSON 结构（不要 markdown 代码块）：",
+        "{",
+        '  "overall": {"conclusion": "一句话总结", "action_advisory": "观察/研究 advisory（非交易指令）", "confidence": 0.0},',
+        '  "dimensions": {',
+    ]
+    for key in dim_keys:
+        if key == "catalyst_timeline":
+            lines.append(
+                f'    "{key}": {{"verdict": "", "items": [{{"window": "", "event": "", "probability": "高|中|低"}}], '
+                '"reasoning": "", "evidence": [], "confidence": 0.0}},'
+            )
+        elif key == "valuation":
+            lines.append(
+                f'    "{key}": {{"verdict": "低估|合理|高估", "davis_double": "双击可能|中性|双杀风险", '
+                '"pe_percentile": null, "reasoning": "", "evidence": [], "confidence": 0.0}},'
+            )
+        else:
+            lines.append(
+                f'    "{key}": {{"verdict": "", "reasoning": "", "evidence": [], "confidence": 0.0}},'
+            )
+    lines.append("  }")
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _format_dimension_brief(layout: dict[str, Any]) -> str:
+    from apps.copilot.modules.radar.display_layout import ordered_display_metas
+
+    lines: list[str] = []
+    for m in ordered_display_metas(layout):
+        custom = " [自定义]" if m.get("custom") == "true" else ""
+        guide = (m.get("prompt_guide") or m.get("hint") or "").strip()
+        lines.append(
+            f"- {m['key']}（{m.get('emoji', '')} {m.get('label', m['key'])}）{custom}"
+            + (f"：{guide}" if guide else "")
+        )
+    return "\n".join(lines) if lines else "（使用内置九维主题）"
+
+
+_SYSTEM_T2_FREEFORM = (
+    "你是 A 股深度研究分析师。用户给出标的与一组分析维度主题；"
+    "请基于你对该公司/行业的公开认知与逻辑推演完成各维度研报（非交易指令）。"
+    "不得编造具体股价、精确 PE、未公开的财务数字；不确定处降低 confidence 并说明。"
+    "只输出 JSON，不要额外文字。"
+)
+
+_SYSTEM_T2_FROM_T0 = (
+    "你是严谨的 A 股基本面分析师。你将收到标的的 T0 原始采集数据（行情/资料/财务/估值分位），"
+    "请仅基于这些数据与合理行业逻辑完成各维度深度推理；数据字段缺失时在 reasoning 中说明。"
+    "全部为研究 advisory。只输出 JSON。"
+)
+
+
+def build_opus_messages_freeform(
+    symbol: str,
+    name: str,
+    layout: dict[str, Any],
+) -> list[dict[str, str]]:
+    """仅 T2：不读 T0/T1 缓存；按展示布局维度主题模型自推演。"""
+    dim_keys = dimension_keys_from_layout(layout) or list(DIM_KEYS)
+    brief = _format_dimension_brief(layout)
+    user = (
+        f"【标的】{name}（{symbol}）\n"
+        f"【分析维度主题】（共 {len(dim_keys)} 项，须逐项输出 dimensions 下对应 key）\n{brief}\n\n"
+        f"{_schema_hint_for_keys(dim_keys)}"
+    )
+    return [{"role": "system", "content": _SYSTEM_T2_FREEFORM}, {"role": "user", "content": user}]
+
+
+def build_opus_messages_from_t0(
+    symbol: str,
+    name: str,
+    t0_raw: dict[str, Any],
+    layout: dict[str, Any],
+) -> list[dict[str, str]]:
+    """T0+T2：原始 T0 采集 JSON 直喂 T2，不经 T1 压缩。"""
+    dim_keys = dimension_keys_from_layout(layout) or list(DIM_KEYS)
+    brief = _format_dimension_brief(layout)
+    payload = {
+        "symbol": symbol,
+        "name": name,
+        "quote": t0_raw.get("quote"),
+        "profile": t0_raw.get("profile"),
+        "financials": t0_raw.get("financials"),
+        "valuation": t0_raw.get("valuation"),
+        "collected_at": t0_raw.get("collected_at"),
+    }
+    facts = json.dumps(payload, ensure_ascii=False, indent=1)
+    user = (
+        f"【标的】{name}（{symbol}）\n"
+        f"【T0 原始采集数据】\n{facts}\n"
+        f"【分析维度】\n{brief}\n\n"
+        f"{_schema_hint_for_keys(dim_keys)}"
+    )
+    return [{"role": "system", "content": _SYSTEM_T2_FROM_T0}, {"role": "user", "content": user}]
 
 
 # ── 解析 Opus 输出 ────────────────────────────────────────────────────────────
@@ -118,12 +223,16 @@ def _extract_json(text: str) -> dict[str, Any]:
         raise
 
 
-def parse_opus_verdict(text: str) -> dict[str, Any]:
-    """把 Opus 原文解析为规范化 9 维结构；缺维补 status 标注而非编造内容。"""
+def parse_opus_verdict(
+    text: str,
+    dim_keys: list[str] | None = None,
+) -> dict[str, Any]:
+    """解析 Opus JSON；dim_keys 默认内置 9 维，可传布局中的自定义维 key。"""
+    keys = dim_keys if dim_keys else list(DIM_KEYS)
     parsed = _extract_json(text)
     dims_in = parsed.get("dimensions") or {}
     dims_out: dict[str, Any] = {}
-    for key in DIM_KEYS:
+    for key in keys:
         d = dims_in.get(key) or {}
         norm = {
             "verdict": d.get("verdict") or "—",
@@ -133,7 +242,7 @@ def parse_opus_verdict(text: str) -> dict[str, Any]:
         }
         if key == "catalyst_timeline":
             norm["items"] = d.get("items") if isinstance(d.get("items"), list) else []
-        if key == "valuation":
+        elif key == "valuation":
             norm["davis_double"] = d.get("davis_double") or "—"
             norm["pe_percentile"] = d.get("pe_percentile")
         if not d:

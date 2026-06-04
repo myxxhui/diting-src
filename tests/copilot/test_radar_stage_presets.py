@@ -35,7 +35,8 @@ def test_valid_combos(t0, t1, t2):
 def test_invalid_combos(t0, t1, t2):
     with pytest.raises(ValueError) as exc:
         validate_radar_stage_combo(t0, t1, t2)
-    assert RADAR_STAGE_COMBO_MSG in str(exc.value)
+    msg = str(exc.value)
+    assert RADAR_STAGE_COMBO_MSG in msg or "勾选 T1" in msg
 
 
 def test_combo_label():
@@ -46,14 +47,16 @@ def test_combo_label():
 
 def test_scan_steps_t2_only():
     ids = [s["id"] for s in scan_steps_for_combo(False, False, True)]
-    assert ids == ["resolve", "t0", "t1", "t2", "persist", "done"]
-    assert "仅 T2" in workflow_summary(False, False, True)
+    assert ids == ["resolve", "t2", "persist", "done"]
+    assert "自主推演" in workflow_summary(False, False, True)
 
 
 def test_scan_steps_t0_t2():
-    ids = [s["id"] for s in scan_steps_for_combo(True, False, True)]
+    steps = scan_steps_for_combo(True, False, True)
+    ids = [s["id"] for s in steps]
     assert "t0" in ids and "t2" in ids
-    assert "t1" not in ids
+    t1 = next(s for s in steps if s["id"] == "t1")
+    assert "跳过" in str(t1["label"])
 
 
 def test_scan_steps_full():

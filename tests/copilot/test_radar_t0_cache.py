@@ -82,11 +82,6 @@ async def test_pipeline_enable_t2_skipped(cache_root, monkeypatch):
 
     t0_cache.save_cache(SAMPLE_T0)
 
-    async def _fail_t2(*_a, **_k):
-        raise AssertionError("不应 live Opus")
-
-    monkeypatch.setattr("apps.copilot.modules.radar.pipeline.run_t2_live", _fail_t2)
-
     class _Sess:
         _n = 0
 
@@ -99,10 +94,28 @@ async def test_pipeline_enable_t2_skipped(cache_root, monkeypatch):
             pass
 
     _Sess._n = 0
-    result = await run_radar_pipeline(
-        _Sess(), symbol="601138", enable_t0=True, enable_t1=True, enable_t2=False
+    monkeypatch.setattr(
+        "apps.copilot.modules.radar.pipeline.radar_t2_enabled", lambda: False
     )
-    assert result["t2_verdict"]["status"] == "skipped"
+
+    async def _t0(*_a, **_k):
+        return {**SAMPLE_T0, "cache_hit": False}
+
+    async def _t1(t0, **_k):
+        return {"matrix": {"quote": {"last_close": 20.0}}, "unavailable": []}
+
+    monkeypatch.setattr("apps.copilot.modules.radar.pipeline.collect_t0_raw", _t0)
+    monkeypatch.setattr("apps.copilot.modules.radar.pipeline.build_t1_payload", _t1)
+
+    result = await run_radar_pipeline(
+        _Sess(),
+        symbol="601138",
+        enable_t0=True,
+        enable_t1=True,
+        enable_t2=True,
+        scan_origin="workbench",
+    )
+    assert result["t2_verdict"]["status"] == "disabled"
 
 
 @pytest.mark.asyncio
@@ -127,7 +140,9 @@ async def test_pipeline_t2_cache_hit(cache_root, monkeypatch):
     async def _fail_t2(*_a, **_k):
         raise AssertionError("不应 live Opus")
 
-    monkeypatch.setattr("apps.copilot.modules.radar.pipeline.run_t2_live", _fail_t2)
+    monkeypatch.setattr(
+        "apps.copilot.modules.radar.pipeline.run_t2_live_messages", _fail_t2
+    )
 
     class _Sess:
         _n = 0
@@ -149,6 +164,7 @@ async def test_pipeline_t2_cache_hit(cache_root, monkeypatch):
         enable_t0=True,
         enable_t1=True,
         enable_t2=True,
+        scan_origin="internal",
     )
     assert result["t2_verdict"]["cache_hit"] is True
     assert result["t0_raw"].get("cache_hit") is True

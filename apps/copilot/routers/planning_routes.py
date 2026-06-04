@@ -490,8 +490,9 @@ async def api_create_radar_scan(
         ):
             return HTMLResponse(_render_radar_resolve_error_html(str(exc)))
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    scan_origin = (form.get("scan_origin") or "workbench").strip() or "workbench"
     fr_vals = form.getlist("force_refresh")
-    force_refresh = _form_bool_on(fr_vals, default=False)
+    force_refresh = _form_bool_on(fr_vals, default=scan_origin == "workbench")
     await ensure_model_profiles(session)
     redis_client = _sync_redis()
     try:
@@ -532,6 +533,7 @@ async def api_create_radar_scan(
             t1_mode=t1_mode,
             t2_model=t2_model,
             force_refresh=force_refresh,
+            scan_origin=scan_origin,
             redis_client=redis_client,
         )
     )
@@ -625,10 +627,14 @@ async def api_get_radar_scan(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if "text/html" in request.headers.get("accept", "") or request.headers.get("hx-request"):
         redis_client = _sync_redis()
+        view_cached = (
+            request.headers.get("x-radar-view-mode", "").strip().lower() == "cached"
+        )
         return _render_scan_html(
             result,
             layout=_layout_from_request(request),
             redis_client=redis_client,
+            view_cached=view_cached,
         )
     return result
 
@@ -1257,7 +1263,8 @@ def _render_radar_candidates_html(items: list, *, flash: str = "") -> HTMLRespon
                 f"hx-get='/api/radar/scans/{int(scan_id)}' "
                 f"hx-target='#radar-scan-result' hx-swap='innerHTML' "
                 f"hx-indicator='#radar-scan-loading' "
-                f"hx-headers='{{\"Accept\":\"text/html\",\"HX-Request\":\"true\"}}'>"
+                f"hx-headers='{{\"Accept\":\"text/html\",\"HX-Request\":\"true\","
+                f"\"X-Radar-View-Mode\":\"cached\"}}'>"
                 f"{title_inner}</button>"
             )
         else:
@@ -1673,6 +1680,7 @@ def _render_candidate_report(
     *,
     cache_version_id: str | None = None,
     layout: dict[str, Any] | None = None,
+    view_cached: bool = False,
 ) -> str:
     deep = c.get("deep_analysis") or {}
     overall = deep.get("overall") or {}
@@ -1705,7 +1713,13 @@ def _render_candidate_report(
     dim_count = len(display_metas)
 
     stale_note = ""
-    if c.get("t2_from_stale_cache"):
+    if view_cached:
+        stale_note = (
+            "<div class='rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 mb-2 "
+            "text-xs text-blue-800'>📋 候选池缓存报告（非重新扫描）；"
+            "索引框分析请使用「开始分析」重新推演。</div>"
+        )
+    elif c.get("t2_from_stale_cache"):
         stale_note = (
             f"<div class='rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 mb-2 "
             f"text-xs text-amber-800'>📦 本次 live Opus 未成功，已展示历史预拉缓存"
@@ -1904,6 +1918,7 @@ def _render_scan_html(
     *,
     layout: dict[str, Any] | None = None,
     redis_client: Any = None,
+    view_cached: bool = False,
 ) -> HTMLResponse:
     """雷达扫描结果 HTMX 片段：人类可读 9 维深度研报卡 + 成本 + 溯源。"""
     status = scan.get("status")
@@ -1945,7 +1960,9 @@ def _render_scan_html(
     summary = scan.get("summary_json") or {}
     vid = summary.get("cache_version_id")
     blocks = [
-        _render_candidate_report(c, cache_version_id=vid, layout=layout)
+        _render_candidate_report(
+            c, cache_version_id=vid, layout=layout, view_cached=view_cached
+        )
         for c in (scan.get("candidates") or [])
     ]
     if not blocks:

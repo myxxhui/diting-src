@@ -44,16 +44,19 @@ def workflow_summary(
     """进度面板顶部流程说明（与勾选一致）。"""
     t2 = (t2_model or "Opus").strip()
     if enable_t0 and enable_t1 and enable_t2:
-        return f"流程：T0 采集 → T1 事实矩阵 → T2 深度研报（{t2}）；完成后自动展示研报。"
+        return (
+            f"流程：解析标的 → T0 采集 → T1 压缩事实矩阵入库 → T2 深度研报（{t2}）；"
+            "索引框触发为全新推演。"
+        )
     if enable_t0 and enable_t2:
         return (
-            f"流程：T0 采集 → T2 深度研报（{t2}）；"
-            "T1 事实矩阵优先使用缓存（无缓存时 T2 可能失败）。"
+            f"流程：解析标的 → T0 采集（原始数据不压缩）→ T2 深度研报（{t2}）；"
+            "不经 T1，索引框触发为全新推演。"
         )
     if enable_t2:
         return (
-            f"流程：从缓存加载基础数据与事实矩阵 → T2 深度研报（{t2}）；"
-            "不采集、不跑 T1；无缓存请先 T0+T2 或 T0+T1+T2。"
+            f"流程：解析标的 → T2 按布局维度主题自主推演（{t2}）→ 写入；"
+            "不加载 T0/T1 缓存；索引框每次重新分析。"
         )
     return RADAR_STAGE_COMBO_MSG
 
@@ -75,12 +78,12 @@ def scan_steps_for_combo(
     if enable_t0:
         steps.append(("t0", "T0 采集行情与公司资料", 22))
     elif enable_t2:
-        steps.append(("t0", "加载缓存基础数据（T0）", 18))
+        pass
 
     if enable_t1:
         steps.append(("t1", t1_step_label(t1_mode=t1_mode), 48))
-    elif enable_t2 and not enable_t1:
-        steps.append(("t1", "加载缓存事实矩阵（T1）", 38))
+    elif enable_t0 and enable_t2:
+        steps.append(("t1", "T1 已跳过（T0 直供 T2）", 40))
 
     if enable_t2:
         steps.append(("t2", f"T2 深度研报（{t2_lbl}）", 78))
