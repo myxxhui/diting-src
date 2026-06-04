@@ -143,6 +143,14 @@ async def set_stage(
     else:
         _advance(row, target_stage)
     await session.flush()
+    if row.funnel_stage == "executing":
+        from apps.copilot.modules.executing.universe import upsert_executing_collect
+
+        await upsert_executing_collect(
+            session,
+            row.symbol,
+            funnel_stage="executing",
+        )
     return row
 
 

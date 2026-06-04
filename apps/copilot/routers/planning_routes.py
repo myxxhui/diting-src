@@ -88,7 +88,11 @@ from apps.copilot.modules.radar.symbol_resolve import (
     resolve_radar_query,
     suggest_radar_symbols,
 )
-from apps.copilot.modules.radar.t0_cache import file_retention_hours, retention_days
+from apps.copilot.modules.radar.t0.symbol_list import (
+    list_collect_symbol_rows,
+    row_to_dict,
+    set_collect_symbol_enabled,
+)
 from apps.copilot.db.models import AssetState, RadarCandidate, RadarScan
 from apps.copilot.modules.radar.collect_progress import (
     COLLECT_STEP_ORDER,
@@ -750,6 +754,49 @@ async def api_radar_collect_job_status(
     return state
 
 
+@router.get("/api/radar/collect-symbols")
+async def api_radar_collect_symbols(
+    session: AsyncSession = Depends(get_db),
+    enabled_only: bool = False,
+):
+    """基础数据采集标的列表（T0 universe SoT）。"""
+    rows = await list_collect_symbol_rows(session, enabled_only=enabled_only)
+    return {"items": [row_to_dict(r) for r in rows], "count": len(rows)}
+
+
+@router.patch("/api/radar/collect-symbols/{symbol}")
+async def api_radar_collect_symbol_patch(
+    symbol: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """启用/停用采集列表中的标的。"""
+    try:
+        body = await request.json()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="需要 JSON body") from exc
+    if "enabled" not in body:
+        raise HTTPException(status_code=400, detail="缺少 enabled 字段")
+    row = await set_collect_symbol_enabled(session, symbol, enabled=bool(body["enabled"]))
+    if row is None:
+        raise HTTPException(status_code=404, detail="标的不在采集列表中")
+    await session.commit()
+    return row_to_dict(row)
+
+
+@router.delete("/api/radar/collect-symbols/{symbol}")
+async def api_radar_collect_symbol_delete(
+    symbol: str,
+    session: AsyncSession = Depends(get_db),
+):
+    """软删：enabled=false（保留历史采集记录）。"""
+    row = await set_collect_symbol_enabled(session, symbol, enabled=False)
+    if row is None:
+        raise HTTPException(status_code=404, detail="标的不在采集列表中")
+    await session.commit()
+    return row_to_dict(row)
+
+
 @router.post("/api/funnel/symbols/{symbol}/demote")
 async def api_funnel_demote(
     symbol: str,
@@ -1134,10 +1181,12 @@ def _render_collect_progress_panel(state: dict) -> str:
         res = state.get("result") or {}
         vid = _esc(res.get("version_id") or "")
         ok = res.get("t0_ok_parts", "?")
+        enrolled = res.get("enrolled_in_collect_list")
+        enrolled_note = " · 已纳入基础数据采集列表" if enrolled else ""
         footer = (
             f"<div class='text-sm text-green-800 bg-green-50 rounded-lg px-3 py-2'>"
             f"✓ 采集完成 · 版本 <span class='font-mono'>{vid}</span> · "
-            f"T0 就绪 {ok}/4 · "
+            f"T0 就绪 {ok}/4{enrolled_note} · "
             f"<a class='text-blue-600 underline' href='/audit?symbol={sym}'>"
             f"数据审计</a></div>"
         )
@@ -1396,6 +1445,8 @@ def _render_workspace_symbols_html(
                 f"text-gray-600'>移除</button></form>"
                 f"</div>"
                 f"<div id='exec-{sym}' class='mt-3'></div>"
+                f"<div hx-get='/api/executing/{sym}/detail' hx-trigger='load' hx-swap='outerHTML' "
+                f"class='mt-3 border-t pt-3'></div>"
                 f"</div>"
             )
     return HTMLResponse("".join(cards))

@@ -250,11 +250,19 @@ def parse_opus_verdict(
         dims_out[key] = norm
 
     overall = parsed.get("overall") or {}
+    radar_verdict = parsed.get("radar_verdict") or overall.get("radar_verdict") or {}
+    if not radar_verdict:
+        radar_verdict = {
+            "headline": overall.get("conclusion") or "—",
+            "stance": overall.get("action_advisory") or "—",
+            "confidence": _safe_float(overall.get("confidence"), 0.0),
+        }
     return {
         "overall": {
             "conclusion": overall.get("conclusion") or "—",
             "action_advisory": overall.get("action_advisory") or "—",
             "confidence": _safe_float(overall.get("confidence"), 0.0),
+            "radar_verdict": radar_verdict,
         },
         "dimensions": dims_out,
     }

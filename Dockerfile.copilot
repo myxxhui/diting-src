@@ -24,7 +24,8 @@ WORKDIR /app
 
 # ── 依赖层（pyproject 变更才重建；改 apps/ 不触发 pip）────────────────────
 COPY pyproject.toml README.md ./
-RUN mkdir -p apps/__init__.py apps/common/__init__.py apps/copilot/__init__.py scripts/.keep
+RUN mkdir -p apps/common apps/copilot scripts \
+    && touch apps/__init__.py apps/common/__init__.py apps/copilot/__init__.py scripts/.keep
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip setuptools wheel \

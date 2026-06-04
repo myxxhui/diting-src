@@ -1352,6 +1352,38 @@ radar-t0-status:
 radar-t0-clean:
 	@rm -rf data/cache/radar_t0/*.json && echo "✅ radar T0 本地缓存已清"
 
+# ── 雷达 T0 · collect_symbols SoT 一次性采集（27_ §2.1.1 P0）────────────────
+.PHONY: radar-t0-collect-list radar-t0-collect radar-t0-collect-all
+
+radar-t0-collect-list: _ensure-deps
+	@echo "▶ [radar-t0-collect-list] radar_t0_collect_symbols 表"
+	PYTHONPATH=. python3 scripts/radar_t0_collect_once.py --list
+
+radar-t0-collect: _ensure-deps
+	@test -n "$(SYMBOL)" || (echo "用法: make radar-t0-collect SYMBOL=601138" && exit 1)
+	@echo "▶ [radar-t0-collect] UPSERT + T0+T1 · $(SYMBOL)"
+	PYTHONPATH=. python3 scripts/radar_t0_collect_once.py --symbol $(SYMBOL)
+
+radar-t0-collect-all: _ensure-deps
+	@echo "▶ [radar-t0-collect-all] 表内 enabled 标的批量 T0+T1"
+	PYTHONPATH=. python3 scripts/radar_t0_collect_once.py --all
+
+.PHONY: radar-t1-build
+radar-t1-build: _ensure-deps
+	@test -n "$(SYMBOL)" || (echo "用法: make radar-t1-build SYMBOL=601138" && exit 1)
+	@echo "▶ [radar-t1-build] T0+微观 → fact_matrix · $(SYMBOL)"
+	PYTHONPATH=. python3 scripts/radar_t1_build.py --symbol $(SYMBOL)
+
+.PHONY: radar-pipeline-status radar-t0-job
+radar-pipeline-status: _ensure-deps
+	@echo "▶ [radar-pipeline-status] watermark + 表内 stale"
+	PYTHONPATH=. python3 scripts/radar_pipeline_status.py
+
+radar-t0-job: _ensure-deps
+	@test -n "$(JOB)" || (echo "用法: make radar-t0-job JOB=bars-reconcile-daily" && exit 1)
+	@echo "▶ [radar-t0-job] $(JOB)"
+	PYTHONPATH=. python3 -m apps.copilot.jobs.radar_t0 $(JOB)
+
 # ─── D0 copilot · step15（M9 滚动路线图双层锚定）────────────────────────────
 # [Ref: 24_ §9 ⑧ · step_15_滚动路线图双层锚定.md]
 .PHONY: copilot-step15-prep copilot-step15-migrate copilot-step15-timeline copilot-step15-regime
@@ -1481,6 +1513,56 @@ copilot-step17-clean:
 
 copilot-step17-all: copilot-step17-migrate copilot-step17-advise copilot-step17-audit copilot-step17-test copilot-step17-status
 	@echo "✅ [copilot-step17-all] ⑩ 执行中仓位指导本机验收"
+
+# ─── 执行中工作区（28_ · executing workspace）────────────────────────────────
+.PHONY: executing-workspace-migrate executing-import-positions executing-pipeline-status
+.PHONY: executing-daily executing-t0-collect executing-workspace-test executing-workspace-audit
+.PHONY: executing-workspace-all
+
+executing-workspace-migrate: _ensure-deps
+	@echo "▶ [executing-workspace-migrate] step28 表 + init_db"
+	$(RUNPY) -c "import asyncio; from apps.copilot.db.database import init_db; asyncio.run(init_db()); print('✅ executing workspace migrate ok')"
+	@sqlite3 data/copilot.db "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'executing%' OR name='user_positions';" | head -20
+
+executing-import-positions: executing-workspace-migrate
+	@echo "▶ [executing-import-positions] MY_HOLDINGS_YAML → user_positions"
+	MY_HOLDINGS_YAML=$${MY_HOLDINGS_YAML:-data/config/my_holdings.yaml} $(RUNPY) scripts/executing_import_positions.py
+
+executing-pipeline-status: executing-workspace-migrate
+	@echo "▶ [executing-pipeline-status] watermark + stale 报告"
+	$(RUNPY) -m apps.copilot.jobs.executing_t0 --status
+
+executing-t0-collect: executing-workspace-migrate
+	@test -n "$(SYMBOL)" || (echo "用法: make executing-t0-collect SYMBOL=601138" && exit 1)
+	@echo "▶ [executing-t0-collect] T0 全量采集 $(SYMBOL)"
+	COPILOT_REDIS_URL=$${COPILOT_REDIS_URL:-redis://127.0.0.1:6379/0} \
+	  $(RUNPY) -m apps.copilot.jobs.executing_t0 collect-once --symbol $(SYMBOL)
+
+executing-daily: executing-workspace-migrate
+	@test -n "$(SYMBOL)" || (echo "用法: make executing-daily SYMBOL=601138" && exit 1)
+	@echo "▶ [executing-daily] T0→T1→T2 $(SYMBOL)（T2 需 EXECUTING_T2_ENABLED + ANTHROPIC_API_KEY）"
+	COPILOT_REDIS_URL=$${COPILOT_REDIS_URL:-redis://127.0.0.1:6379/0} \
+	  $(RUNPY) -m apps.copilot.jobs.executing_t0 daily-pipeline --symbol $(SYMBOL)
+	@$(MAKE) executing-pipeline-status
+
+executing-workspace-audit:
+	@echo "▶ [executing-workspace-audit] no-auto-execute（执行区路径）"
+	@rg -i "auto_trade|order_id|webhook_target|立即下单|一键下单" apps/copilot/modules/executing/ apps/copilot/routers/executing_routes.py 2>/dev/null && echo "❌ 命中禁词" || echo "✅ 执行区 no-auto-execute 通过"
+
+executing-workspace-test: _ensure-deps executing-workspace-migrate
+	@echo "▶ [executing-workspace-test] pytest test_executing_workspace"
+	$(RUNPY) -m pytest tests/copilot/test_executing_workspace.py -q
+
+executing-workspace-all: executing-import-positions executing-t0-collect executing-daily executing-workspace-audit executing-workspace-test executing-pipeline-status
+	@echo "✅ [executing-workspace-all] 28_ 本机链路验收（SYMBOL 默认需传 601138）"
+
+.PHONY: copilot-executing-tier2-verify
+copilot-executing-tier2-verify:
+	@echo "▶ [copilot-executing-tier2-verify] K3s 生产 28_ 执行中工作区 HTTP 验收（需 prod.conn PUBLIC_IP 可达 NodePort）"
+	$(RUNPY) scripts/copilot_executing_tier2_verify.py
+
+copilot-executing-tier2-verify-k8s:
+	@echo "▶ [copilot-executing-tier2-verify-k8s] 请在 diting-infra 执行 make copilot-executing-workspace-deploy 或 bash scripts/copilot-executing-tier2-verify-k8s.sh"
 
 copilot-step16-tier2-rollout:
 	@echo "▶ [copilot-step16-tier2-rollout] 需在 diting-infra 执行 make copilot-step16-deploy"

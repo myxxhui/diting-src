@@ -285,6 +285,7 @@ def build_bundle_from_pipeline(
         "profile": t0.get("profile"),
         "financials": t0.get("financials"),
         "valuation": t0.get("valuation"),
+        "micro": t0.get("micro"),
         "t1_distilled": pipe.get("t1_distilled"),
         "t2_verdict": pipe.get("t2_verdict"),
     }

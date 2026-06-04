@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Callable, Optional
 
 import redis
@@ -25,13 +26,22 @@ _KLINE_CACHE_PREFIX = "quote:kline:"
 _RT_TTL = 60
 
 
+def _default_redis_url() -> str:
+    return (
+        os.environ.get("COPILOT_REDIS_URL")
+        or os.environ.get("REDIS_URL")
+        or "redis://localhost:6379/0"
+    )
+
+
 class MarketQuoteClient:
     def __init__(
         self,
-        redis_url: str = "redis://localhost:6379/0",
+        redis_url: str | None = None,
         breaker: CircuitBreakerRegistry | None = None,
     ) -> None:
-        self.redis = redis.from_url(redis_url, decode_responses=True)
+        url = redis_url or _default_redis_url()
+        self.redis = redis.from_url(url, decode_responses=True)
         self.breaker = breaker or get_breaker_registry()
 
     def get_realtime(

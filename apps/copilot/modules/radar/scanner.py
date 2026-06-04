@@ -25,6 +25,7 @@ from apps.copilot.modules.radar.t0_cache import (
 logger = logging.getLogger(__name__)
 
 _T0_TIMEOUT = 35.0
+_MICRO_TIMEOUT = 45.0
 
 
 def _cache_enabled() -> bool:
@@ -74,33 +75,41 @@ async def collect_t0_live(
         ("profile", "公司资料", _collect_profile, 45),
         ("financials", "财务摘要", _collect_financials, 62),
         ("valuation", "估值分位", _collect_valuation, 78),
+        ("micro", "微观结构", _collect_micro, 92),
     ]
     quote: dict[str, Any]
     profile: dict[str, Any]
     financials: dict[str, Any]
     valuation: dict[str, Any]
+    micro: dict[str, Any]
 
     if on_step is None:
-        quote, profile, financials, valuation = await asyncio.gather(
+        quote, profile, financials, valuation, micro = await asyncio.gather(
             _safe(_collect_quote, sym),
             _safe(_collect_profile, sym),
             _safe(_collect_financials, sym),
             _safe(_collect_valuation, sym),
+            _safe_micro(sym),
         )
     else:
-        quote = profile = financials = valuation = {"status": "pending"}
+        quote = profile = financials = valuation = micro = {"status": "pending"}
         for step_id, label, fn, pct in _steps:
             on_step(step_id, label, pct, f"正在拉取 {label}…")
-            part = await _safe(fn, sym)
-            st = part.get("status", "?")
+            if step_id == "micro":
+                part = await _safe_micro(sym)
+            else:
+                part = await _safe(fn, sym)
+            st = part.get("status", "?") if step_id != "micro" else _micro_status(part)
             if step_id == "quote":
                 quote = part
             elif step_id == "profile":
                 profile = part
             elif step_id == "financials":
                 financials = part
-            else:
+            elif step_id == "valuation":
                 valuation = part
+            else:
+                micro = part
             on_step(step_id, label, pct, f"{label}：{st}")
 
     resolved_name = name
@@ -108,7 +117,9 @@ async def collect_t0_live(
         resolved_name = profile.get("name") or sym
     resolved_name = resolved_name or sym
 
-    return {
+    domains = await _safe_domains(sym)
+    macro_snap = domains.get("macro", {}).get("market_sentiment")
+    out = {
         "symbol": sym,
         "name": resolved_name,
         "collected_at": datetime.utcnow().isoformat(),
@@ -118,7 +129,69 @@ async def collect_t0_live(
         "profile": profile,
         "financials": financials,
         "valuation": valuation,
+        "micro": domains.get("micro") or micro,
     }
+    for key in ("macro", "ecosystem", "consensus", "risk"):
+        if domains.get(key):
+            out[key] = domains[key]
+    eco_prof = (domains.get("ecosystem") or {}).get("profile")
+    if isinstance(eco_prof, dict) and eco_prof.get("status") == "ok":
+        out["profile"] = eco_prof
+    reg = (domains.get("risk") or {}).get("regulatory_events")
+    if isinstance(reg, dict) and reg.get("status") == "ok":
+        out.setdefault("risk", {})["regulatory_events"] = reg
+    if macro_snap and macro_snap.get("status") == "ok":
+        out.setdefault("macro", {})["market_sentiment"] = macro_snap
+    return out
+
+
+async def _safe_domains(sym: str) -> dict[str, Any]:
+    try:
+        from apps.copilot.modules.radar.t0.collectors.market_sentiment import load_macro_for_scan
+        from apps.copilot.modules.radar.t0.collectors.symbol_bundle import collect_symbol_domains
+
+        macro = load_macro_for_scan()
+        return await asyncio.wait_for(
+            asyncio.to_thread(collect_symbol_domains, sym, macro_snapshot=macro),
+            timeout=120.0,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("T0 domains(%s) failed: %s", sym, exc)
+        return {}
+
+
+def _micro_status(micro: dict[str, Any]) -> str:
+    ok = sum(
+        1
+        for k in ("bars_250d", "northbound", "margin", "dragon_tiger")
+        if (micro.get(k) or {}).get("status") == "ok"
+    )
+    skip = sum(
+        1
+        for k in ("bars_250d", "northbound", "margin", "dragon_tiger")
+        if (micro.get(k) or {}).get("status") == "skip"
+    )
+    return f"ok={ok}/skip={skip}"
+
+
+def _collect_micro(sym: str) -> dict[str, Any]:
+    from apps.copilot.modules.radar.t0.collectors.microstructure import collect_microstructure
+
+    return collect_microstructure(sym)
+
+
+async def _safe_micro(sym: str) -> dict[str, Any]:
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(_collect_micro, sym), timeout=_MICRO_TIMEOUT)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("T0 micro(%s) failed: %s", sym, exc)
+        err = {"status": "error", "detail": f"{type(exc).__name__}: {str(exc)[:160]}"}
+        return {
+            "bars_250d": err,
+            "northbound": err,
+            "margin": err,
+            "dragon_tiger": err,
+        }
 
 
 async def _safe(fn, sym: str) -> dict[str, Any]:

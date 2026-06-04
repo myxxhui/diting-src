@@ -34,9 +34,12 @@ class Bar:
 
 def _from_market_quote(symbol: str, days: int = 60) -> list[Bar] | None:
     try:
+        import os
+
         from apps.common.market_quote import MarketQuoteClient
 
-        client = MarketQuoteClient()
+        url = os.environ.get("COPILOT_REDIS_URL") or os.environ.get("REDIS_URL")
+        client = MarketQuoteClient(redis_url=url) if url else MarketQuoteClient()
         klines = client.get_recent_kline(symbol, days=days)
         if not klines:
             return None
@@ -116,14 +119,25 @@ def _from_akshare(symbol: str, days: int = 60) -> list[Bar] | None:
 
 
 def fetch_bars_60d(symbol: str) -> list[Bar]:
-    bars = _from_market_quote(symbol, 60)
+    return fetch_bars(symbol, 60)
+
+
+def fetch_bars(symbol: str, days: int = 60) -> list[Bar]:
+    """近 N 日 K 线（腾讯/新浪 → 东财 akshare 降级）。"""
+    bars = _from_market_quote(symbol, days)
     if bars:
         return bars
-    bars = _from_akshare(symbol, 60)
+    bars = _from_akshare(symbol, days)
     if bars:
         return bars
     logger.warning(
-        "行情不可用 symbol=%s（MarketQuote 腾讯/新浪 + 东财 akshare 均失败），返回空列表",
+        "行情不可用 symbol=%s days=%d（MarketQuote + akshare 均失败），返回空列表",
         symbol,
+        days,
     )
     return []
+
+
+def fetch_bars_250d(symbol: str) -> list[Bar]:
+    """T0-8 · 近 250 日前复权 OHLCV（P1）。"""
+    return fetch_bars(symbol, 250)

@@ -49,6 +49,10 @@ def _should_persist_display_name(stored: str | None, sym: str, resolved: str) ->
         and resolved != sym
         and not _is_valid_chinese_name(stored, sym)
     )
+from apps.copilot.modules.radar.t0.symbol_list import (
+    touch_collect_symbol,
+    upsert_collect_symbol,
+)
 from apps.copilot.modules.radar.t0_cache import (
     build_bundle_from_pipeline,
     load_cached,
@@ -167,6 +171,7 @@ async def create_symbol_scan(
         scan_origin=scan_origin,
         progress_cb=progress_cb,
     )
+    bg_sink = pipe.pop("_bg_sink", None)
 
     version_id: str | None = None
     fresh_write = force_refresh or scan_origin == "workbench"
@@ -230,6 +235,7 @@ async def create_symbol_scan(
         "confidence": fields.get("confidence"),
         "t2_status": t2.get("status"),
         "t2_detail": t2.get("detail"),
+        "stage_status": pipe.get("stage_status") or {},
         "cost": cost,
     }
 
@@ -243,7 +249,9 @@ async def create_symbol_scan(
     if progress_cb is not None:
         progress_cb("done", "分析完成", 100, "")
 
-    return await get_scan(session, scan.id)
+    out = await get_scan(session, scan.id)
+    out["_bg_sink"] = bg_sink
+    return out
 
 
 async def run_scan_job(
@@ -266,7 +274,7 @@ async def run_scan_job(
     cb = make_progress_callback(redis_client, scan_id)
     async with AsyncSessionLocal() as session:
         try:
-            await create_symbol_scan(
+            result = await create_symbol_scan(
                 session,
                 query_text=query_text,
                 redis_client=redis_client,
@@ -280,7 +288,10 @@ async def run_scan_job(
                 progress_cb=cb,
                 scan_id=scan_id,
             )
+            bg_sink = result.pop("_bg_sink", None)
             await session.commit()
+            if bg_sink is not None:
+                await bg_sink.drain()
             finish_scan(redis_client, scan_id, {"scan_id": scan_id})
         except Exception as exc:  # noqa: BLE001
             await session.rollback()
@@ -313,13 +324,23 @@ async def collect_symbol_t0_only(
     redis_client: Any = None,
     run_t1: bool = True,
     progress_cb: Any = None,
+    job_id: str | None = None,
 ) -> dict[str, Any]:
-    """仅采集 T0（可选自动 T1），不写 T2；结果入库并返回状态。"""
+    """仅采集 T0（可选自动 T1），不写 T2；入 collect_symbols 表并入库缓存。"""
     try:
         sym, name = resolve_radar_query(query_text)
     except RadarSymbolResolveError as exc:
         raise ValueError(str(exc)) from exc
 
+    await upsert_collect_symbol(
+        session,
+        symbol=sym,
+        name=name,
+        enrolled_by="workbench",
+        enabled=True,
+    )
+
+    bg_sink = None
     if progress_cb is not None:
         progress_cb("resolve", f"已解析 {sym} · {name}", 8, "")
         t0_raw = await collect_t0_live(sym, name=name, on_step=progress_cb)
@@ -336,17 +357,36 @@ async def collect_symbol_t0_only(
             "t2_from_cache": False,
         }
     else:
-        pipe = await run_radar_pipeline(
-            session,
-            symbol=sym,
+        # Cron / collect-once：仅 T0（可选 T1），不走工作台三组合校验
+        from apps.copilot.modules.radar.scanner import collect_t0_raw
+        from apps.copilot.modules.radar.t1_distill import build_t1_payload
+
+        t0_raw = await collect_t0_raw(
+            sym,
             name=name,
-            enable_t0=True,
-            enable_t1=run_t1,
-            enable_t2=False,
-            force_refresh_t0=True,
-            force_refresh_t2=False,
             redis_client=redis_client,
+            force_refresh=True,
         )
+        if run_t1:
+            t1_payload = await build_t1_payload(t0_raw)
+        else:
+            t1_payload = {
+                "matrix": {},
+                "unavailable": [],
+                "skipped": True,
+                "status": "skipped",
+            }
+        pipe = {
+            "t0_raw": t0_raw,
+            "t1_distilled": t1_payload,
+            "t2_verdict": {"status": "skipped", "detail": "仅采集模式"},
+            "t0_id": None,
+            "t1_id": None,
+            "t2_id": None,
+            "wa_id": None,
+            "t2_from_cache": False,
+        }
+        bg_sink = None
 
     if progress_cb:
         progress_cb("persist", "写入文件缓存与数据库", 96, "")
@@ -356,6 +396,8 @@ async def collect_symbol_t0_only(
     await sync_bundle_to_db(session, bundle)
     await upsert_funnel_symbol(session, sym, name, stage="radar_intake")
     await touch_last_analyzed(session, sym)
+    if job_id:
+        await touch_collect_symbol(session, sym, job_id=job_id)
     await session.flush()
 
     ok_parts = sum(
@@ -371,6 +413,8 @@ async def collect_symbol_t0_only(
         "t1_done": run_t1,
         "t0_ok_parts": ok_parts,
         "status": "ok",
+        "enrolled_in_collect_list": True,
+        "_bg_sink": bg_sink,
     }
 
 
@@ -404,8 +448,12 @@ async def run_collect_job(
                 query_text=query_text,
                 redis_client=redis_client,
                 progress_cb=cb,
+                job_id=job_id,
             )
+            bg_sink = result.pop("_bg_sink", None)
             await session.commit()
+            if bg_sink is not None:
+                await bg_sink.drain()
             finish_job(redis_client, job_id, result)
         except Exception as exc:  # noqa: BLE001
             await session.rollback()

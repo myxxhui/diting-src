@@ -1,0 +1,83 @@
+# 执行中工作区 · 601138 工业富联 profile
+# [Ref: 28_ §4.5 · 禁止 hardcode 于代码]
+
+symbol: "601138"
+name: "工业富联"
+profile: "601138"
+
+probes:
+  nvda_gpu_leadtime:
+    cadence: weekly
+    stale_days: 7
+  tsmc_cowos_capacity:
+    cadence: dynamic
+    stale_days: 7
+  parent_honhai_revenue:
+    cadence: monthly
+    stale_days: 35
+  cloud_capex_consensus:
+    cadence: quarterly
+    stale_days: 120
+  smci_quanta_share:
+    cadence: quarterly
+    stale_days: 120
+  gb200_iteration_node:
+    cadence: daily
+    stale_days: 1
+  inventory_turnover:
+    cadence: quarterly
+    stale_days: 120
+  contract_liabilities:
+    cadence: quarterly
+    stale_days: 120
+  copper_cost_pressure:
+    cadence: daily
+    stale_days: 1
+  cpi_ppi_spread:
+    cadence: monthly
+    stale_days: 35
+  exchange_rate_impact:
+    cadence: daily
+    stale_days: 1
+  mgmt_and_core_team:
+    cadence: daily
+    stale_days: 1
+  related_party_trans:
+    cadence: quarterly
+    stale_days: 120
+  gross_margin_trend:
+    cadence: quarterly
+    stale_days: 120
+  qmt_atr_trailing:
+    cadence: daily
+    stale_days: 1
+  volume_price_div:
+    cadence: daily
+    stale_days: 1
+  northbound_net_flow:
+    cadence: daily
+    stale_days: 1
+  level2_super_order:
+    cadence: daily
+    stale_days: 1
+  margin_short_skew:
+    cadence: daily
+    stale_days: 1
+  turnover_acceleration:
+    cadence: daily
+    stale_days: 1
+  block_trade_discount:
+    cadence: daily
+    stale_days: 1
+  retail_concentration:
+    cadence: dynamic
+    stale_days: 35
+  insider_sell_actual:
+    cadence: daily
+    stale_days: 1
+  etf_redemption_impact:
+    cadence: weekly
+    stale_days: 7
+  tech_beta_correlation:
+    cadence: daily
+    stale_days: 1

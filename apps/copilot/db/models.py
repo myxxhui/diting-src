@@ -576,6 +576,61 @@ class RadarSymbolVersion(Base):
     )
 
 
+class RadarT0CollectSymbol(Base):
+    """基础数据采集标的列表 · T0 一次性/定时任务唯一 universe。
+
+    [Ref: 27_行情雷达全链路架构设计优化 §2.1.1]
+    """
+
+    __tablename__ = "radar_t0_collect_symbols"
+
+    symbol: Mapped[str] = mapped_column(String(6), primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    enrolled_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    enrolled_by: Mapped[str] = mapped_column(String(32), nullable=False, default="workbench")
+    last_collect_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_collect_job: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    last_trade_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class RadarMarketSentimentDaily(Base):
+    """T0-1 全市场情绪日定稿。
+
+    [Ref: 27_ §2.2.1]
+    """
+
+    __tablename__ = "radar_market_sentiment_daily"
+
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    total_turnover_yi: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    turnover_vs_prev_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    advance_ratio: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    limit_up_height: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    snapshot_json: Mapped[dict] = mapped_column(JSON_TYPE, nullable=False, default=dict)
+    finalized_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    source: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+
+class RadarT0SyncWatermark(Base):
+    """T0 CronJob / bootstrap 水位表。
+
+    [Ref: 27_ §2.8.3]
+    """
+
+    __tablename__ = "radar_t0_sync_watermarks"
+
+    job_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_trade_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    last_row_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    catch_up_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
 # ─── M9 滚动路线图双层锚定（step_15）────────────────────────────────────────────
 
 
@@ -613,6 +668,133 @@ class ExecutionAdvice(Base):
     )
 
     campaign: Mapped["Campaign"] = relationship()
+
+
+# ─── 执行中工作区（28_ · executing workspace）──────────────────────────────────
+
+
+class UserPosition(Base):
+    """执行区持仓真值（前端 CRUD · DB SoT）。
+
+    [Ref: 28_ §5.3]
+    """
+
+    __tablename__ = "user_positions"
+
+    symbol: Mapped[str] = mapped_column(String(6), primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    cost_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    position_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    opened_at: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="ui")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class ExecutingCollectSymbol(Base):
+    """执行区 T0 采集宇宙 SoT。
+
+    [Ref: 28_ §4.2]
+    """
+
+    __tablename__ = "executing_collect_symbols"
+
+    symbol: Mapped[str] = mapped_column(String(6), primary_key=True)
+    profile: Mapped[str] = mapped_column(String(32), nullable=False, default="601138")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    funnel_stage: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    enrolled_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class ExecutingT0SyncWatermark(Base):
+    """执行区 T0 job 水位。
+
+    [Ref: 28_ §4.3]
+    """
+
+    __tablename__ = "executing_t0_sync_watermarks"
+
+    job_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(6), primary_key=True, default="*")
+    last_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_trade_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    last_period_key: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    last_row_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    catch_up_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class ExecutingT0ProbeState(Base):
+    """25 探针逐项新鲜度。
+
+    [Ref: 28_ §4.3 §4.5]
+    """
+
+    __tablename__ = "executing_t0_probe_state"
+
+    symbol: Mapped[str] = mapped_column(String(6), primary_key=True)
+    probe_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    as_of: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    collected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    stale_after: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="missing")
+    blocker: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class ExecutingT0Raw(Base):
+    """T0 原始采集落库（按 probe_key 追加）。"""
+
+    __tablename__ = "executing_t0_raw"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    probe_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    trade_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    payload_json: Mapped[dict] = mapped_column(JSON_TYPE, nullable=False, default=dict)
+    source: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class ExecutingDailyAudit(Base):
+    """T1 telemetry + T2 audit 日快照。"""
+
+    __tablename__ = "executing_daily_audits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    telemetry_json: Mapped[dict] = mapped_column(JSON_TYPE, nullable=False, default=dict)
+    audit_json: Mapped[dict] = mapped_column(JSON_TYPE, nullable=False, default=dict)
+    run_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    t2_status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class ExecutingPipelineRun(Base):
+    """交互式 daily-run 进度。"""
+
+    __tablename__ = "executing_pipeline_runs"
+
+    run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="running")
+    stage: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    progress_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class RegimeAssessment(Base):

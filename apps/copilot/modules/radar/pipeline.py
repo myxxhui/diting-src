@@ -12,6 +12,7 @@ from typing import Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.copilot.db.models import StageArtifact, WorkspaceArtifact
+from apps.copilot.modules.radar.bg_tasks import BackgroundArtifactSink
 from apps.copilot.modules.radar.display_layout import default_layout, load_saved_layout
 from apps.copilot.modules.radar.model_router import t1_step_label
 from apps.copilot.modules.radar.t1_distill import build_t1_payload
@@ -76,7 +77,7 @@ async def run_radar_pipeline(
     t0_t2 = enable_t0 and enable_t2 and not enable_t1
     full_chain = enable_t0 and enable_t1 and enable_t2
 
-    t0_art: StageArtifact | None = None
+    bg_sink = BackgroundArtifactSink()
     if enable_t0:
         if progress_cb is not None:
             progress_cb("t0", "T0 采集行情与公司资料", 20, symbol)
@@ -87,8 +88,7 @@ async def run_radar_pipeline(
             redis_client=redis_client,
             force_refresh=t0_refresh,
         )
-        t0_art = await _save_artifact(
-            session,
+        bg_sink.fire(
             stage="T0_raw",
             model_id="code:t0_collect",
             payload=t0_raw,
@@ -104,7 +104,6 @@ async def run_radar_pipeline(
     else:
         raise ValueError("当前阶段组合需要勾选 T0 或仅 T2")
 
-    t1_art: StageArtifact | None = None
     if enable_t1:
         if progress_cb is not None:
             hit = "" if workbench_fresh else (
@@ -117,18 +116,22 @@ async def run_radar_pipeline(
         if not workbench_fresh and t0_raw.get("cache_hit"):
             cached_t1 = t0_raw.get("t1_distilled")
         if isinstance(cached_t1, dict) and cached_t1.get("matrix"):
-            t1_payload = cached_t1
+            from apps.copilot.modules.radar.t1.fact_matrix_builder import enrich_t1_payload
+
+            t1_payload = (
+                cached_t1
+                if cached_t1.get("fact_matrix")
+                else enrich_t1_payload(t0_raw, dict(cached_t1))
+            )
         else:
             t1_payload = await build_t1_payload(t0_raw, t1_mode=t1_mode)
-        t1_art = await _save_artifact(
-            session,
+        bg_sink.fire(
             stage="T1_distilled",
             model_id=t1_profile["model_id"],
             payload=t1_payload,
             symbol=symbol,
             scan_id=scan_id,
             candidate_id=candidate_id,
-            input_refs=[t0_art.id] if t0_art else [],
             latency_ms=int((time.perf_counter() - t1_start) * 1000),
         )
     else:
@@ -185,17 +188,14 @@ async def run_radar_pipeline(
             or t2_payload.get("stale_fallback")
         )
     )
-    t2_art: StageArtifact | None = None
     if enable_t2:
-        t2_art = await _save_artifact(
-            session,
+        bg_sink.fire(
             stage="T2_verdict",
             model_id=t2_payload.get("model_id", t2_profile["model_id"]),
             payload=t2_payload,
             symbol=symbol,
             scan_id=scan_id,
             candidate_id=candidate_id,
-            input_refs=[t1_art.id] if t1_art else ([t0_art.id] if t0_art else []),
             latency_ms=int((time.perf_counter() - t2_start) * 1000),
             token_cost=float(t2_payload.get("token_cost") or 0.0),
         )
@@ -210,20 +210,31 @@ async def run_radar_pipeline(
             key_facts={
                 "matrix": t1_payload.get("matrix"),
                 "unavailable": t1_payload.get("unavailable"),
+                "fact_matrix": t1_payload.get("fact_matrix"),
+                "unavailable_data": t1_payload.get("unavailable_data"),
             },
             verdict=t2_payload.get("deep_analysis") or {"status": t2_payload.get("status")},
             confidence=float(t2_payload.get("confidence") or 0.0),
-            upstream_refs=[t2_art.id] if t2_art else [],
-            t2_artifact_id=t2_art.id if t2_art else None,
+            upstream_refs=[],
+            t2_artifact_id=None,
         )
         session.add(wa)
         await session.flush()
         wa_id = wa.id
 
+    stage_status = _build_stage_status(
+        enable_t0=enable_t0,
+        enable_t1=enable_t1,
+        enable_t2=enable_t2,
+        t0_raw=t0_raw,
+        t1_payload=t1_payload,
+        t2_payload=t2_payload,
+    )
+
     return {
-        "t0_id": t0_art.id if t0_art else None,
-        "t1_id": t1_art.id if t1_art else None,
-        "t2_id": t2_art.id if t2_art else None,
+        "t0_id": None,
+        "t1_id": None,
+        "t2_id": None,
         "wa_id": wa_id,
         "t0_raw": t0_raw,
         "t1_distilled": t1_payload,
@@ -236,6 +247,8 @@ async def run_radar_pipeline(
         "enable_t0": enable_t0,
         "enable_t1": enable_t1,
         "enable_t2": enable_t2,
+        "stage_status": stage_status,
+        "_bg_sink": bg_sink,
     }
 
 
@@ -329,6 +342,49 @@ async def _run_t2_for_combo(
                 "stale_fallback": True,
             }
     return t2_payload
+
+
+def _build_stage_status(
+    *,
+    enable_t0: bool,
+    enable_t1: bool,
+    enable_t2: bool,
+    t0_raw: dict[str, Any],
+    t1_payload: dict[str, Any],
+    t2_payload: dict[str, Any],
+) -> dict[str, str]:
+    """HTMX / summary_json 段状态：running|ok|skipped|error。"""
+
+    def _t0() -> str:
+        if not enable_t0:
+            return "skipped"
+        if t0_raw.get("source") == "resolve_only":
+            return "ok"
+        ok = sum(
+            1
+            for k in ("quote", "profile", "financials", "valuation")
+            if (t0_raw.get(k) or {}).get("status") == "ok"
+        )
+        return "ok" if ok else "error"
+
+    def _t1() -> str:
+        if not enable_t1:
+            return "skipped"
+        if t1_payload.get("skipped"):
+            return "skipped"
+        if t1_payload.get("fact_matrix") or t1_payload.get("matrix"):
+            return "ok"
+        return "error"
+
+    def _t2() -> str:
+        if not enable_t2:
+            return "skipped"
+        st = str(t2_payload.get("status") or "error")
+        if st in ("ok", "skipped", "disabled"):
+            return st if st != "disabled" else "skipped"
+        return "error"
+
+    return {"t0": _t0(), "t1": _t1(), "t2": _t2()}
 
 
 async def _save_artifact(

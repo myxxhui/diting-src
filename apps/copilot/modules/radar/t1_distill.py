@@ -10,6 +10,7 @@ import logging
 from typing import Any
 
 from apps.copilot.modules.radar.context_matrix import build_context_matrix
+from apps.copilot.modules.radar.t1.fact_matrix_builder import enrich_t1_payload
 from apps.copilot.modules.radar.model_router import (
     radar_t1_uses_deepseek,
     t1_step_label,
@@ -26,7 +27,7 @@ async def build_t1_payload(
 ) -> dict[str, Any]:
     """T1 输出：优先 DeepSeek 压缩；失败或未配置则 rule。t1_mode: rule | deepseek | None=auto。"""
     if not t1_uses_deepseek_mode(t1_mode):
-        return build_context_matrix(t0_raw)
+        return enrich_t1_payload(t0_raw, build_context_matrix(t0_raw))
     try:
         return await _build_context_matrix_deepseek(t0_raw)
     except Exception as exc:  # noqa: BLE001
@@ -34,7 +35,7 @@ async def build_t1_payload(
         out = build_context_matrix(t0_raw)
         out["t1_fallback"] = "rule"
         out["t1_error"] = str(exc)[:200]
-        return out
+        return enrich_t1_payload(t0_raw, out)
 
 
 async def _build_context_matrix_deepseek(t0_raw: dict[str, Any]) -> dict[str, Any]:
@@ -75,19 +76,22 @@ async def _build_context_matrix_deepseek(t0_raw: dict[str, Any]) -> dict[str, An
     resp = await asyncio.to_thread(_blocking)
     parsed = _parse_matrix_json(resp.text)
     model_id = resp.model or "deepseek:deepseek-chat"
-    return {
-        "model_id": model_id,
-        "t1_fallback": "deepseek",
-        "symbol": sym,
-        "name": name,
-        "matrix": parsed.get("matrix") or {},
-        "unavailable": parsed.get("unavailable") or [],
-        "fact_count": len(parsed.get("matrix") or {}),
-        "tokens_in": resp.tokens_in,
-        "tokens_out": resp.tokens_out,
-        "cost_yuan": resp.cost_yuan_est,
-        "t1_step_label": t1_step_label(),
-    }
+    return enrich_t1_payload(
+        t0_raw,
+        {
+            "model_id": model_id,
+            "t1_fallback": "deepseek",
+            "symbol": sym,
+            "name": name,
+            "matrix": parsed.get("matrix") or {},
+            "unavailable": parsed.get("unavailable") or [],
+            "fact_count": len(parsed.get("matrix") or {}),
+            "tokens_in": resp.tokens_in,
+            "tokens_out": resp.tokens_out,
+            "cost_yuan": resp.cost_yuan_est,
+            "t1_step_label": t1_step_label(),
+        },
+    )
 
 
 def _parse_matrix_json(text: str) -> dict[str, Any]:

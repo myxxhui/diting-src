@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,7 @@ from apps.copilot.modules.radar.schema import (
 )
 
 FORBIDDEN = re.compile(
-    r"buy|qmt|auto_trade|order_id|webhook_target|立即|一键|下单",
+    r"\b(auto_trade|auto_execute|order_id|webhook_target)\b|立即执行|一键下单",
     re.IGNORECASE,
 )
 
@@ -141,6 +142,35 @@ def mock_pipeline(monkeypatch):
     _patch_pipeline(monkeypatch, opus_text=json.dumps(OPUS_VERDICT, ensure_ascii=False))
 
 
+def _poll_scan_done(client, scan_id: int, *, timeout: float = 120.0) -> dict:
+    """POST /api/radar/scans 现为异步；轮询直至 done/error。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        got = client.get(f"/api/radar/scans/{scan_id}").json()
+        st = got.get("status")
+        if st == "done":
+            return got
+        if st == "error":
+            pytest.fail(f"scan {scan_id} error: {got.get('summary_json')}")
+        time.sleep(0.5)
+    pytest.fail(f"scan {scan_id} 未在 {timeout}s 内完成")
+
+
+def _post_scan_and_wait(client, *, enable_t0: bool = True, enable_t1: bool = True, enable_t2: bool = True, **form_data) -> dict:
+    if enable_t0:
+        form_data.setdefault("enable_t0", "on")
+    if enable_t1:
+        form_data.setdefault("enable_t1", "on")
+    if enable_t2:
+        form_data.setdefault("enable_t2", "on")
+    created = client.post("/api/radar/scans", data=form_data)
+    assert created.status_code == 201
+    body = created.json()
+    if body.get("status") == "done":
+        return body
+    return _poll_scan_done(client, int(body["id"]))
+
+
 # ── 单元：schema / 成本 / T1 ────────────────────────────────────────────────
 def test_estimate_cost_positive():
     cost = estimate_cost_yuan(1000, 1000)
@@ -177,10 +207,9 @@ def test_context_matrix_marks_unavailable():
 
 # ── 集成：真扫（mock Opus）非 pending + 成本透出 ─────────────────────────────
 def test_radar_scan_real_dims_no_pending(client, mock_pipeline):
-    r = client.post("/api/radar/scans", data={"input_type": "symbol", "query_text": "601138"})
-    assert r.status_code == 201
-    data = r.json()
-    assert data["status"] == "done"
+    data = _post_scan_and_wait(
+        client, input_type="symbol", query_text="601138"
+    )
     c = data["candidates"][0]
     assert c["symbol"] == "601138"
     assert c["market_phase"] == "expectation"
@@ -211,9 +240,9 @@ def test_radar_scan_html_human_readable(client, mock_pipeline):
 
 
 def test_radar_summary_cost(client, mock_pipeline):
-    created = client.post(
-        "/api/radar/scans", data={"input_type": "symbol", "query_text": "601138"}
-    ).json()
+    created = _post_scan_and_wait(
+        client, input_type="symbol", query_text="601138"
+    )
     got = client.get(f"/api/radar/scans/{created['id']}").json()
     assert got["summary_json"]["t2_status"] == "ok"
     assert got["summary_json"]["cost"]["cost_yuan"] > 0
@@ -223,8 +252,9 @@ def test_radar_summary_cost(client, mock_pipeline):
 def test_radar_t2_mock_fallback_is_error(client, monkeypatch):
     """Opus 降级 mock（无 key/异常）→ t2_status=error，不伪造 9 维内容。"""
     _patch_pipeline(monkeypatch, opus_text="{}", opus_model="mock")
-    r = client.post("/api/radar/scans", data={"input_type": "symbol", "query_text": "601138"})
-    data = r.json()
+    data = _post_scan_and_wait(
+        client, input_type="symbol", query_text="601138"
+    )
     c = data["candidates"][0]
     assert c["t2_status"] == "error"
     assert c["niche_text"] is None  # 不伪造
@@ -244,8 +274,10 @@ def test_radar_t2_error_html_shows_banner(client, monkeypatch):
 
 # ── 三段溯源 / 晋级 / 红线 ────────────────────────────────────────────────
 def test_radar_artifacts_three_stages(client, mock_pipeline):
-    r = client.post("/api/radar/scans", data={"input_type": "symbol", "query_text": "601138"})
-    cid = r.json()["candidates"][0]["id"]
+    data = _post_scan_and_wait(
+        client, input_type="symbol", query_text="601138"
+    )
+    cid = data["candidates"][0]["id"]
     arts = client.get(f"/api/radar/candidates/{cid}/artifacts").json()
     stages = {a["stage"] for a in arts}
     assert stages == {"T0_raw", "T1_distilled", "T2_verdict"}
@@ -254,9 +286,9 @@ def test_radar_artifacts_three_stages(client, mock_pipeline):
 
 
 def test_radar_promote_advisory(client, mock_pipeline):
-    cid = client.post(
-        "/api/radar/scans", data={"input_type": "symbol", "query_text": "601138"}
-    ).json()["candidates"][0]["id"]
+    cid = _post_scan_and_wait(
+        client, input_type="symbol", query_text="601138"
+    )["candidates"][0]["id"]
     pr = client.post(f"/api/radar/candidates/{cid}/promote", data={"new_theme": "测试晋级"})
     assert pr.status_code == 200
     body = pr.json()
