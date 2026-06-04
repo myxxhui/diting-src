@@ -142,7 +142,33 @@ async def lifespan(app: FastAPI):
     else:
         app.state.alert_consumer_task = None
 
+    async def _purge_funnel_expired() -> None:
+        from apps.copilot.modules.planning.funnel import purge_expired_ui_removed
+
+        async with AsyncSessionLocal() as session:
+            await purge_expired_ui_removed(session)
+            await session.commit()
+
+    async def _warm_radar_names() -> None:
+        from apps.copilot.modules.radar.symbol_resolve import warm_market_name_index
+
+        n = await asyncio.to_thread(warm_market_name_index)
+        if n:
+            print(f"[copilot] A 股简称索引已预热：{n} 条", flush=True)
+
+    app.state.radar_bg_tasks = [
+        asyncio.create_task(_warm_radar_names()),
+        asyncio.create_task(_purge_funnel_expired()),
+    ]
+
     yield
+
+    for t in getattr(app.state, "radar_bg_tasks", []) or []:
+        t.cancel()
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
 
     report_scheduler = getattr(app.state, "report_scheduler", None)
     if report_scheduler:

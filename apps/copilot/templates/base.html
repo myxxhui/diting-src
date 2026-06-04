@@ -16,35 +16,43 @@
     }
   </script>
   <style>
-    /* 全局兼容基础层（供未迁移页继续使用 .card 等老 class） */
     body {
       font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
       margin: 0; padding: 0;
-      background-color: #f3f4f6; /* gray-100 */
+      background-color: #f3f4f6;
       color: #111827;
     }
-    /* 顶部导航 */
     nav.site-nav {
       background: #111827;
       color: white;
-      padding: 0 24px;
+      padding: 0 20px;
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 2px;
       height: 52px;
+      flex-wrap: nowrap;
     }
     nav.site-nav .nav-brand {
       font-size: 0.95rem;
       font-weight: 700;
       color: #e5e7eb;
-      margin-right: 16px;
+      margin-right: 12px;
       letter-spacing: 0.02em;
+      flex-shrink: 0;
+    }
+    nav.site-nav .nav-main {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex: 1;
+      min-width: 0;
+      overflow-x: auto;
     }
     nav.site-nav a {
       color: #d1d5db;
       text-decoration: none;
-      font-size: 0.88rem;
-      padding: 6px 12px;
+      font-size: 0.86rem;
+      padding: 6px 11px;
       border-radius: 6px;
       transition: background 0.15s, color 0.15s;
       white-space: nowrap;
@@ -58,8 +66,22 @@
       background: #2563eb;
       color: white;
     }
-    main { padding: 28px 24px; max-width: 1200px; margin: 0 auto; }
-    /* 旧版 .card 兼容 */
+    nav.site-nav .nav-settings {
+      margin-left: auto;
+      flex-shrink: 0;
+      background: #1f2937;
+      border: 1px solid #374151;
+    }
+    nav.site-nav .nav-settings:hover {
+      background: #374151;
+      border-color: #4b5563;
+    }
+    nav.site-nav .nav-settings.nav-active {
+      background: #4b5563;
+      border-color: #6b7280;
+      color: #f9fafb;
+    }
+    main { padding: 28px 24px; max-width: 1280px; margin: 0 auto; }
     .card {
       background: white;
       border-radius: 12px;
@@ -75,17 +97,25 @@
     button { padding: 6px 14px; border: 1px solid #d1d5db; border-radius: 6px; background: white; cursor: pointer; color: #374151; }
     button.primary { background: #2563eb; color: white; border-color: #2563eb; }
     input, select { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; }
+    .htmx-indicator { opacity: 0; visibility: hidden; pointer-events: none; }
+    .htmx-request .htmx-indicator,
+    .htmx-request.htmx-indicator { opacity: 1; visibility: visible; pointer-events: auto; }
   </style>
 </head>
-<body class="bg-gray-100 min-h-screen">
+<body class="bg-gray-100 min-h-screen" hx-headers='{"Accept":"text/html","HX-Request":"true"}'>
+  {% set _path = request.url.path %}
   <nav class="site-nav">
     <span class="nav-brand">AI 投资副驾驶</span>
-    <a href="/">总览</a>
-    <a href="/portfolio-guard">🛡️ 持仓监管</a>
-    <a href="/planning">📡 行情解析及规划</a>
-    <a href="/graph">🕸️ 产业图谱</a>
-    <a href="/value">📒 价值账本</a>
-    <a href="/system">⚙️ 系统</a>
+    <div class="nav-main">
+      <a href="/" class="{% if _path == '/' %}nav-active{% endif %}">总览</a>
+      <a href="/portfolio-guard" class="{% if _path.startswith('/portfolio-guard') %}nav-active{% endif %}">持仓监管</a>
+      <a href="/planning" class="{% if _path.startswith('/planning') %}nav-active{% endif %}">行情解析及规划</a>
+      <a href="/graph" class="{% if _path.startswith('/graph') %}nav-active{% endif %}">产业图谱</a>
+      <a href="/value" class="{% if _path.startswith('/value') %}nav-active{% endif %}">价值账本</a>
+      <a href="/audit" class="{% if _path.startswith('/audit') %}nav-active{% endif %}">审计</a>
+      <a href="/opus" class="{% if _path.startswith('/opus') %}nav-active{% endif %}">Opus 对话</a>
+    </div>
+    <a href="/settings" class="nav-settings {% if _path.startswith('/settings') or _path.startswith('/system') %}nav-active{% endif %}">设置</a>
   </nav>
   <main>
     {% block content %}{% endblock %}

@@ -14,7 +14,12 @@ from apps.copilot.db.models import StageArtifact, WorkspaceArtifact
 from apps.copilot.modules.radar.context_matrix import build_context_matrix
 from apps.copilot.modules.radar.model_router import radar_t2_enabled, resolve_model
 from apps.copilot.modules.radar.scanner import collect_t0_raw
-from apps.copilot.modules.radar.t0_cache import cached_t2_verdict
+from apps.copilot.modules.radar.persistence import load_latest_bundle_db
+from apps.copilot.modules.radar.t0_cache import cached_t2_verdict, load_cached
+from apps.copilot.modules.radar.t2_resolve import (
+    find_ok_t2_verdict,
+    find_ok_t2_verdict_db,
+)
 from apps.copilot.modules.radar.schema import (
     build_opus_messages,
     estimate_cost_yuan,
@@ -33,10 +38,17 @@ async def run_radar_pipeline(
     candidate_id: Optional[int] = None,
     redis_client: Any = None,
     enable_t2: bool = True,
+    force_refresh_t0: bool = False,
+    force_refresh_t2: bool = False,
 ) -> dict[str, Any]:
     """跑完整三段流水线并落库；enable_t2=False 时仅 T0+T1（快速扫描）。"""
     t0_start = time.perf_counter()
-    t0_raw = await collect_t0_raw(symbol, name=name, redis_client=redis_client)
+    t0_raw = await collect_t0_raw(
+        symbol,
+        name=name,
+        redis_client=redis_client,
+        force_refresh=force_refresh_t0,
+    )
     t0_art = await _save_artifact(
         session,
         stage="T0_raw",
@@ -69,6 +81,7 @@ async def run_radar_pipeline(
 
     t2_start = time.perf_counter()
     t2_profile = resolve_model("radar", "t2_assess")
+    t2_from_cache = False
     if not enable_t2:
         t2_payload = _t2_result(
             status="skipped",
@@ -77,12 +90,47 @@ async def run_radar_pipeline(
             detail="已关闭深度推理（仅 T0+T1 事实矩阵）",
         )
     else:
-        t2_cached = cached_t2_verdict(t0_raw) if t0_raw.get("cache_hit") else None
+        t2_cached = None
+        if not force_refresh_t2:
+            t2_cached = cached_t2_verdict(t0_raw)
+            if not t2_cached:
+                t2_cached = cached_t2_verdict(load_cached(symbol, require_fresh=True))
+            if not t2_cached:
+                t2_cached = cached_t2_verdict(load_cached(symbol, require_fresh=False))
+            if not t2_cached:
+                db_bundle = await load_latest_bundle_db(session, symbol)
+                t2_cached = cached_t2_verdict(db_bundle)
         if t2_cached:
             t2_payload = t2_cached
             logger.info("T2 cache hit symbol=%s model=%s", symbol, t2_payload.get("model_id"))
         else:
             t2_payload = await run_t2_live(t1_payload, t0_raw, profile=t2_profile)
+            if t2_payload.get("status") != "ok":
+                fb = find_ok_t2_verdict(symbol)
+                if not fb:
+                    fb = await find_ok_t2_verdict_db(session, symbol)
+                if fb:
+                    logger.info(
+                        "T2 live 失败，回退历史 ok 缓存 symbol=%s detail=%s",
+                        symbol,
+                        (t2_payload.get("detail") or "")[:80],
+                    )
+                    t2_payload = {
+                        **fb,
+                        "detail": (
+                            f"{t2_payload.get('detail') or 'live 失败'} · "
+                            "已展示历史 Opus 缓存（非编造）"
+                        ),
+                    }
+    t2_from_cache = bool(
+        enable_t2
+        and t2_payload.get("status") == "ok"
+        and (
+            t2_payload.get("cache_hit")
+            or t2_payload.get("route") == "cache"
+            or t2_payload.get("stale_fallback")
+        )
+    )
     t2_art = await _save_artifact(
         session,
         stage="T2_verdict",
@@ -118,6 +166,10 @@ async def run_radar_pipeline(
         "t0_raw": t0_raw,
         "t1_distilled": t1_payload,
         "t2_verdict": t2_payload,
+        "t0_cache_hit": bool(t0_raw.get("cache_hit")),
+        "t2_from_cache": t2_from_cache,
+        "force_refresh_t0": force_refresh_t0,
+        "force_refresh_t2": force_refresh_t2,
     }
 
 
@@ -238,7 +290,7 @@ async def _run_t2(
             detail=f"Opus 调用失败：{str(exc)[:200]}",
         )
 
-    # 检测 AIDispatcher 静默降级到 mock（无 key / API 异常）→ no-mock 显式报错
+    # 检测 AIDispatcher 静默降级到 mock（旧路径兜底）→ no-mock 显式报错
     if resp.model == "mock" or (resp.raw or {}).get("_dispatcher_mock"):
         return _t2_result(
             status="error",
@@ -246,7 +298,7 @@ async def _run_t2(
             route=resp.route,
             detail=(
                 "Opus 不可达（香港 ECS 地域限制或未配置 HTTPS_PROXY）；"
-                "持仓标的可本机 make radar-t0-prefetch-with-t2 后 make radar-t0-sync；"
+                "持仓/已预拉标的：本机 make radar-t0-prefetch-with-t2 后 diting-infra make radar-t0-sync；"
                 "新标的 live 推理需配置出口代理"
             ),
         )

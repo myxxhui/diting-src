@@ -1495,6 +1495,24 @@ copilot-funnel-audit:
 copilot-funnel-all: copilot-funnel-migrate copilot-funnel-test copilot-funnel-audit
 	@echo "✅ [copilot-funnel-all] 四区漏斗标的级重构本机验收（清空重建用 copilot-funnel-cleanup 单独执行）"
 
+# ─── 波次四 · 持久化 + 漏斗操作 + 采集数据 + 对话模型 ─────────────────────────
+.PHONY: copilot-wave4-prep copilot-wave4-test copilot-wave4-all copilot-wave4-tier2-verify
+
+copilot-wave4-prep: copilot-step14-prep
+	@echo "▶ [copilot-wave4-prep] init_db（含 migrate_step19）"
+	$(RUNPY) -c "import asyncio; from apps.copilot.db.database import init_db; asyncio.run(init_db()); print('✅ wave4 migrate ok')"
+
+copilot-wave4-test: _ensure-deps
+	@echo "▶ [copilot-wave4-test] radar 缓存 + 漏斗单测"
+	$(RUNPY) -m pytest tests/copilot/test_radar_t0_cache.py tests/copilot/test_funnel.py -q
+
+copilot-wave4-all: copilot-wave4-prep copilot-wave4-test
+	@echo "✅ [copilot-wave4-all] 波次四本机验收"
+	@echo "▶ 生产正式部署：cd ../diting-infra && make copilot-wave4-deploy"
+
+copilot-wave4-tier2-verify:
+	@echo "▶ [copilot-wave4-tier2-verify] 请在 diting-infra 执行 make copilot-wave4-verify"
+
 
 deep-strike-dev:
 	PYTHONPATH=. uvicorn apps.deep_strike.main:app --port 8082 --reload

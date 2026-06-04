@@ -39,6 +39,7 @@ Scene = Literal[
     "etl",
     "dry_run",
     "radar_assess",
+    "radar_chat",
 ]
 
 Route = Literal["remote", "local", "mock"]
@@ -53,6 +54,7 @@ _SCENE_ROUTE: dict[Scene, Route] = {
     "etl": "local",
     "dry_run": "mock",
     "radar_assess": "remote",
+    "radar_chat": "remote",
 }
 
 
@@ -115,9 +117,21 @@ class AIDispatcher:
         if self._anthropic_key:
             try:
                 import anthropic  # noqa: PLC0415
+
+                http_client: Any = None
+                proxy = (os.getenv("HTTPS_PROXY") or os.getenv("https_proxy") or "").strip()
+                if proxy:
+                    import httpx  # noqa: PLC0415
+
+                    http_client = httpx.Client(
+                        proxy=proxy,
+                        timeout=httpx.Timeout(120.0, connect=30.0),
+                    )
+                    logger.info("[AIDispatcher] Anthropic 客户端使用 HTTPS_PROXY")
                 self._anthropic_client = anthropic.Anthropic(
                     api_key=self._anthropic_key,
                     base_url=self._anthropic_base,
+                    **({"http_client": http_client} if http_client else {}),
                 )
             except ImportError:
                 logger.warning("anthropic SDK 未安装；remote 路由将不可用（pip install anthropic）")
@@ -141,6 +155,7 @@ class AIDispatcher:
         max_tokens: int = 2048,
         temperature: float = 0.2,
         force_route: Route | None = None,
+        model_override: str | None = None,
     ) -> AIResponse:
         """统一调度入口。
 
@@ -163,7 +178,13 @@ class AIDispatcher:
 
         t0 = time.perf_counter()
         if route == "remote":
-            resp = self._call_remote(messages, max_tokens=max_tokens, temperature=temperature)
+            resp = self._call_remote(
+                messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                model_override=model_override,
+                scene=scene,
+            )
         elif route == "local":
             resp = self._call_local(messages, max_tokens=max_tokens, temperature=temperature)
         else:
@@ -171,10 +192,13 @@ class AIDispatcher:
 
         latency_ms = int((time.perf_counter() - t0) * 1000)
 
-        # 估算成本（Opus 4.6 约 ¥0.25~¥1.20/次，简化用均值）
         cost = 0.0
         if route == "remote":
-            cost = 0.5  # 均值估算，实际按 tokens 计费
+            from apps.copilot.modules.radar.schema import estimate_cost_yuan
+
+            cost = estimate_cost_yuan(resp.get("tokens_in", 0), resp.get("tokens_out", 0))
+            if cost <= 0:
+                cost = 0.5
             self._record_spend(cost)
 
         logger.info(
@@ -229,9 +253,16 @@ class AIDispatcher:
         messages: list[dict[str, str]],
         max_tokens: int,
         temperature: float,
+        model_override: str | None = None,
+        *,
+        scene: Scene = "dry_run",
     ) -> dict:
         if not self._anthropic_client:
             logger.warning("[AIDispatcher] remote 路由降级 → mock（未配置 ANTHROPIC_API_KEY）")
+            if scene == "radar_assess":
+                raise RuntimeError(
+                    "未配置 ANTHROPIC_API_KEY；模式 C 深度研报不可用（no-mock）"
+                )
             return self._call_mock(messages)
 
         system = ""
@@ -242,9 +273,10 @@ class AIDispatcher:
             else:
                 user_msgs.append(m)
 
+        model = (model_override or "").strip() or self._anthropic_model
         try:
             resp = self._anthropic_client.messages.create(
-                model=self._anthropic_model,
+                model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 **({"system": system} if system else {}),
@@ -253,13 +285,18 @@ class AIDispatcher:
             text = resp.content[0].text if resp.content else ""
             return {
                 "text": text,
-                "model": self._anthropic_model,
+                "model": model,
                 "tokens_in": resp.usage.input_tokens,
                 "tokens_out": resp.usage.output_tokens,
                 "raw": resp.model_dump() if hasattr(resp, "model_dump") else {},
             }
         except Exception as exc:
-            logger.warning("[AIDispatcher] remote 调用失败 → mock 降级: %s", exc)
+            logger.warning("[AIDispatcher] remote 调用失败: %s", exc)
+            if scene == "radar_assess":
+                raise RuntimeError(
+                    f"Opus API 不可达：{exc}；请配置 HTTPS_PROXY 或本机预拉后 sync 缓存"
+                ) from exc
+            logger.warning("[AIDispatcher] remote 调用失败 → mock 降级")
             return self._call_mock(messages)
 
     def _call_local(

@@ -58,13 +58,15 @@ async def _prefetch_one(symbol: str, name: str, *, with_t2: bool) -> dict:
                 f"  ⚠️  {symbol} T2 {t2_status}: {(t2.get('detail') or '')[:120]}"
             )
 
-    path = save_cache(bundle)
+    version_id = save_cache(bundle)
     suffix = ""
     if with_t2:
         suffix = f" | T2 {t2_status} {t2_dims}/9 维"
         if t2_cost is not None:
             suffix += f" ¥{t2_cost:.4f}"
-    print(f"  ✅ {symbol} {t0.get('name')} | T0 {ok}/4 绿{suffix} | → {path}")
+    print(
+        f"  ✅ {symbol} {t0.get('name')} | T0 {ok}/4 绿{suffix} | 版本 {version_id}"
+    )
     return {
         "symbol": symbol,
         "name": t0.get("name"),
@@ -72,7 +74,7 @@ async def _prefetch_one(symbol: str, name: str, *, with_t2: bool) -> dict:
         "ok_parts": ok,
         "t2_status": t2_status,
         "t2_dims": t2_dims,
-        "path": str(path),
+        "version_id": version_id,
     }
 
 

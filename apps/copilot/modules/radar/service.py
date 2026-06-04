@@ -4,6 +4,9 @@
 """
 from __future__ import annotations
 
+import asyncio
+import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy import select
@@ -12,6 +15,7 @@ from sqlalchemy.orm import selectinload
 
 from apps.common.holdings_sot import load_holdings_sot
 from apps.copilot.db.models import (
+    CampaignSymbol,
     ModelProfile,
     RadarCandidate,
     RadarScan,
@@ -21,12 +25,36 @@ from apps.copilot.db.models import (
 from apps.copilot.modules.planning.falsify import ensure_default_falsify_tasks
 from apps.copilot.modules.planning.funnel import (
     get_or_create_container,
+    touch_last_analyzed,
     upsert_funnel_symbol,
 )
+from apps.copilot.modules.radar.persistence import recent_analysis_days, sync_bundle_to_db
 from apps.copilot.modules.planning.monitor import ensure_three_pillars
 from apps.copilot.modules.radar.model_router import DEFAULT_PROFILES
+from apps.copilot.modules.radar.context_matrix import build_context_matrix
 from apps.copilot.modules.radar.pipeline import run_radar_pipeline
-from apps.copilot.modules.radar.scanner import t1_to_candidate_fields
+from apps.copilot.modules.radar.scanner import collect_t0_live, t1_to_candidate_fields
+from apps.copilot.modules.radar.symbol_resolve import (
+    RadarSymbolResolveError,
+    _is_valid_chinese_name,
+    display_name_for_symbol,
+    resolve_radar_query,
+)
+
+
+def _should_persist_display_name(stored: str | None, sym: str, resolved: str) -> bool:
+    return bool(
+        resolved
+        and resolved != sym
+        and not _is_valid_chinese_name(stored, sym)
+    )
+from apps.copilot.modules.radar.t0_cache import (
+    build_bundle_from_pipeline,
+    load_cached,
+    save_cache,
+)
+
+logger = logging.getLogger(__name__)
 
 
 async def ensure_model_profiles(session: AsyncSession) -> None:
@@ -58,10 +86,13 @@ async def create_symbol_scan(
     query_text: str,
     redis_client: Any = None,
     enable_t2: bool = True,
+    force_refresh: bool = False,
 ) -> dict[str, Any]:
     """模式 C：模糊标的深度分析（默认含 T2 Opus 9 维）。"""
-    sym = query_text.strip().zfill(6)[-6:]
-    name = _resolve_name(sym)
+    try:
+        sym, name = resolve_radar_query(query_text)
+    except RadarSymbolResolveError as exc:
+        raise ValueError(str(exc)) from exc
 
     scan = RadarScan(
         input_type="symbol",
@@ -83,7 +114,32 @@ async def create_symbol_scan(
         candidate_id=candidate.id,
         redis_client=redis_client,
         enable_t2=enable_t2,
+        force_refresh_t0=force_refresh,
+        force_refresh_t2=force_refresh and enable_t2,
     )
+
+    version_id: str | None = None
+    if force_refresh or not pipe.get("t2_from_cache") or not pipe.get("t0_cache_hit"):
+        bundle = build_bundle_from_pipeline(
+            pipe,
+            source="scan_force_refresh" if force_refresh else "scan_live",
+        )
+        # live Opus 失败时勿用 error T2 覆盖本机预拉并已 sync 的 ok 缓存（no-mock · 防污染）
+        new_t2 = bundle.get("t2_verdict") or {}
+        if enable_t2 and new_t2.get("status") != "ok" and not force_refresh:
+            from apps.copilot.modules.radar.t2_resolve import resolve_ok_t2_verdict
+
+            prior_t2 = await resolve_ok_t2_verdict(session, sym)
+            if prior_t2:
+                bundle["t2_verdict"] = prior_t2
+                pipe["t2_verdict"] = prior_t2
+                pipe["t2_from_cache"] = True
+        version_id = save_cache(bundle)
+        await sync_bundle_to_db(session, bundle)
+    elif pipe.get("t0_cache_hit"):
+        latest = load_cached(sym, require_fresh=False)
+        if latest:
+            version_id = str(latest.get("version_id") or "")
 
     t2 = pipe["t2_verdict"]
     fields = t1_to_candidate_fields(pipe["t0_raw"], pipe["t1_distilled"], t2)
@@ -107,14 +163,124 @@ async def create_symbol_scan(
         "symbol": sym,
         "enable_t2": enable_t2,
         "t0_cache_hit": bool(pipe["t0_raw"].get("cache_hit")),
+        "t2_from_cache": bool(pipe.get("t2_from_cache")),
+        "force_refresh": force_refresh,
+        "cache_version_id": version_id,
         "confidence": fields.get("confidence"),
         "t2_status": t2.get("status"),
         "t2_detail": t2.get("detail"),
         "cost": cost,
     }
 
+    await upsert_funnel_symbol(session, sym, name, stage="radar_intake")
+    await touch_last_analyzed(session, sym)
     await session.flush()
     return await get_scan(session, scan.id)
+
+
+async def collect_symbol_t0_only(
+    session: AsyncSession,
+    *,
+    query_text: str,
+    redis_client: Any = None,
+    run_t1: bool = True,
+    progress_cb: Any = None,
+) -> dict[str, Any]:
+    """仅采集 T0（可选自动 T1），不写 T2；结果入库并返回状态。"""
+    try:
+        sym, name = resolve_radar_query(query_text)
+    except RadarSymbolResolveError as exc:
+        raise ValueError(str(exc)) from exc
+
+    if progress_cb is not None:
+        progress_cb("resolve", f"已解析 {sym} · {name}", 8, "")
+        t0_raw = await collect_t0_live(sym, name=name, on_step=progress_cb)
+        progress_cb("t1", "T1 事实矩阵压缩", 88, "构建上下文矩阵…")
+        t1_payload = build_context_matrix(t0_raw)
+        pipe = {
+            "t0_raw": t0_raw,
+            "t1_distilled": t1_payload,
+            "t2_verdict": {"status": "skipped", "detail": "仅采集模式"},
+            "t0_id": None,
+            "t1_id": None,
+            "t2_id": None,
+            "wa_id": None,
+            "t2_from_cache": False,
+        }
+    else:
+        pipe = await run_radar_pipeline(
+            session,
+            symbol=sym,
+            name=name,
+            enable_t2=False,
+            force_refresh_t0=True,
+            force_refresh_t2=False,
+            redis_client=redis_client,
+        )
+
+    if progress_cb:
+        progress_cb("persist", "写入文件缓存与数据库", 96, "")
+
+    bundle = build_bundle_from_pipeline(pipe, source="collect_t0")
+    vid = save_cache(bundle)
+    await sync_bundle_to_db(session, bundle)
+    await upsert_funnel_symbol(session, sym, name, stage="radar_intake")
+    await touch_last_analyzed(session, sym)
+    await session.flush()
+
+    ok_parts = sum(
+        1
+        for k in ("quote", "profile", "financials", "valuation")
+        if (pipe["t0_raw"].get(k) or {}).get("status") == "ok"
+    )
+    return {
+        "symbol": sym,
+        "name": name,
+        "version_id": vid,
+        "t0_cache_hit": bool(pipe["t0_raw"].get("cache_hit")),
+        "t1_done": run_t1,
+        "t0_ok_parts": ok_parts,
+        "status": "ok",
+    }
+
+
+async def run_collect_job(
+    job_id: str,
+    query_text: str,
+    redis_client: Any,
+) -> None:
+    """后台执行采集（独立 DB 会话 · 更新 Redis 进度）。"""
+    from apps.copilot.db.database import AsyncSessionLocal
+    from apps.copilot.modules.radar.collect_progress import (
+        fail_job,
+        finish_job,
+        init_job,
+        make_progress_callback,
+    )
+
+    cb = make_progress_callback(redis_client, job_id)
+    try:
+        sym, name = resolve_radar_query(query_text)
+    except RadarSymbolResolveError as exc:
+        fail_job(redis_client, job_id, str(exc))
+        return
+
+    init_job(redis_client, job_id, symbol=sym, name=name)
+
+    async with AsyncSessionLocal() as session:
+        try:
+            result = await collect_symbol_t0_only(
+                session,
+                query_text=query_text,
+                redis_client=redis_client,
+                progress_cb=cb,
+            )
+            await session.commit()
+            finish_job(redis_client, job_id, result)
+        except Exception as exc:  # noqa: BLE001
+            await session.rollback()
+            fail_job(redis_client, job_id, str(exc))
+            logger.exception("collect job %s failed", job_id)
 
 
 def _resolve_name(symbol: str) -> str:
@@ -128,7 +294,12 @@ def _resolve_name(symbol: str) -> str:
     return symbol
 
 
-async def get_scan(session: AsyncSession, scan_id: int) -> dict[str, Any]:
+async def get_scan(
+    session: AsyncSession,
+    scan_id: int,
+    *,
+    hydrate_t2: bool = True,
+) -> dict[str, Any]:
     scan = await session.scalar(
         select(RadarScan)
         .where(RadarScan.id == scan_id)
@@ -136,10 +307,22 @@ async def get_scan(session: AsyncSession, scan_id: int) -> dict[str, Any]:
     )
     if scan is None:
         raise ValueError(f"scan {scan_id} not found")
-    return _scan_to_dict(scan)
+    return await _scan_to_dict(scan, session=session if hydrate_t2 else None)
 
 
-def _scan_to_dict(scan: RadarScan) -> dict[str, Any]:
+async def _scan_to_dict(
+    scan: RadarScan,
+    *,
+    session: AsyncSession | None = None,
+) -> dict[str, Any]:
+    candidates: list[dict[str, Any]] = []
+    for c in (scan.candidates or []):
+        d = _candidate_to_dict(c)
+        if session is not None:
+            from apps.copilot.modules.radar.t2_resolve import hydrate_candidate_for_display
+
+            d = await hydrate_candidate_for_display(session, d)
+        candidates.append(d)
     return {
         "id": scan.id,
         "input_type": scan.input_type,
@@ -147,7 +330,7 @@ def _scan_to_dict(scan: RadarScan) -> dict[str, Any]:
         "status": scan.status,
         "summary_json": scan.summary_json,
         "created_at": scan.created_at.isoformat() if scan.created_at else None,
-        "candidates": [_candidate_to_dict(c) for c in (scan.candidates or [])],
+        "candidates": candidates,
     }
 
 
@@ -178,29 +361,93 @@ def _candidate_to_dict(c: RadarCandidate) -> dict[str, Any]:
     }
 
 
+async def _ui_hidden_symbols(session: AsyncSession) -> set[str]:
+    """前端已移除（ui_removed_at）的标的代码集合。"""
+    from apps.copilot.db.models import CampaignSymbol
+
+    rows = await session.scalars(
+        select(CampaignSymbol.symbol).where(CampaignSymbol.ui_removed_at.isnot(None))
+    )
+    return {(s or "").zfill(6)[-6:] for s in rows if s}
+
+
 async def list_recent_candidates(
     session: AsyncSession,
     *,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
-    """雷达区 = 扫描工作台：最近扫描候选（按 symbol 去重保留最新）+ 是否已晋级。"""
-    from apps.copilot.db.models import CampaignSymbol
+    """扫描候选区：近 N 天分析过的标的 + 漏斗 radar_intake/planning/roadmap（去重）。"""
+    from apps.copilot.modules.planning.funnel import list_funnel_symbols
+
+    window = timedelta(days=recent_analysis_days())
+    cutoff = datetime.now(timezone.utc) - window
+    hidden = await _ui_hidden_symbols(session)
+
+    funnel_rows = await list_funnel_symbols(
+        session,
+        stages=("radar_intake", "roadmap", "planning"),
+    )
+    funnel_by_sym: dict[str, CampaignSymbol] = {}
+    for row in funnel_rows:
+        sym = (row.symbol or "").zfill(6)[-6:]
+        if not sym:
+            continue
+        analyzed = row.last_analyzed_at or row.updated_at
+        if analyzed and analyzed.tzinfo is None:
+            analyzed = analyzed.replace(tzinfo=timezone.utc)
+        if analyzed and analyzed >= cutoff:
+            funnel_by_sym[sym] = row
 
     rows = await session.scalars(
-        select(RadarCandidate).order_by(RadarCandidate.id.desc()).limit(limit * 3)
+        select(RadarCandidate).order_by(RadarCandidate.id.desc()).limit(limit * 5)
     )
-    promoted = await session.scalars(select(CampaignSymbol.symbol))
-    promoted_syms = {(s or "").zfill(6)[-6:] for s in promoted}
-
-    seen: set[str] = set()
-    out: list[dict[str, Any]] = []
+    cand_by_sym: dict[str, RadarCandidate] = {}
     for c in rows:
         sym = (c.symbol or "").zfill(6)[-6:]
-        if not sym or sym in seen:
+        if sym and sym not in cand_by_sym:
+            cand_by_sym[sym] = c
+
+    all_syms = list(dict.fromkeys(list(funnel_by_sym.keys()) + list(cand_by_sym.keys())))
+    # 批量用内存 code 表（轻量 API 预热）；缺的再单标的补拉（不拉全市场 spot）
+    from apps.copilot.modules.radar.symbol_resolve import _code_name_map, _resolve_name_single
+
+    code_map = _code_name_map()
+    out: list[dict[str, Any]] = []
+    for sym in all_syms:
+        if sym in hidden:
             continue
-        seen.add(sym)
-        d = _candidate_to_dict(c)
-        d["already_promoted"] = sym in promoted_syms
+        c = cand_by_sym.get(sym)
+        fr = funnel_by_sym.get(sym)
+        if c:
+            d = _candidate_to_dict(c)
+        else:
+            d = {
+                "id": None,
+                "scan_id": None,
+                "symbol": sym,
+                "name": code_map.get(sym) or sym,
+                "confidence": None,
+                "market_phase": None,
+            }
+        stored = d.get("name")
+        if _is_valid_chinese_name(stored, sym):
+            resolved = (stored or "").strip()
+        elif sym in code_map:
+            resolved = code_map[sym]
+        else:
+            resolved = await asyncio.to_thread(_resolve_name_single, sym)
+            if _is_valid_chinese_name(resolved, sym):
+                code_map[sym] = resolved
+        d["name"] = resolved
+        if c is not None and _should_persist_display_name(c.name, sym, resolved):
+            c.name = resolved
+        if fr is not None and _should_persist_display_name(fr.name, sym, resolved):
+            fr.name = resolved
+        stage = fr.funnel_stage if fr else "radar_intake"
+        d["funnel_stage"] = stage
+        d["funnel_symbol_id"] = fr.id if fr else None
+        d["already_promoted"] = stage in ("planning", "roadmap", "executing")
+        d["in_scan_pool"] = stage in ("radar_intake", "roadmap", "planning")
         out.append(d)
         if len(out) >= limit:
             break
@@ -279,11 +526,13 @@ async def promote_candidate(
     if wa:
         wa.campaign_id = container.id
 
+    await touch_last_analyzed(session, sym)
     await session.flush()
     return {
         "campaign_id": container.id,
         "candidate_id": candidate_id,
         "symbol": sym,
+        "name": candidate.name or sym,
         "funnel_stage": row.funnel_stage,
         "analysis_snapshot": snapshot,
         "human_confirmation_required": True,

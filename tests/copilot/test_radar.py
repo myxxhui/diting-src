@@ -127,6 +127,7 @@ def _patch_pipeline(monkeypatch, *, opus_text: str, opus_model: str = "claude-op
 
     monkeypatch.setattr("apps.copilot.modules.radar.scanner.collect_t0_raw", _fake_collect)
     monkeypatch.setattr("apps.copilot.modules.radar.pipeline.collect_t0_raw", _fake_collect)
+    monkeypatch.setattr("apps.copilot.modules.radar.pipeline.load_cached", lambda *_a, **_k: None)
     monkeypatch.setattr("apps.copilot.modules.radar.pipeline.radar_t2_enabled", lambda: True)
 
     fake = _FakeDispatcher(opus_text, model=opus_model)

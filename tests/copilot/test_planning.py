@@ -111,10 +111,27 @@ def test_graph_placeholder(client):
     assert "产业" in r.text
 
 
-def test_system_page_links(client):
-    r = client.get("/system")
+def test_settings_page_links(client):
+    r = client.get("/settings", follow_redirects=False)
     assert r.status_code == 200
     assert "/holdings" in r.text
+    assert "行情雷达" in r.text
+
+    r2 = client.get("/system", follow_redirects=False)
+    assert r2.status_code in (302, 307)
+    assert "/settings" in (r2.headers.get("location") or "")
+
+
+def test_audit_and_opus_pages(client):
+    r = client.get("/audit")
+    assert r.status_code == 200
+    assert "查询版本" in r.text
+    r2 = client.get("/opus")
+    assert r2.status_code == 200
+    assert "Opus" in r2.text
+    r3 = client.get("/planning?view=audit&symbol=002837", follow_redirects=False)
+    assert r3.status_code in (302, 307)
+    assert "/audit" in (r3.headers.get("location") or "")
 
 
 def test_create_campaign_api(client):

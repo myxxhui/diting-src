@@ -14,6 +14,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime
+from collections.abc import Callable
 from typing import Any
 
 from apps.copilot.modules.radar.t0_cache import (
@@ -23,7 +24,7 @@ from apps.copilot.modules.radar.t0_cache import (
 
 logger = logging.getLogger(__name__)
 
-_T0_TIMEOUT = 15.0
+_T0_TIMEOUT = 35.0
 
 
 def _cache_enabled() -> bool:
@@ -35,9 +36,13 @@ async def collect_t0_raw(
     *,
     name: str = "",
     redis_client: Any = None,  # 兼容旧签名
+    force_refresh: bool = False,
 ) -> dict[str, Any]:
-    """扫描入口：优先读预拉缓存；miss 则 live 采集（腾讯行情 + 能拿到的 akshare，部分失败可接受）。"""
+    """扫描入口：优先读预拉缓存；miss 或 force_refresh 则 live 采集。"""
     sym = symbol.zfill(6)[-6:]
+    if force_refresh:
+        logger.info("T0 force_refresh → live 采集 symbol=%s", sym)
+        return await collect_t0_live(sym, name=name)
     if _cache_enabled():
         cached = load_cached(sym, require_fresh=True)
         if cached:
@@ -55,16 +60,48 @@ async def collect_t0_raw(
     return await collect_t0_live(sym, name=name)
 
 
-async def collect_t0_live(symbol: str, *, name: str = "") -> dict[str, Any]:
-    """强制 live 采集（预拉脚本用；不走缓存）。"""
+async def collect_t0_live(
+    symbol: str,
+    *,
+    name: str = "",
+    on_step: Callable[[str, str, int | None, str], None] | None = None,
+) -> dict[str, Any]:
+    """强制 live 采集（预拉脚本用；不走缓存）。on_step(step_id, label, pct, detail) 可选。"""
     sym = symbol.zfill(6)[-6:]
 
-    quote, profile, financials, valuation = await asyncio.gather(
-        _safe(_collect_quote, sym),
-        _safe(_collect_profile, sym),
-        _safe(_collect_financials, sym),
-        _safe(_collect_valuation, sym),
-    )
+    _steps: list[tuple[str, str, Any, int]] = [
+        ("quote", "行情 K 线", _collect_quote, 28),
+        ("profile", "公司资料", _collect_profile, 45),
+        ("financials", "财务摘要", _collect_financials, 62),
+        ("valuation", "估值分位", _collect_valuation, 78),
+    ]
+    quote: dict[str, Any]
+    profile: dict[str, Any]
+    financials: dict[str, Any]
+    valuation: dict[str, Any]
+
+    if on_step is None:
+        quote, profile, financials, valuation = await asyncio.gather(
+            _safe(_collect_quote, sym),
+            _safe(_collect_profile, sym),
+            _safe(_collect_financials, sym),
+            _safe(_collect_valuation, sym),
+        )
+    else:
+        quote = profile = financials = valuation = {"status": "pending"}
+        for step_id, label, fn, pct in _steps:
+            on_step(step_id, label, pct, f"正在拉取 {label}…")
+            part = await _safe(fn, sym)
+            st = part.get("status", "?")
+            if step_id == "quote":
+                quote = part
+            elif step_id == "profile":
+                profile = part
+            elif step_id == "financials":
+                financials = part
+            else:
+                valuation = part
+            on_step(step_id, label, pct, f"{label}：{st}")
 
     resolved_name = name
     if not resolved_name and profile.get("status") == "ok":
@@ -132,29 +169,91 @@ def _collect_quote(sym: str) -> dict[str, Any]:
     }
 
 
-def _collect_profile(sym: str) -> dict[str, Any]:
-    """公司资料：行业/简称/总市值/流通市值/上市时间。"""
+def _mv_yi(v: Any) -> float | None:
+    try:
+        return round(float(v) / 1e8, 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def _collect_profile_em(sym: str) -> dict[str, Any]:
     import akshare as ak
 
     df = ak.stock_individual_info_em(symbol=sym)
     if df is None or df.empty:
-        return {"status": "error", "detail": "未取到公司资料"}
+        return {"status": "error", "detail": "未取到公司资料(em)"}
     info = dict(zip(df["item"].astype(str), df["value"]))
-
-    def _mv(v: Any) -> float | None:
-        try:
-            return round(float(v) / 1e8, 2)  # 元 → 亿元
-        except (TypeError, ValueError):
-            return None
-
     return {
         "status": "ok",
+        "source": "akshare:stock_individual_info_em",
         "name": str(info.get("股票简称") or "").strip() or sym,
         "industry": str(info.get("行业") or "").strip() or None,
-        "total_mv_yi": _mv(info.get("总市值")),
-        "float_mv_yi": _mv(info.get("流通市值")),
+        "total_mv_yi": _mv_yi(info.get("总市值")),
+        "float_mv_yi": _mv_yi(info.get("流通市值")),
         "listing_date": str(info.get("上市时间") or "").strip() or None,
     }
+
+
+def _latest_value_em(sym: str) -> dict[str, Any] | None:
+    """东财估值表末行：市值 + PE/PB（profile/valuation 共用）。"""
+    import akshare as ak
+
+    df = ak.stock_value_em(symbol=sym)
+    if df is None or df.empty:
+        return None
+    row = df.iloc[-1]
+    return {
+        "as_of": str(row.get("数据日期") or "").strip() or None,
+        "total_mv_yi": _mv_yi(row.get("总市值")),
+        "float_mv_yi": _mv_yi(row.get("流通市值")),
+        "pe_ttm": _safe_float(row.get("PE(TTM)")),
+        "pb": _safe_float(row.get("市净率")),
+        "pe_series": df["PE(TTM)"].dropna().astype(float),
+    }
+
+
+def _safe_float(v: Any) -> float | None:
+    try:
+        f = float(v)
+        return round(f, 4) if f == f else None  # NaN check
+    except (TypeError, ValueError):
+        return None
+
+
+def _collect_profile_cninfo(sym: str) -> dict[str, Any]:
+    import akshare as ak
+
+    df = ak.stock_profile_cninfo(symbol=sym)
+    if df is None or df.empty:
+        return {"status": "error", "detail": "未取到公司资料(cninfo)"}
+    row = df.iloc[0]
+    em = _latest_value_em(sym)
+    listing = str(row.get("上市日期") or "").strip() or None
+    if listing and len(listing) >= 10:
+        listing = listing.replace("-", "")[:8]
+    return {
+        "status": "ok",
+        "source": "akshare:stock_profile_cninfo+stock_value_em",
+        "name": str(row.get("A股简称") or row.get("公司名称") or sym).strip() or sym,
+        "industry": str(row.get("所属行业") or "").strip() or None,
+        "total_mv_yi": (em or {}).get("total_mv_yi"),
+        "float_mv_yi": (em or {}).get("float_mv_yi"),
+        "listing_date": listing,
+    }
+
+
+def _collect_profile(sym: str) -> dict[str, Any]:
+    """公司资料：东财 em 优先；失败走 cninfo + 东财估值表补市值。"""
+    try:
+        out = _collect_profile_em(sym)
+        if out.get("status") == "ok":
+            return out
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("profile em failed %s: %s", sym, exc)
+    try:
+        return _collect_profile_cninfo(sym)
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "detail": f"profile 全源失败: {type(exc).__name__}: {str(exc)[:120]}"}
 
 
 _FIN_PICK = {
@@ -162,6 +261,7 @@ _FIN_PICK = {
     "归母净利润": "net_profit_parent",
     "净利润": "net_profit",
     "销售毛利率": "gross_margin",
+    "毛利率": "gross_margin",
     "净资产收益率(ROE)": "roe",
     "净资产收益率": "roe",
     "资产负债率": "debt_ratio",
@@ -169,6 +269,32 @@ _FIN_PICK = {
     "归母净利润同比增长": "net_profit_yoy",
     "经营现金流量净额": "operating_cashflow",
 }
+
+
+def _parse_pct(v: Any) -> float | None:
+    if v is None or v is False:
+        return None
+    s = str(v).strip().replace("%", "")
+    try:
+        return round(float(s), 4)
+    except ValueError:
+        return None
+
+
+def _supplement_financials_yoy(sym: str, picked: dict[str, Any]) -> None:
+    """同花顺摘要补同比（东财 abstract 常缺）。"""
+    if picked.get("revenue_yoy") is not None and picked.get("net_profit_yoy") is not None:
+        return
+    import akshare as ak
+
+    df = ak.stock_financial_abstract_ths(symbol=sym, indicator="按报告期")
+    if df is None or df.empty:
+        return
+    row = df.iloc[-1]
+    if picked.get("revenue_yoy") is None:
+        picked["revenue_yoy"] = _parse_pct(row.get("营业总收入同比增长率"))
+    if picked.get("net_profit_yoy") is None:
+        picked["net_profit_yoy"] = _parse_pct(row.get("净利润同比增长率"))
 
 
 def _collect_financials(sym: str) -> dict[str, Any]:
@@ -195,25 +321,35 @@ def _collect_financials(sym: str) -> dict[str, Any]:
                     picked[en] = v if v is not None else None
     if not picked:
         return {"status": "error", "detail": "财务摘要无可用指标"}
-    return {"status": "ok", "report_period": str(latest), **picked}
+    _supplement_financials_yoy(sym, picked)
+    return {"status": "ok", "source": "akshare:stock_financial_abstract", "report_period": str(latest), **picked}
 
 
-def _collect_valuation(sym: str) -> dict[str, Any]:
-    """估值分位：乐咕 PE/PB 历史序列 → 当前 PE-TTM 及其历史百分位。"""
+def _pe_percentile(series) -> tuple[float, float] | None:
+    import pandas as pd
+
+    s = pd.Series(series).dropna().astype(float)
+    s = s[s > 0]
+    if s.empty:
+        return None
+    cur = float(s.iloc[-1])
+    pct = round(float((s <= cur).mean()) * 100, 1)
+    return cur, pct
+
+
+def _collect_valuation_lg(sym: str) -> dict[str, Any]:
     import akshare as ak
 
     df = ak.stock_a_indicator_lg(symbol=sym)
     if df is None or df.empty:
-        return {"status": "error", "detail": "未取到估值序列"}
+        return {"status": "error", "detail": "未取到估值序列(lg)"}
     col = "pe_ttm" if "pe_ttm" in df.columns else ("pe" if "pe" in df.columns else None)
     if col is None:
         return {"status": "error", "detail": "估值序列无 PE 列"}
-    series = df[col].dropna().astype(float)
-    series = series[series > 0]
-    if series.empty:
+    ranked = _pe_percentile(df[col])
+    if ranked is None:
         return {"status": "error", "detail": "PE 序列无有效正值"}
-    cur = float(series.iloc[-1])
-    pct_rank = round(float((series <= cur).mean()) * 100, 1)
+    cur, pct_rank = ranked
     pb_cur = None
     if "pb" in df.columns:
         pb = df["pb"].dropna().astype(float)
@@ -221,12 +357,46 @@ def _collect_valuation(sym: str) -> dict[str, Any]:
             pb_cur = round(float(pb.iloc[-1]), 2)
     return {
         "status": "ok",
+        "source": "akshare:stock_a_indicator_lg",
         "pe_ttm": round(cur, 2),
         "pe_percentile": pct_rank,
         "pb": pb_cur,
-        "history_points": int(series.shape[0]),
+        "history_points": int(df[col].dropna().shape[0]),
         "as_of": str(df["trade_date"].iloc[-1]) if "trade_date" in df.columns else None,
     }
+
+
+def _collect_valuation_em(sym: str) -> dict[str, Any]:
+    em = _latest_value_em(sym)
+    if not em or em.get("pe_ttm") is None:
+        return {"status": "error", "detail": "未取到估值序列(value_em)"}
+    ranked = _pe_percentile(em["pe_series"])
+    if ranked is None:
+        return {"status": "error", "detail": "PE 序列无有效正值(value_em)"}
+    cur, pct_rank = ranked
+    return {
+        "status": "ok",
+        "source": "akshare:stock_value_em",
+        "pe_ttm": round(cur, 2),
+        "pe_percentile": pct_rank,
+        "pb": em.get("pb"),
+        "history_points": int(em["pe_series"].dropna().shape[0]),
+        "as_of": em.get("as_of"),
+    }
+
+
+def _collect_valuation(sym: str) -> dict[str, Any]:
+    """估值分位：乐咕 lg 优先；失败走东财 stock_value_em 历史 PE(TTM) 分位。"""
+    try:
+        out = _collect_valuation_lg(sym)
+        if out.get("status") == "ok":
+            return out
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("valuation lg failed %s: %s", sym, exc)
+    try:
+        return _collect_valuation_em(sym)
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "detail": f"valuation 全源失败: {type(exc).__name__}: {str(exc)[:120]}"}
 
 
 def t1_to_candidate_fields(

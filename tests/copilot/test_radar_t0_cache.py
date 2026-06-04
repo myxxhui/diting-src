@@ -180,4 +180,80 @@ def test_status_summary(cache_root):
     t0_cache.write_manifest([{"symbol": "601138", "ok_parts": 4}])
     s = t0_cache.status_summary()
     assert s["symbol_count"] == 1
-    assert s["fresh_count"] == 1
+    assert s["symbols"][0]["fresh"] is True
+    assert s["symbols"][0]["version_count"] >= 1
+
+
+def test_list_versions_multiple_saves(cache_root):
+    vid1 = t0_cache.save_cache({**SAMPLE_T0, "source": "v1"})
+    vid2 = t0_cache.save_cache({**SAMPLE_T0, "source": "v2"})
+    versions = t0_cache.list_versions("601138")
+    ids = {v["version_id"] for v in versions}
+    assert vid1 in ids
+    assert vid2 in ids
+    assert versions[0]["is_latest"] or versions[0]["version_id"] == vid2
+
+
+@pytest.mark.asyncio
+async def test_collect_t0_raw_force_refresh_skips_cache(cache_root, monkeypatch):
+    t0_cache.save_cache(SAMPLE_T0)
+    called = {"live": False}
+
+    async def _live(*_a, **_k):
+        called["live"] = True
+        return {**SAMPLE_T0, "cache_hit": False, "source": "live:force"}
+
+    monkeypatch.setattr("apps.copilot.modules.radar.scanner.collect_t0_live", _live)
+    out = await collect_t0_raw("601138", force_refresh=True)
+    assert called["live"] is True
+    assert out.get("cache_hit") is False
+
+
+def test_collect_profile_cninfo_fallback(monkeypatch):
+    from apps.copilot.modules.radar import scanner
+
+    def _fail_em(_sym):
+        raise ValueError("em down")
+
+    monkeypatch.setattr(scanner, "_collect_profile_em", _fail_em)
+    monkeypatch.setattr(
+        scanner,
+        "_collect_profile_cninfo",
+        lambda sym: {
+            "status": "ok",
+            "source": "test:cninfo",
+            "name": "工业富联",
+            "industry": "电子设备",
+            "total_mv_yi": 15000.0,
+            "float_mv_yi": 15000.0,
+            "listing_date": "20180608",
+        },
+    )
+    out = scanner._collect_profile("601138")
+    assert out["status"] == "ok"
+    assert out["industry"] == "电子设备"
+
+
+def test_collect_valuation_em_fallback(monkeypatch):
+    from apps.copilot.modules.radar import scanner
+
+    def _fail_lg(_sym):
+        raise ValueError("lg down")
+
+    monkeypatch.setattr(scanner, "_collect_valuation_lg", _fail_lg)
+    monkeypatch.setattr(
+        scanner,
+        "_collect_valuation_em",
+        lambda sym: {
+            "status": "ok",
+            "source": "test:value_em",
+            "pe_ttm": 39.0,
+            "pe_percentile": 55.0,
+            "pb": 9.0,
+            "history_points": 100,
+            "as_of": "2026-06-02",
+        },
+    )
+    out = scanner._collect_valuation("601138")
+    assert out["status"] == "ok"
+    assert out["pe_percentile"] == 55.0

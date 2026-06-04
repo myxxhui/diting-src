@@ -8,6 +8,7 @@
 [Ref: 03_/00_维度零/stages/stage_1_启动期/steps/step_08]
 """
 from datetime import date, datetime
+from uuid import uuid4
 from typing import Optional
 
 from sqlalchemy import (
@@ -25,8 +26,11 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import JSONB
 
 from apps.copilot.db.database import Base
+
+JSON_TYPE = JSON().with_variant(JSONB, "postgresql")
 
 
 class User(Base):
@@ -318,6 +322,9 @@ class CampaignSymbol(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
     )
+    # 前端「移除」：立即从各 Tab 隐藏；后端保留 ui_removed_at 起 7 天后物理清理
+    ui_removed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_analyzed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     campaign: Mapped["Campaign"] = relationship(back_populates="symbols")
 
@@ -545,6 +552,30 @@ class RadarCandidate(Base):
     scan: Mapped["RadarScan"] = relationship(back_populates="candidates")
 
 
+class RadarSymbolVersion(Base):
+    """雷达单标的 T0~T2 bundle 持久化（文件缓存 24h 同步入库，保留 30 天、每标的最多 7 版）。"""
+
+    __tablename__ = "radar_symbol_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    version_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    collected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    source: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    bundle_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    t0_ok_parts: Mapped[int] = mapped_column(Integer, default=0)
+    t2_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    cost_yuan: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("symbol", "version_id", name="uq_radar_sym_version"),
+    )
+
+
 # ─── M9 滚动路线图双层锚定（step_15）────────────────────────────────────────────
 
 
@@ -608,3 +639,76 @@ class RegimeAssessment(Base):
     __table_args__ = (
         UniqueConstraint("campaign_id", "symbol", name="uq_regime_campaign_symbol"),
     )
+
+
+# ─── Context-Aware Agentic Sandbox（Planning）──────────────────────────────────
+
+
+class AssetState(Base):
+    """标的资产全局态（Planning 沙盒单一真相源）。"""
+
+    __tablename__ = "asset_states"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    symbol_code: Mapped[str] = mapped_column(String(16), nullable=False, unique=True, index=True)
+    core_logic: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    radar_initial_analysis: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="planning", index=True
+    )  # planning|executing|archived|discarded
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    probes: Mapped[list["ProbeTask"]] = relationship(
+        back_populates="asset", cascade="all, delete-orphan"
+    )
+
+
+class ProbeTask(Base):
+    """探针开发任务（一次全局规划后批量插入）。"""
+
+    __tablename__ = "probe_tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    asset_id: Mapped[str] = mapped_column(
+        ForeignKey("asset_states.id"), nullable=False, index=True
+    )
+    probe_blueprint: Mapped[dict] = mapped_column(JSON_TYPE, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending_code", index=True
+    )  # pending_code|data_ready
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    asset: Mapped["AssetState"] = relationship(back_populates="probes")
+    result: Mapped[Optional["ProbeResult"]] = relationship(
+        back_populates="probe_task", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class ProbeResult(Base):
+    """探针数据成果（T1 提炼后的结构化指标）。"""
+
+    __tablename__ = "probe_results"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    probe_task_id: Mapped[str] = mapped_column(
+        ForeignKey("probe_tasks.id"), nullable=False, unique=True, index=True
+    )
+    refined_data: Mapped[dict] = mapped_column(JSON_TYPE, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    probe_task: Mapped["ProbeTask"] = relationship(back_populates="result")

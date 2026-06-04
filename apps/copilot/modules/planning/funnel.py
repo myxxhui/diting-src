@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy import select
@@ -144,12 +145,103 @@ async def set_stage(
     return row
 
 
+UI_REMOVE_RETAIN_DAYS = 7
+
+
+async def purge_expired_ui_removed(session: AsyncSession) -> int:
+    """物理删除 ui_removed_at 超过 7 天的漏斗记录。"""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=UI_REMOVE_RETAIN_DAYS)
+    rows = await session.scalars(
+        select(CampaignSymbol).where(CampaignSymbol.ui_removed_at.isnot(None))
+    )
+    n = 0
+    for row in rows:
+        removed = row.ui_removed_at
+        if removed is None:
+            continue
+        if removed.tzinfo is None:
+            removed = removed.replace(tzinfo=timezone.utc)
+        if removed < cutoff:
+            await session.delete(row)
+            n += 1
+    if n:
+        await session.flush()
+    return n
+
+
+async def hide_symbol_ui(
+    session: AsyncSession,
+    symbol: str,
+    *,
+    name: str = "",
+) -> Optional[CampaignSymbol]:
+    """前端移除：立即隐藏，后端保留 7 天。"""
+    sym = symbol.zfill(6)[-6:]
+    row = await get_funnel_symbol(session, sym)
+    if row is None:
+        await get_or_create_container(session)
+        row = await upsert_funnel_symbol(
+            session, sym, name or sym, stage="radar_intake"
+        )
+    row.ui_removed_at = datetime.now(timezone.utc)
+    await session.flush()
+    return row
+
+
+async def demote_symbol_one_stage(
+    session: AsyncSession,
+    symbol: str,
+    *,
+    name: str = "",
+) -> Optional[CampaignSymbol]:
+    """降一级：executing→planning→roadmap→radar_intake。"""
+    from apps.copilot.modules.radar.symbol_resolve import display_name_for_symbol
+
+    sym = symbol.zfill(6)[-6:]
+    display = display_name_for_symbol(sym, name or None, allow_network=False)
+    row = await get_funnel_symbol(session, sym)
+    if row is None:
+        await get_or_create_container(session)
+        row = await upsert_funnel_symbol(
+            session, sym, display, stage="radar_intake"
+        )
+    if row.ui_removed_at:
+        return None
+    stage = row.funnel_stage or "planning"
+    demote_map = {
+        "archived": "executing",
+        "executing": "planning",
+        "planning": "radar_intake",
+        "roadmap": "radar_intake",
+        "radar_intake": "radar_intake",
+    }
+    target = demote_map.get(stage, "radar_intake")
+    row.funnel_stage = target
+    if display and display != sym:
+        row.name = display
+    await session.flush()
+    return row
+
+
+async def touch_last_analyzed(session: AsyncSession, symbol: str) -> None:
+    row = await get_funnel_symbol(session, symbol)
+    if row:
+        row.last_analyzed_at = datetime.now(timezone.utc)
+        await session.flush()
+
+
 async def list_funnel_symbols(
     session: AsyncSession,
     *,
     stages: Optional[tuple[str, ...]] = None,
+    include_removed: bool = False,
+    run_purge: bool = False,
 ) -> list[CampaignSymbol]:
+    if run_purge:
+        await purge_expired_ui_removed(session)
     q = select(CampaignSymbol).order_by(CampaignSymbol.symbol)
+    if not include_removed:
+        q = q.where(CampaignSymbol.ui_removed_at.is_(None))
     if stages:
         q = q.where(CampaignSymbol.funnel_stage.in_(stages))
     rows = await session.scalars(q)

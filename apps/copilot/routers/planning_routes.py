@@ -4,7 +4,11 @@
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import html as _html
+import re
+from typing import Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -29,7 +33,17 @@ from apps.copilot.modules.planning.falsify import (
 )
 from apps.copilot.modules.planning.monitor import list_monitors, refresh_verdicts
 from apps.copilot.modules.planning.schema import CampaignCreate, RadarPromoteRequest, RadarScanCreate
-from apps.copilot.modules.planning.funnel import get_or_create_container
+from apps.copilot.modules.planning.funnel import (
+    demote_symbol_one_stage,
+    get_or_create_container,
+    hide_symbol_ui,
+)
+from apps.copilot.modules.planning.sandbox import (
+    get_asset_sandbox,
+    one_shot_global_deduction,
+    one_shot_plan_probes,
+    update_probe_result,
+)
 from apps.copilot.modules.planning.service import (
     create_campaign,
     get_campaign,
@@ -42,8 +56,44 @@ from apps.copilot.modules.planning.service import (
     promote_campaign_to_executing,
 )
 from apps.copilot.modules.radar.schema import DIMENSIONS, MARKET_PHASE_LABELS
+from apps.copilot.modules.radar.display_layout import (
+    LAYOUT_HEADER,
+    layout_schema_payload,
+    ordered_display_metas,
+    parse_layout_from_header,
+)
+from apps.copilot.modules.radar.audit_render import render_audit_page
+from apps.copilot.modules.radar.chat import (
+    RADAR_CHAT_MODELS,
+    chat_turn,
+    clear_session,
+    load_messages,
+    new_session_id,
+)
+from apps.copilot.modules.radar.persistence import (
+    db_retention_days,
+    list_versions_merged,
+    load_version_merged,
+    symbol_data_status,
+)
+from apps.copilot.modules.radar.symbol_resolve import (
+    RadarSymbolResolveError,
+    display_name_for_symbol,
+    resolve_radar_query,
+    suggest_radar_symbols,
+)
+from apps.copilot.modules.radar.t0_cache import file_retention_hours, retention_days
+from apps.copilot.db.models import AssetState, RadarCandidate
+from apps.copilot.modules.radar.collect_progress import (
+    COLLECT_STEP_ORDER,
+    load as load_collect_job,
+    new_job_id,
+)
+from apps.copilot.modules.radar.collect_progress import init_job as init_collect_job
 from apps.copilot.modules.radar.service import (
+    collect_symbol_t0_only,
     create_symbol_scan,
+    run_collect_job,
     ensure_model_profiles,
     get_scan,
     list_candidate_artifacts,
@@ -72,14 +122,227 @@ def _sync_redis():
     return wait_for_sync_redis()
 
 
-@router.get("/planning", response_class=HTMLResponse)
-async def planning_page(request: Request):
-    view = request.query_params.get("view", "radar")
-    if view not in ("radar", "planning", "executing", "roadmap"):
-        view = "radar"
-    return _tpl(request).TemplateResponse(
-        request, "planning/workbench.html", {"view": view}
+def _render_probe_task_markdown(bp: dict[str, Any]) -> str:
+    def g(k: str) -> str:
+        return _esc(bp.get(k) or "—")
+
+    alts = bp.get("alternative_sources") or []
+    alt_html = "".join(f"<li>{_esc(x)}</li>" for x in alts) if alts else "<li>无</li>"
+    return (
+        "<div class='text-sm leading-6 text-gray-700 space-y-2'>"
+        f"<p><b>维度：</b>{g('dimension')}</p>"
+        f"<p><b>目标数据：</b>{g('target_data_desc')}</p>"
+        f"<p><b>主数据源：</b>{g('primary_source_name')}</p>"
+        f"<p><b>为何选它：</b>{g('why_this_source')}</p>"
+        f"<p><b>采集建议：</b>{g('collection_guidance')}</p>"
+        f"<p><b>证伪逻辑：</b>{g('falsification_logic')}</p>"
+        "<div><b>备选来源：</b><ul class='list-disc pl-5'>"
+        f"{alt_html}</ul></div>"
+        "</div>"
     )
+
+
+def _render_sandbox_panel(sandbox: dict[str, Any]) -> str:
+    probes = sandbox.get("probes") or []
+    symbol = _esc(sandbox.get("symbol_code") or "")
+    planning_snapshot = sandbox.get("planning_snapshot") or {}
+    deduction_snapshot = sandbox.get("deduction_snapshot") or {}
+
+    top = (
+        f"<details class='mb-3 rounded-lg border border-gray-100 bg-gray-50/70' open>"
+        f"<summary class='cursor-pointer px-3 py-2 text-sm font-semibold text-gray-700'>"
+        f"雷达初评快照（{symbol}）</summary>"
+        f"<div class='px-3 pb-3 text-xs text-gray-600'>"
+        f"<pre class='bg-white border border-gray-100 rounded p-2 overflow-x-auto'>"
+        f"{_esc(json.dumps((sandbox.get('radar_initial_analysis') or {}), ensure_ascii=False, indent=2)[:2000])}"
+        f"</pre></div></details>"
+    )
+    plan_meta = ""
+    if planning_snapshot:
+        plan_meta = (
+            f"<p class='text-xs text-gray-500 mb-2'>"
+            f"最近规划：{_esc(planning_snapshot.get('model'))} · "
+            f"probe={planning_snapshot.get('probe_count', 0)} · "
+            f"¥{float(planning_snapshot.get('cost_yuan_est') or 0):.4f}</p>"
+        )
+    plan_btn = (
+        f"<form hx-post='/api/planning/sandbox/{symbol}/plan' "
+        f"hx-target='#planning-sandbox-panel-{symbol}' hx-swap='outerHTML' class='mb-3'>"
+        f"<button type='submit' class='px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold "
+        f"hover:bg-indigo-700'>✨ 智能规划：一键生成全维度数据探针</button></form>"
+    )
+
+    rows: list[str] = []
+    for p in probes:
+        pid = _esc(p.get("id"))
+        st = p.get("status")
+        cls = "bg-red-50 text-red-700" if st == "pending_code" else "bg-green-50 text-green-700"
+        st_label = "🔴 待开发接入" if st == "pending_code" else "🟢 数据可用"
+        bp = p.get("probe_blueprint") or {}
+        title = _esc(bp.get("target_data_desc") or bp.get("dimension") or "探针")
+        dim = _esc(bp.get("dimension") or "—")
+        row = [
+            "<div class='border border-gray-100 rounded-lg p-3 mb-2'>",
+            f"<div class='flex flex-wrap items-center gap-2 mb-1'>",
+            f"<span class='font-semibold text-gray-900'>{title}</span>",
+            f"<span class='text-xs px-2 py-0.5 rounded {cls}'>{st_label}</span>",
+            f"<span class='text-xs text-gray-400'>{dim}</span></div>",
+        ]
+        if st == "pending_code":
+            row.append(
+                "<details class='mt-2 bg-gray-50 rounded border border-gray-100'>"
+                "<summary class='cursor-pointer px-2 py-1.5 text-xs text-blue-700'>查看数据采集开发蓝图</summary>"
+                f"<div class='p-2'>{_render_probe_task_markdown(bp)}</div></details>"
+            )
+        else:
+            refined = p.get("refined_data") or {}
+            row.append(
+                "<div class='mt-2 grid grid-cols-1 lg:grid-cols-2 gap-2'>"
+                "<div class='rounded border border-gray-100 bg-white p-2'>"
+                "<p class='text-xs text-gray-500 mb-1'>数值趋势（Echarts 占位）</p>"
+                "<div class='h-20 rounded bg-slate-50 border border-dashed border-slate-200 "
+                "text-[11px] text-slate-500 flex items-center justify-center'>迷你趋势图（time-series）</div>"
+                "</div>"
+                "<div class='rounded border border-gray-100 bg-white p-2'>"
+                "<p class='text-xs text-gray-500 mb-1'>提炼结论</p>"
+                f"<pre class='text-xs text-gray-700 whitespace-pre-wrap'>{_esc(json.dumps(refined, ensure_ascii=False, indent=2)[:900])}</pre>"
+                "</div></div>"
+            )
+        row.append(
+            f"<form hx-post='/api/planning/sandbox/probes/{pid}/result' hx-target='#planning-sandbox-panel-{symbol}' "
+            f"hx-swap='outerHTML' class='mt-2 flex gap-2 items-center'>"
+            f"<input type='text' name='mock_result' placeholder='可粘贴 JSON（模拟数据就绪）' "
+            f"class='flex-1 border border-gray-200 rounded px-2 py-1 text-xs'>"
+            f"<button type='submit' class='text-xs px-2 py-1 rounded border border-gray-200 text-gray-600'>标记数据可用</button>"
+            f"</form>"
+        )
+        row.append("</div>")
+        rows.append("".join(row))
+    board = (
+        "<div class='rounded-lg border border-gray-100 bg-white p-3'>"
+        "<h3 class='text-sm font-semibold text-gray-800 mb-2'>探针流水线看板</h3>"
+        + ("".join(rows) if rows else "<p class='text-sm text-gray-400'>暂无探针，请先执行智能规划。</p>")
+        + "</div>"
+    )
+
+    all_ready = bool(sandbox.get("all_data_ready"))
+    gate_cls = "bg-green-600 hover:bg-green-700" if all_ready else "bg-gray-300"
+    gate_text = "🚀 全局视野：执行最终逻辑深度推演" if all_ready else "🚀 全局视野：等待全部探针数据就绪"
+    gate = (
+        f"<div class='mt-3 rounded-lg border border-gray-100 bg-white p-3'>"
+        f"<p class='text-xs text-gray-500 mb-2'>全局决断门：仅当全部探针为 🟢 数据可用时解锁</p>"
+        f"<form hx-post='/api/planning/sandbox/{symbol}/deduce' "
+        f"hx-target='#planning-sandbox-panel-{symbol}' hx-swap='outerHTML'>"
+        f"<button type='submit' {'disabled' if not all_ready else ''} "
+        f"class='w-full px-3 py-2 rounded-lg text-white text-sm font-semibold {gate_cls} "
+        f"{'cursor-not-allowed' if not all_ready else ''}'>{gate_text}</button></form>"
+        f"</div>"
+    )
+
+    verdict = ""
+    if deduction_snapshot:
+        falsified = bool(deduction_snapshot.get("falsified_flag"))
+        lamp = "🔴 红灯（逻辑被证伪）" if falsified else "🟢 绿灯（逻辑未被证伪）"
+        lamp_cls = "bg-red-50 text-red-700 border-red-100" if falsified else "bg-green-50 text-green-700 border-green-100"
+        verdict = (
+            f"<div class='mt-3 rounded-lg border p-3 {lamp_cls}'>"
+            f"<p class='font-semibold mb-1'>{lamp}</p>"
+            f"<p class='text-sm mb-1'>{_esc(deduction_snapshot.get('cross_validation_analysis') or '')}</p>"
+            f"<p class='text-sm'><b>建议：</b>{_esc(deduction_snapshot.get('final_recommendation') or '')}</p>"
+            f"</div>"
+        )
+
+    return (
+        f"<div id='planning-sandbox-panel-{symbol}' class='mt-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3'>"
+        f"{top}{plan_meta}{plan_btn}{board}{gate}{verdict}</div>"
+    )
+
+
+async def _audit_page_context(
+    request: Request,
+    session: AsyncSession,
+) -> dict[str, Any]:
+    """数据审计页上下文（顶栏「审计」）。"""
+    sym_q = (request.query_params.get("symbol") or "").strip()
+    ver_q = (request.query_params.get("version") or "").strip()
+    symbol = sym_q
+    name = sym_q
+    if sym_q:
+        try:
+            symbol, name = resolve_radar_query(sym_q)
+        except RadarSymbolResolveError:
+            symbol = sym_q.zfill(6)[-6:] if sym_q.isdigit() else sym_q
+    versions = await list_versions_merged(session, symbol) if symbol else []
+    bundle = None
+    vid = ver_q or (versions[0]["version_id"] if versions else "")
+    if symbol and vid:
+        bundle = await load_version_merged(session, symbol, vid)
+    return {
+        "audit_symbol": symbol,
+        "audit_name": name,
+        "audit_versions": versions,
+        "audit_version_id": vid,
+        "audit_html": render_audit_page(
+            symbol=symbol or "—",
+            name=name or "—",
+            versions=versions,
+            selected_version_id=vid or None,
+            bundle=bundle,
+        )
+        if symbol
+        else (
+            "<p class='text-sm text-gray-500 py-6 text-center'>"
+            "输入标的代码或简称，查询 T0 / T1 / T2 版本与 bundle</p>"
+        ),
+    }
+
+
+@router.get("/audit", response_class=HTMLResponse)
+async def audit_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    ctx = await _audit_page_context(request, session)
+    return _tpl(request).TemplateResponse(request, "audit/data.html", ctx)
+
+
+@router.get("/opus", response_class=HTMLResponse)
+async def opus_chat_page(request: Request):
+    return _tpl(request).TemplateResponse(
+        request,
+        "audit/opus.html",
+        {"chat_models": RADAR_CHAT_MODELS},
+    )
+
+
+@router.get("/planning", response_class=HTMLResponse)
+async def planning_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import urlencode
+
+    view = request.query_params.get("view", "radar")
+    audit_tab = (request.query_params.get("audit_tab") or "data").strip()
+    # 旧工作台链接 → 顶栏一级页面
+    if view == "radar_chat" or (view in ("audit", "radar_audit") and audit_tab == "chat"):
+        return RedirectResponse(url="/opus", status_code=302)
+    if view in ("audit", "radar_audit", "radar_data"):
+        q = {k: v for k, v in request.query_params.items() if k not in ("view", "audit_tab")}
+        return RedirectResponse(url="/audit?" + urlencode(q), status_code=302)
+    if view in ("radar_settings",):
+        return RedirectResponse(url="/settings#radar-prefs", status_code=302)
+    allowed = ("radar", "planning", "executing", "roadmap")
+    if view not in allowed:
+        view = "radar"
+    from apps.copilot.modules.radar.workbench_prefs import load_prefs
+
+    ctx: dict = {
+        "view": view,
+        "workbench_prefs": load_prefs(),
+    }
+    return _tpl(request).TemplateResponse(request, "planning/workbench.html", ctx)
 
 
 @router.get("/portfolio-guard", response_class=HTMLResponse)
@@ -97,9 +360,25 @@ async def graph_page(request: Request):
     )
 
 
+@router.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    from apps.copilot.modules.radar.workbench_prefs import load_prefs
+
+    return _tpl(request).TemplateResponse(
+        request,
+        "settings/index.html",
+        {"workbench_prefs": load_prefs()},
+    )
+
+
 @router.get("/system", response_class=HTMLResponse)
 async def system_page(request: Request):
-    return _tpl(request).TemplateResponse(request, "system/index.html", {})
+    """兼容旧链接 /system → /settings。"""
+    from fastapi.responses import RedirectResponse
+
+    if request.url.query:
+        return RedirectResponse(url=f"/settings?{request.url.query}#radar-prefs", status_code=302)
+    return RedirectResponse(url="/settings#radar-prefs", status_code=302)
 
 
 @router.get("/api/campaigns")
@@ -136,6 +415,15 @@ async def api_timeline(
     return items
 
 
+async def _radar_candidates_html_response(
+    session: AsyncSession,
+    *,
+    flash: str = "",
+) -> HTMLResponse:
+    items = await list_recent_candidates(session)
+    return _render_radar_candidates_html(items, flash=flash)
+
+
 @router.get("/api/radar/symbols")
 async def api_radar_symbols(
     request: Request,
@@ -160,20 +448,66 @@ async def api_create_radar_scan(
             status_code=501,
             detail="启动期仅支持模式 C（symbol）；A/B 见 step_14 扩展项",
         )
-    t2_vals = (await request.form()).getlist("enable_t2")
+    form = await request.form()
+    t2_vals = form.getlist("enable_t2")
     t2_on = any(v.lower() in ("1", "true", "yes", "on") for v in t2_vals) if t2_vals else True
+    fr_vals = form.getlist("force_refresh")
+    force_refresh = any(v.lower() in ("1", "true", "yes", "on") for v in fr_vals)
     await ensure_model_profiles(session)
     redis_client = _sync_redis()
-    result = await create_symbol_scan(
-        session,
-        query_text=query_text,
-        redis_client=redis_client,
-        enable_t2=t2_on,
-    )
+    try:
+        result = await create_symbol_scan(
+            session,
+            query_text=query_text,
+            redis_client=redis_client,
+            enable_t2=t2_on,
+            force_refresh=force_refresh,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     await session.commit()
     if request.headers.get("hx-request"):
-        return _render_scan_html(result)
+        return _render_scan_html(result, layout=_layout_from_request(request))
     return result
+
+
+@router.get("/api/radar/display-layout/schema")
+async def api_radar_display_layout_schema():
+    """内置 9 维 + 默认布局 + 自定义模块提示词编写指南。"""
+    return layout_schema_payload()
+
+
+@router.get("/api/radar/workbench-prefs")
+async def api_get_radar_workbench_prefs():
+    """扫描台默认选项 + 缓存策略（服务端 JSON 热加载）。"""
+    from apps.copilot.modules.radar.workbench_prefs import load_prefs
+
+    return load_prefs()
+
+
+@router.put("/api/radar/workbench-prefs")
+async def api_put_radar_workbench_prefs(request: Request):
+    from apps.copilot.modules.radar.workbench_prefs import save_prefs
+
+    try:
+        body = await request.json()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="需要 JSON 请求体") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="无效 JSON")
+    return save_prefs(body)
+
+
+@router.delete("/api/radar/workbench-prefs")
+async def api_delete_radar_workbench_prefs():
+    from apps.copilot.modules.radar.workbench_prefs import reset_prefs
+
+    return reset_prefs()
+
+
+def _layout_from_request(request: Request) -> dict[str, Any]:
+    raw = request.headers.get(LAYOUT_HEADER) or request.headers.get("X-Radar-Display-Layout")
+    return parse_layout_from_header(raw)
 
 
 @router.get("/api/radar/scans/{scan_id}")
@@ -187,7 +521,7 @@ async def api_get_radar_scan(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if "text/html" in request.headers.get("accept", "") or request.headers.get("hx-request"):
-        return _render_scan_html(result)
+        return _render_scan_html(result, layout=_layout_from_request(request))
     return result
 
 
@@ -197,6 +531,247 @@ async def api_candidate_artifacts(
     session: AsyncSession = Depends(get_db),
 ):
     return await list_candidate_artifacts(session, candidate_id)
+
+
+@router.get("/api/radar/audit/{symbol}/versions")
+async def api_radar_audit_versions(
+    symbol: str,
+    session: AsyncSession = Depends(get_db),
+):
+    """近 N 天版本列表（DB + 24h 文件缓存，最多 7 版/标的）。"""
+    try:
+        sym, _ = resolve_radar_query(symbol)
+    except RadarSymbolResolveError:
+        sym = symbol.zfill(6)[-6:] if symbol.isdigit() else symbol
+    return {
+        "symbol": sym,
+        "file_retention_hours": file_retention_hours(),
+        "db_retention_days": db_retention_days(),
+        "versions": await list_versions_merged(session, sym),
+    }
+
+
+@router.get("/api/radar/data/{symbol}")
+async def api_radar_data_status(
+    symbol: str,
+    session: AsyncSession = Depends(get_db),
+):
+    try:
+        sym, _ = resolve_radar_query(symbol)
+    except RadarSymbolResolveError:
+        sym = symbol.zfill(6)[-6:] if symbol.isdigit() else symbol
+    return await symbol_data_status(session, sym)
+
+
+def _start_radar_collect(query_text: str, redis_client: Any) -> tuple[str, dict]:
+    """解析输入并启动后台采集，返回 (job_id, progress_state)。"""
+    sym, name = resolve_radar_query(query_text)
+    job_id = new_job_id()
+    state = init_collect_job(redis_client, job_id, symbol=sym, name=name)
+    asyncio.create_task(run_collect_job(job_id, query_text.strip(), redis_client))
+    return job_id, state
+
+
+@router.get("/api/radar/symbols/suggest")
+async def api_radar_symbol_suggest(q: str = "", limit: int = 8):
+    """搜索栏模糊建议（JSON）。"""
+    items = suggest_radar_symbols(q, limit=min(12, max(1, limit)))
+    return {"query": q, "items": items}
+
+
+@router.post("/api/radar/collect")
+async def api_radar_collect_by_query(
+    request: Request,
+    query_text: str = Form(...),
+):
+    """启动后台 T0+T1 采集（表单 query_text · 避免路径编码问题）。"""
+    try:
+        redis_client = _sync_redis()
+        _job_id, state = _start_radar_collect(query_text, redis_client)
+    except RadarSymbolResolveError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
+        return HTMLResponse(_render_collect_progress_panel(state))
+    return {"job_id": state["job_id"], "status": "running"}
+
+
+@router.post("/api/radar/data/{symbol}/collect")
+async def api_radar_collect_t0(
+    symbol: str,
+    request: Request,
+):
+    """启动后台 T0+T1 采集；立即返回进度面板（兼容旧路径）。"""
+    try:
+        redis_client = _sync_redis()
+        _job_id, state = _start_radar_collect(symbol, redis_client)
+    except RadarSymbolResolveError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
+        return HTMLResponse(_render_collect_progress_panel(state))
+    return {"job_id": state["job_id"], "status": "running"}
+
+
+@router.get("/api/radar/collect/jobs/{job_id}")
+async def api_radar_collect_job_status(
+    job_id: str,
+    request: Request,
+):
+    """采集任务进度（HTML 片段 · 未完成时每 1s 由 HTMX 轮询）。"""
+    redis_client = _sync_redis()
+    state = load_collect_job(redis_client, job_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="任务不存在或已过期")
+    if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
+        return HTMLResponse(_render_collect_progress_panel(state))
+    return state
+
+
+@router.post("/api/funnel/symbols/{symbol}/demote")
+async def api_funnel_demote(
+    symbol: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    row = await demote_symbol_one_stage(session, symbol)
+    if row is None:
+        raise HTTPException(status_code=404, detail="标的未在漏斗中")
+    await session.commit()
+    if request.headers.get("hx-request"):
+        return await _radar_candidates_html_response(
+            session,
+            flash=f"已降级 {display_name_for_symbol(row.symbol, row.name, allow_network=False)} · 当前阶段 {row.funnel_stage}",
+        )
+    return {"symbol": row.symbol, "funnel_stage": row.funnel_stage}
+
+
+@router.post("/api/funnel/symbols/{symbol}/remove")
+async def api_funnel_remove_ui(
+    symbol: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    row = await hide_symbol_ui(session, symbol)
+    if row is None:
+        raise HTTPException(status_code=404, detail="标的未在漏斗中")
+    await session.commit()
+    if request.headers.get("hx-request"):
+        return await _radar_candidates_html_response(
+            session,
+            flash=f"已从候选区移除 {display_name_for_symbol(row.symbol, row.name, allow_network=False)}",
+        )
+    return {"symbol": row.symbol, "ui_removed_at": row.ui_removed_at.isoformat()}
+
+
+async def _latest_scan_context(session: AsyncSession, symbol: str) -> dict | None:
+    sym = symbol.zfill(6)[-6:]
+    row = await session.scalar(
+        select(RadarCandidate)
+        .where(RadarCandidate.symbol == sym)
+        .order_by(RadarCandidate.id.desc())
+        .limit(1)
+    )
+    if row is None:
+        return None
+    raw = row.raw_json or {}
+    return {
+        "name": row.name,
+        "symbol": row.symbol,
+        "deep_analysis": raw.get("deep_analysis") or {},
+    }
+
+
+@router.post("/api/radar/chat")
+async def api_radar_chat(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    message: str = Form(...),
+    session_id: str = Form(""),
+    symbol: str = Form(""),
+    model_id: str = Form(""),
+):
+    """Opus 多轮日常对话（HTMX 返回聊天气泡 HTML）。"""
+    redis_client = _sync_redis()
+    sym: str | None = (symbol or "").strip() or None
+    scan_ctx = None
+    if sym:
+        try:
+            sym, _ = resolve_radar_query(sym)
+        except RadarSymbolResolveError:
+            sym = sym.zfill(6)[-6:] if sym.isdigit() else None
+        if sym:
+            scan_ctx = await _latest_scan_context(session, sym)
+
+    try:
+        result = await chat_turn(
+            redis_client,
+            session_id=session_id,
+            user_message=message,
+            symbol=sym,
+            scan_context=scan_ctx,
+            model_id=model_id or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
+        return HTMLResponse(_render_chat_panel(result))
+    return result
+
+
+@router.post("/api/radar/chat/new")
+async def api_radar_chat_new(
+    request: Request,
+    session_id: str = Form(""),
+):
+    """清空当前会话，开始新对话。"""
+    clear_session(_sync_redis(), session_id)
+    payload = {"session_id": new_session_id(), "messages": [], "status": "new"}
+    if request.headers.get("hx-request"):
+        return HTMLResponse(_render_chat_panel(payload))
+    return payload
+
+
+@router.get("/api/radar/chat/{session_id}")
+async def api_radar_chat_history(
+    session_id: str,
+    request: Request,
+):
+    """拉取会话历史（HTML 片段）。"""
+    messages = load_messages(_sync_redis(), session_id)
+    payload = {"session_id": session_id, "messages": messages, "status": "ok"}
+    if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
+        return HTMLResponse(_render_chat_panel(payload))
+    return payload
+
+
+@router.get("/api/radar/audit/{symbol}/{version_id}")
+async def api_radar_audit_bundle(
+    symbol: str,
+    version_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """指定版本的 T0/T1/T2 bundle。"""
+    try:
+        sym, name = resolve_radar_query(symbol)
+    except RadarSymbolResolveError:
+        sym = symbol.zfill(6)[-6:] if symbol.isdigit() else symbol
+        name = sym
+    bundle = await load_version_merged(session, sym, version_id)
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="版本不存在或已超出保留期")
+    if "text/html" in request.headers.get("accept", "") or request.headers.get("hx-request"):
+        html_body = render_audit_page(
+            symbol=sym,
+            name=str(bundle.get("name") or name),
+            versions=list_versions(sym),
+            selected_version_id=version_id,
+            bundle=bundle,
+        )
+        return HTMLResponse(html_body)
+    return bundle
 
 
 @router.post("/api/radar/candidates/{candidate_id}/promote")
@@ -220,10 +795,13 @@ async def api_promote_candidate(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
     if request.headers.get("hx-request"):
-        return HTMLResponse(
-            f"<div class='p-3 rounded-lg bg-green-50 text-green-700 text-sm'>"
-            f"✓ 标的 {result['symbol']} 已晋级到「规划中」区（funnel_stage="
-            f"{result.get('funnel_stage', 'planning')}）。切到 📝 规划中 Tab 继续证伪监控。</div>"
+        sym = result.get("symbol", "")
+        return await _radar_candidates_html_response(
+            session,
+            flash=(
+                f"✓ {display_name_for_symbol(sym, result.get('name'), allow_network=False)} "
+                f"({sym}) 已晋级到「规划中」· 可切到 📝 规划中 Tab"
+            ),
         )
     return result
 
@@ -368,43 +946,247 @@ def _phase_chip(phase: str | None) -> str:
     return f"<span class='text-xs px-2 py-0.5 rounded {cls}'>{label}</span>"
 
 
-def _render_radar_candidates_html(items: list) -> HTMLResponse:
-    """雷达扫描候选卡（待晋级 → planning）。"""
+def _render_collect_progress_panel(state: dict) -> str:
+    """T0 采集进度条 + 分步清单（运行中可 HTMX 轮询）。"""
+    job_id = _esc(state.get("job_id") or "")
+    status = state.get("status") or "running"
+    sym = _esc(state.get("symbol") or "")
+    name = _esc(state.get("name") or "")
+    pct = int(state.get("pct") or 0)
+    step_label = _esc(state.get("step_label") or "采集中…")
+    detail = _esc(state.get("detail") or "")
+    steps_done = set(state.get("steps_done") or [])
+
+    step_rows: list[str] = []
+    for sid, label, _bound in COLLECT_STEP_ORDER:
+        if sid == "done":
+            continue
+        if status == "done" or sid in steps_done:
+            icon = "✅"
+            cls = "text-emerald-700"
+        elif state.get("step") == sid and status == "running":
+            icon = "⏳"
+            cls = "text-blue-700 font-medium"
+        else:
+            icon = "○"
+            cls = "text-gray-400"
+        step_rows.append(
+            f"<li class='flex items-center gap-2 text-xs {cls}'>"
+            f"<span class='w-4 text-center'>{icon}</span><span>{_esc(label)}</span></li>"
+        )
+
+    poll_attrs = ""
+    if status == "running":
+        poll_attrs = (
+            f" id='radar-collect-progress' data-job-id='{job_id}' data-running='1'"
+            f" hx-get='/api/radar/collect/jobs/{job_id}'"
+            f" hx-trigger='every 1s'"
+            f" hx-swap='outerHTML'"
+        )
+    elif status == "error":
+        poll_attrs = f" id='radar-collect-progress' data-job-id='{job_id}' data-done='1' data-error='1'"
+    else:
+        poll_attrs = f" id='radar-collect-progress' data-job-id='{job_id}' data-done='1'"
+
+    bar_color = "bg-emerald-500" if status == "done" else "bg-blue-500"
+    if status == "error":
+        bar_color = "bg-red-400"
+
+    header = (
+        f"<div class='flex flex-wrap items-center justify-between gap-2 mb-2'>"
+        f"<span class='text-sm font-semibold text-gray-800'>"
+        f"📦 T0 采集 · {name} <span class='font-mono text-gray-500'>{sym}</span></span>"
+        f"<span class='text-xs text-gray-500'>{pct}%</span></div>"
+    )
+    bar = (
+        f"<div class='h-2 rounded-full bg-gray-100 overflow-hidden mb-2'>"
+        f"<div class='h-full {bar_color} transition-all duration-500' "
+        f"style='width:{pct}%'></div></div>"
+    )
+    detail_html = f' <span class="text-gray-400">— {detail}</span>' if detail else ""
+    current = f"<p class='text-sm text-gray-700 mb-2'>{step_label}{detail_html}</p>"
+    steps_ul = f"<ul class='space-y-1 mb-3 border-t border-gray-100 pt-2'>{''.join(step_rows)}</ul>"
+
+    footer = ""
+    if status == "done":
+        res = state.get("result") or {}
+        vid = _esc(res.get("version_id") or "")
+        ok = res.get("t0_ok_parts", "?")
+        footer = (
+            f"<div class='text-sm text-green-800 bg-green-50 rounded-lg px-3 py-2'>"
+            f"✓ 采集完成 · 版本 <span class='font-mono'>{vid}</span> · "
+            f"T0 就绪 {ok}/4 · "
+            f"<a class='text-blue-600 underline' href='/audit?symbol={sym}'>"
+            f"数据审计</a></div>"
+        )
+    elif status == "error":
+        err = _esc(state.get("error") or "未知错误")
+        footer = (
+            f"<div class='text-sm text-red-800 bg-red-50 rounded-lg px-3 py-2'>"
+            f"⚠️ 采集失败：{err}</div>"
+        )
+    elif status == "running":
+        footer = (
+            "<p class='text-[11px] text-gray-400 flex items-center gap-2'>"
+            "<svg class='animate-spin h-3 w-3' fill='none' viewBox='0 0 24 24'>"
+            "<circle class='opacity-25' cx='12' cy='12' r='10' stroke='currentColor' stroke-width='4'/>"
+            "<path class='opacity-75' fill='currentColor' d='M4 12a8 8 0 018-8v8H4z'/></svg>"
+            "自动刷新进度（约 30～120 秒，视网络而定）</p>"
+        )
+
+    return (
+        f"<div class='rounded-xl border border-emerald-100 bg-emerald-50/40 p-4'{poll_attrs}>"
+        f"{header}{bar}{current}{steps_ul}{footer}</div>"
+    )
+
+
+def _render_chat_panel(payload: dict) -> str:
+    """ChatGPT 风格对话区 HTML。"""
+    sid = _esc(payload.get("session_id") or new_session_id())
+    messages = payload.get("messages") or []
+    err = payload.get("error")
+    status = payload.get("status")
+
+    bubbles: list[str] = []
+    if not messages and status in ("new", None):
+        bubbles.append(
+            "<div class='text-center text-sm text-gray-400 py-12'>"
+            "<p class='mb-2'>💬 开始与 Opus 对话</p>"
+            "<p class='text-xs'>可问产业逻辑、财报解读、估值框架、风险识别等；"
+            "可选填标的代码以附带最近扫描结论</p></div>"
+        )
+    for m in messages:
+        role = m.get("role")
+        content = _esc(m.get("content") or "")
+        if role == "user":
+            bubbles.append(
+                f"<div class='flex justify-end'><div class='max-w-[85%] rounded-2xl rounded-tr-sm "
+                f"bg-blue-600 text-white px-4 py-2.5 text-sm leading-relaxed shadow-sm'>"
+                f"{content}</div></div>"
+            )
+        elif role == "assistant":
+            meta = m.get("meta") or {}
+            cost_line = ""
+            if meta.get("cost_yuan") is not None:
+                cost_line = (
+                    f"<p class='text-[10px] text-gray-400 mt-1.5 border-t border-gray-100 pt-1'>"
+                    f"本轮 ¥{float(meta['cost_yuan']):.4f} · {_esc(meta.get('model') or '')} · "
+                    f"入{meta.get('tokens_in', 0)}/出{meta.get('tokens_out', 0)} tok</p>"
+                )
+            bubbles.append(
+                f"<div class='flex justify-start'><div class='max-w-[90%] rounded-2xl rounded-tl-sm "
+                f"bg-white border border-gray-200 px-4 py-2.5 text-sm text-gray-800 leading-relaxed "
+                f"shadow-sm whitespace-pre-wrap'>{content}{cost_line}</div></div>"
+            )
+
+    err_html = ""
+    if err:
+        err_html = (
+            f"<div class='mx-2 mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 "
+            f"text-sm text-red-700'>⚠️ {_esc(err)}</div>"
+        )
+
+    meta_html = ""
+    if payload.get("cost_yuan") is not None and status == "ok":
+        meta_html = (
+            f"<p class='text-[10px] text-gray-400 text-center mt-2'>"
+            f"本轮 ¥{float(payload['cost_yuan']):.4f} · "
+            f"{_esc(payload.get('model') or '')} · "
+            f"入{payload.get('tokens_in', 0)}/出{payload.get('tokens_out', 0)} tok</p>"
+        )
+
+    return (
+        f"<div id='radar-chat-inner' data-session-id='{sid}'>"
+        f"<input type='hidden' name='session_id' id='radar-chat-session-id' value='{sid}'>"
+        f"{err_html}"
+        f"<div class='space-y-4 px-2 py-2 min-h-[200px]'>{''.join(bubbles)}</div>"
+        f"{meta_html}</div>"
+    )
+
+
+def _render_radar_candidates_html(items: list, *, flash: str = "") -> HTMLResponse:
+    """雷达扫描候选卡（待晋级 → planning）；片段 HTML，由 #radar-candidates-list 容器 hx-swap 注入。"""
+    flash_html = ""
+    if flash:
+        flash_html = (
+            f"<div class='mb-2 text-sm text-green-800 bg-green-50 border border-green-100 "
+            f"rounded-lg px-3 py-2'>{_esc(flash)}</div>"
+        )
     if not items:
         return HTMLResponse(
+            f"{flash_html}"
             "<p class='text-sm text-gray-500 py-4 text-center'>"
-            "暂无扫描候选 · 上方输入标的代码启动扫描</p>"
+            "暂无近 7 日分析候选 · 上方输入标的启动扫描</p>"
         )
     cards: list[str] = []
     for c in items:
         sym = c.get("symbol", "")
+        scan_id = c.get("scan_id")
+        sym_esc = _esc(sym)
+        display = _esc(display_name_for_symbol(sym, c.get("name"), allow_network=False))
         promoted = c.get("already_promoted")
         conf = c.get("confidence")
         conf_txt = f"{conf:.0%}" if conf is not None else "—"
-        action = (
-            "<span class='text-xs px-3 py-1 rounded bg-green-50 text-green-700'>✓ 已在规划区</span>"
-            if promoted
-            else (
-                f"<form hx-post='/api/radar/candidates/{c['id']}/promote' "
-                f"hx-target='#radar-scan-result' hx-swap='innerHTML' class='inline'>"
+        title_inner = (
+            f"<span class='block font-semibold text-gray-900 leading-tight'>{display}</span>"
+            f"<span class='block text-xs text-gray-400 font-mono mt-0.5'>{sym_esc}</span>"
+        )
+        if scan_id:
+            title = (
+                f"<button type='button' "
+                f"class='hover:text-blue-700 hover:underline cursor-pointer text-left "
+                f"bg-transparent border-0 p-0' "
+                f"title='查看最近一次深度分析报告' "
+                f"hx-get='/api/radar/scans/{int(scan_id)}' "
+                f"hx-target='#radar-scan-result' hx-swap='innerHTML'>"
+                f"{title_inner}</button>"
+            )
+        else:
+            title = f"<div>{title_inner}</div>"
+        cid = c.get("id")
+        sym_raw = sym
+        promote_btn = ""
+        if not promoted and cid:
+            promote_btn = (
+                f"<form hx-post='/api/radar/candidates/{int(cid)}/promote' "
+                f"hx-target='#radar-candidates-list' hx-swap='innerHTML' class='inline'>"
                 f"<button type='submit' "
                 f"class='text-sm px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700'>"
-                f"➕ 晋级到规划区</button></form>"
+                f"➕ 晋级规划</button></form>"
             )
+        elif promoted:
+            promote_btn = (
+                "<span class='text-xs px-2 py-1 rounded bg-green-50 text-green-700'>"
+                "✓ 已在规划区</span>"
+            )
+        demote_btn = (
+            f"<form hx-post='/api/funnel/symbols/{sym_raw}/demote' "
+            f"hx-target='#radar-candidates-list' hx-swap='innerHTML' class='inline'>"
+            f"<button type='submit' class='text-xs px-2 py-1 rounded border border-amber-200 "
+            f"text-amber-800 hover:bg-amber-50'>降级</button></form>"
+        )
+        remove_btn = (
+            f"<form hx-post='/api/funnel/symbols/{sym_raw}/remove' "
+            f"hx-target='#radar-candidates-list' hx-swap='innerHTML' class='inline'>"
+            f"<button type='submit' class='text-xs px-2 py-1 rounded border border-gray-200 "
+            f"text-gray-600 hover:bg-gray-100'>移除</button></form>"
+        )
+        action = (
+            f"<div class='flex flex-wrap gap-2 justify-end'>"
+            f"{promote_btn}{demote_btn}{remove_btn}</div>"
         )
         cards.append(
             f"<div class='flex items-center justify-between p-3 mb-2 rounded-lg"
             f" bg-gray-50 border border-gray-100'>"
-            f"<div class='flex items-center gap-2 flex-wrap'>"
-            f"<span class='font-semibold text-gray-900'>{c.get('name', sym)}</span>"
-            f"<span class='text-gray-400 text-sm'>{sym}</span>"
+            f"<div class='flex items-center gap-3 flex-wrap'>"
+            f"{title}"
             f"{_phase_chip(c.get('market_phase'))}"
             f"<span class='text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700'>置信 {conf_txt}</span>"
             f"</div>"
             f"<div class='shrink-0 ml-4'>{action}</div>"
             f"</div>"
         )
-    return HTMLResponse("".join(cards))
+    return HTMLResponse(f"{flash_html}{''.join(cards)}")
 
 
 def _render_workspace_symbols_html(
@@ -433,21 +1215,29 @@ def _render_workspace_symbols_html(
                 f"<span class='text-xs px-2 py-0.5 rounded bg-indigo-50 text-indigo-700'>规划中</span>"
                 f"</div>"
                 f"<div class='flex flex-wrap gap-2 items-center'>"
-                f"<button class='text-sm text-blue-600 hover:underline' "
-                f"hx-get='/api/campaigns/{container_id}/planning-panel?symbol={sym}' "
-                f"hx-target='#panel-{sym}' hx-swap='innerHTML' "
-                f"hx-headers='{{\"Accept\":\"text/html\"}}'>展开证伪监控面板 ▾</button>"
+                f"<button type='button' class='text-sm text-blue-600 hover:underline falsify-panel-toggle' "
+                f"data-symbol='{sym}' data-campaign-id='{container_id}'>"
+                f"展开证伪监控面板 ▾</button>"
+                f"<button type='button' class='text-sm text-indigo-600 hover:underline planning-sandbox-toggle' "
+                f"data-symbol='{sym}'>Context-Aware Sandbox ▾</button>"
                 f"<a href='/api/campaigns/{container_id}/symbols/{sym}' "
                 f"class='text-sm text-gray-500 hover:underline'>6 维档案 JSON</a>"
                 f"<form hx-post='/api/campaigns/{container_id}/promote-executing' "
-                f"hx-swap='none' class='inline ml-auto'>"
+                f"hx-swap='none' class='inline'>"
                 f"<input type='hidden' name='symbol' value='{sym}'>"
                 f"<input type='hidden' name='human_confirmed' value='true'>"
                 f"<button type='submit' "
                 f"class='text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700'>"
                 f"人工确认 · 晋级执行</button></form>"
+                f"<form hx-post='/api/funnel/symbols/{sym}/demote' hx-swap='none' class='inline'>"
+                f"<button type='submit' class='text-xs px-2 py-1 rounded border border-amber-200 "
+                f"text-amber-800'>降级到候选</button></form>"
+                f"<form hx-post='/api/funnel/symbols/{sym}/remove' hx-swap='none' class='inline ml-auto'>"
+                f"<button type='submit' class='text-xs px-2 py-1 rounded border border-gray-200 "
+                f"text-gray-600'>移除</button></form>"
                 f"</div>"
                 f"<div id='panel-{sym}' class='mt-3'></div>"
+                f"<div id='sandbox-{sym}' class='mt-3'></div>"
                 f"</div>"
             )
         else:  # executing
@@ -467,11 +1257,17 @@ def _render_workspace_symbols_html(
                 f"class='text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700'>"
                 f"生成仓位建议</button></form>"
                 f"<form hx-post='/api/campaigns/{container_id}/archive' hx-swap='none' "
-                f"class='inline ml-auto'>"
+                f"class='inline'>"
                 f"<input type='hidden' name='symbol' value='{sym}'>"
                 f"<button type='submit' "
                 f"class='text-sm px-3 py-1.5 rounded bg-gray-200 text-gray-800 hover:bg-gray-300'>"
                 f"本波完成 · 归档</button></form>"
+                f"<form hx-post='/api/funnel/symbols/{sym}/demote' hx-swap='none' class='inline'>"
+                f"<button type='submit' class='text-xs px-2 py-1 rounded border border-amber-200 "
+                f"text-amber-800'>降级到规划</button></form>"
+                f"<form hx-post='/api/funnel/symbols/{sym}/remove' hx-swap='none' class='inline ml-auto'>"
+                f"<button type='submit' class='text-xs px-2 py-1 rounded border border-gray-200 "
+                f"text-gray-600'>移除</button></form>"
                 f"</div>"
                 f"<div id='exec-{sym}' class='mt-3'></div>"
                 f"</div>"
@@ -529,13 +1325,111 @@ def _verdict_badge(text: str) -> str:
     )
 
 
-def _render_dimension_card(meta: dict, dim: dict) -> str:
-    key = meta["key"]
-    verdict = dim.get("verdict") or "—"
-    if key == "market_phase" and verdict in MARKET_PHASE_LABELS:
-        verdict = f"{MARKET_PHASE_LABELS[verdict]}（{verdict}）"
+def _parse_reasoning_blocks(text: str) -> list[tuple[str | None, str, str | None]]:
+    """将推理文本拆为 (序号, 小标题, 正文) 列表；序号为 None 表示引言段。"""
+    raw = (text or "").replace("\r\n", "\n").strip()
+    if not raw:
+        return []
 
-    extra = ""
+    # 仅识别中文序号 1）2）、1、2、，避免把小数 3.86 误判为列表
+    segments = [
+        s.strip()
+        for s in re.split(r"(?:(?<=[；。!！?？\n])|^)\s*(?=\d{1,2}[、）)）]\s*)", raw)
+        if s.strip()
+    ]
+    blocks: list[tuple[str | None, str, str | None]] = []
+
+    for seg in segments:
+        m = re.match(r"^(\d{1,2})(?:[、）)）])\s*(.+)$", seg, re.DOTALL)
+        if not m:
+            body = seg.rstrip("；;")
+            if body:
+                blocks.append((None, "", body))
+            continue
+        num, body = m.group(1), m.group(2).strip().rstrip("；;")
+        subtitle = ""
+        for sep in ("：", ":"):
+            if sep in body[:48]:
+                head, _, tail = body.partition(sep)
+                if 0 < len(head) <= 28:
+                    subtitle = head.strip()
+                    body = tail.strip().rstrip("；;")
+                break
+        blocks.append((num, subtitle, body))
+
+    if len(blocks) == 1 and blocks[0][0] is None:
+        intro = blocks[0][2] or ""
+        clauses = [c.strip().rstrip("；;") for c in re.split(r"[；;]\s*", intro) if c.strip()]
+        if len(clauses) >= 3 and all(len(c) > 12 for c in clauses):
+            return [(None, "", c) for c in clauses]
+
+    return blocks
+
+
+def _render_reasoning_html(reasoning: str) -> str:
+    """推理过程：编号列表 / 分条展示，避免整段混排。"""
+    blocks = _parse_reasoning_blocks(reasoning)
+    if not blocks:
+        return ""
+
+    numbered = [b for b in blocks if b[0] is not None]
+    intros = [b for b in blocks if b[0] is None]
+
+    inner: list[str] = []
+    for _, _, body in intros:
+        inner.append(
+            f"<p class='text-[13px] text-gray-700 leading-relaxed'>{_esc(body)}</p>"
+        )
+
+    if numbered:
+        items: list[str] = []
+        for num, subtitle, body in numbered:
+            title_row = ""
+            if subtitle:
+                title_row = (
+                    f"<p class='text-[13px] font-semibold text-gray-800 mb-0.5'>"
+                    f"{_esc(subtitle)}</p>"
+                )
+            items.append(
+                f"<li class='flex gap-2.5 items-start py-2 border-b border-slate-100 "
+                f"last:border-0'>"
+                f"<span class='shrink-0 w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 "
+                f"text-[11px] font-bold flex items-center justify-center mt-0.5'>"
+                f"{_esc(num)}</span>"
+                f"<div class='min-w-0 flex-1'>{title_row}"
+                f"<p class='text-[13px] text-gray-600 leading-relaxed'>{_esc(body)}</p>"
+                f"</div></li>"
+            )
+        inner.append(
+            f"<ol class='list-none m-0 p-0 space-y-0'>{''.join(items)}</ol>"
+        )
+    elif len(intros) > 1:
+        inner = [
+            f"<ul class='list-disc pl-4 space-y-2 m-0'>"
+            + "".join(
+                f"<li class='text-[13px] text-gray-600 leading-relaxed'>{_esc(b[2])}</li>"
+                for b in intros
+            )
+            + "</ul>"
+        ]
+
+    body_html = "".join(inner)
+    return (
+        f"<div class='rounded-md bg-slate-50/80 border border-slate-100 px-2.5 py-2'>"
+        f"<p class='text-[11px] font-medium text-slate-500 mb-2'>推理过程</p>"
+        f"<div class='space-y-2'>{body_html}</div></div>"
+    )
+
+
+def _render_dimension_detail_body(meta: dict, dim: dict) -> str:
+    """9 维折叠区：推理过程、证据链、维度扩展字段（默认隐藏，点击标题展开）。"""
+    key = meta["key"]
+    parts: list[str] = []
+
+    reasoning = (dim.get("reasoning") or "").strip()
+    if reasoning:
+        parts.append(_render_reasoning_html(reasoning))
+
     if key == "valuation":
         dd = dim.get("davis_double")
         pep = dim.get("pe_percentile")
@@ -545,40 +1439,88 @@ def _render_dimension_card(meta: dict, dim: dict) -> str:
         if pep is not None:
             chips.append(f"PE 历史分位 {_esc(pep)}%")
         if chips:
-            extra += "<div class='text-[11px] text-gray-500 mt-1'>" + " · ".join(chips) + "</div>"
+            parts.append(
+                "<p class='text-[12px] text-gray-600'>" + " · ".join(chips) + "</p>"
+            )
+
     if key == "catalyst_timeline":
         items = dim.get("items") or []
         if items:
             lis = "".join(
-                f"<li class='flex gap-1.5'><span class='text-gray-400'>{_esc(it.get('window'))}</span>"
-                f"<span>{_esc(it.get('event'))}</span>"
-                f"<span class='text-gray-400'>·{_esc(it.get('probability'))}</span></li>"
-                for it in items if isinstance(it, dict)
+                f"<li class='flex flex-wrap gap-x-1.5 gap-y-0.5 py-1 border-b border-gray-50 last:border-0'>"
+                f"<span class='text-indigo-600 font-medium shrink-0'>{_esc(it.get('window'))}</span>"
+                f"<span class='text-gray-800'>{_esc(it.get('event'))}</span>"
+                f"<span class='text-gray-400 text-[11px]'>概率 {_esc(it.get('probability'))}</span></li>"
+                for it in items
+                if isinstance(it, dict)
             )
-            extra += f"<ul class='text-[12px] text-gray-600 mt-1 space-y-0.5'>{lis}</ul>"
+            parts.append(
+                f"<div><p class='text-[11px] font-medium text-slate-500 mb-1'>催化时间线</p>"
+                f"<ul class='text-[12px]'>{lis}</ul></div>"
+            )
 
-    reasoning = dim.get("reasoning") or ""
     evidence = dim.get("evidence") or []
-    ev_html = ""
     if evidence:
         ev_items = "".join(
-            f"<li class='text-[11px] text-gray-500 pl-2 border-l-2 border-gray-200'>{_esc(e)}</li>"
-            for e in evidence[:5]
+            f"<li class='text-[12px] text-gray-600 py-0.5 pl-2 border-l-2 border-indigo-200'>"
+            f"{_esc(e)}</li>"
+            for e in evidence[:8]
         )
-        ev_html = f"<ul class='mt-1.5 space-y-1'>{ev_items}</ul>"
+        parts.append(
+            f"<div><p class='text-[11px] font-medium text-slate-500 mb-1'>事实证据</p>"
+            f"<ul class='space-y-1'>{ev_items}</ul></div>"
+        )
+
+    if not parts:
+        return (
+            "<p class='text-[12px] text-gray-400 italic py-1'>暂无详细推理描述</p>"
+        )
+    return "<div class='space-y-2.5'>" + "".join(parts) + "</div>"
+
+
+def _render_dimension_card(meta: dict, dim: dict) -> str:
+    key = meta["key"]
+    verdict = dim.get("verdict") or "—"
+    if key == "market_phase" and verdict in MARKET_PHASE_LABELS:
+        verdict = f"{MARKET_PHASE_LABELS[verdict]}（{verdict}）"
 
     missing = dim.get("status") == "missing"
-    note = "<span class='text-[11px] text-amber-600'>· 模型未给出该维</span>" if missing else ""
+    custom_tag = (
+        "<span class='text-[10px] text-violet-600'>· 自定义维</span>"
+        if meta.get("custom") == "true"
+        else ""
+    )
+    note = (
+        (f"<span class='text-[11px] text-amber-600'>· 模型未给出该维</span>" if missing else "")
+        + custom_tag
+    )
+    detail_body = _render_dimension_detail_body(meta, dim)
+    dim_id = _esc(key)
 
     return (
-        f"<div class='border border-gray-100 rounded-lg p-3 bg-white'>"
-        f"<div class='flex items-center justify-between gap-2 mb-1'>"
-        f"<span class='text-sm font-semibold text-gray-800'>{meta['emoji']} {meta['label']}</span>"
+        f"<details class='radar-dim-details group border border-gray-100 rounded-lg bg-white "
+        f"overflow-hidden min-h-[7.5rem] h-full' data-dim-key='{dim_id}'>"
+        f"<summary class='cursor-pointer list-none p-3 hover:bg-gray-50/80 transition-colors "
+        f"[&::-webkit-details-marker]:hidden'>"
+        f"<div class='flex items-center justify-between gap-2'>"
+        f"<span class='text-sm font-semibold text-gray-800 flex items-center gap-1.5 min-w-0'>"
+        f"<span class='radar-dim-drag-handle shrink-0 cursor-grab active:cursor-grabbing "
+        f"text-gray-300 hover:text-indigo-500 text-xs select-none px-0.5' title='拖动排序' "
+        f"draggable='true' onclick='event.preventDefault();event.stopPropagation();'>⠿</span>"
+        f"<span class='text-gray-400 text-[10px] group-open:rotate-90 transition-transform "
+        f"inline-block shrink-0'>▸</span>"
+        f"{meta['emoji']} {meta['label']}</span>"
         f"{_verdict_badge(verdict)}</div>"
-        f"<div class='text-[11px] text-gray-400 mb-1'>{_esc(meta['hint'])} {note}</div>"
-        f"{_conf_bar(dim.get('confidence'))}"
-        f"<p class='text-[13px] text-gray-700 leading-relaxed mt-2'>{_esc(reasoning)}</p>"
-        f"{extra}{ev_html}</div>"
+        f"<div class='text-[11px] text-gray-400 mt-1 ml-4'>{_esc(meta['hint'])} {note}</div>"
+        f"<div class='ml-4'>{_conf_bar(dim.get('confidence'))}</div>"
+        f"<p class='text-[10px] text-blue-500/80 mt-1.5 ml-4 group-open:hidden'>"
+        f"点击标题展开 · 推理过程与证据</p>"
+        f"<p class='text-[10px] text-gray-400 mt-1.5 ml-4 hidden group-open:block'>"
+        f"点击标题收起</p>"
+        f"</summary>"
+        f"<div class='px-3 pb-3 pt-0 ml-4 mr-1 border-t border-gray-100 bg-gray-50/40 "
+        f"rounded-b-md'>{detail_body}</div>"
+        f"</details>"
     )
 
 
@@ -597,7 +1539,23 @@ def _cost_badge(cost: dict) -> str:
     )
 
 
-def _render_candidate_report(c: dict) -> str:
+def _audit_link(symbol: str, version_id: str | None = None) -> str:
+    sym = _esc(symbol)
+    qs = f"/audit?symbol={sym}"
+    if version_id:
+        qs += f"&amp;version={_esc(version_id)}"
+    return (
+        f"<a href='{qs}' class='text-blue-600 text-xs hover:underline no-underline'>"
+        f"📋 数据审计（近 7 天 · T0/T1/T2）</a>"
+    )
+
+
+def _render_candidate_report(
+    c: dict,
+    *,
+    cache_version_id: str | None = None,
+    layout: dict[str, Any] | None = None,
+) -> str:
     deep = c.get("deep_analysis") or {}
     overall = deep.get("overall") or {}
     dims = deep.get("dimensions") or {}
@@ -606,17 +1564,35 @@ def _render_candidate_report(c: dict) -> str:
 
     conf = overall.get("confidence", c.get("confidence"))
     conf_txt = f"{float(conf):.0%}" if conf is not None else "—"
+    sym = c.get("symbol") or ""
+    display = _esc(display_name_for_symbol(sym, c.get("name"), allow_network=False))
+    sym_esc = _esc(sym)
 
     header = (
-        f"<div class='flex flex-wrap items-center gap-2 mb-2'>"
-        f"<span class='font-bold text-gray-900 text-base'>{_esc(c['name'])}</span>"
-        f"<span class='text-gray-400 text-sm'>{_esc(c['symbol'])}</span>"
-        + (f"<span class='text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600'>{_esc(c.get('industry'))}</span>"
+        f"<div class='flex flex-wrap items-start justify-between gap-3 mb-2'>"
+        f"<div class='flex flex-wrap items-center gap-2 min-w-0'>"
+        f"<span class='font-bold text-gray-900 text-base'>{display}</span>"
+        f"<span class='text-gray-400 text-sm font-mono'>{sym_esc}</span>"
+        + (f"<span class='text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600'>"
+           f"{_esc(c.get('industry'))}</span>"
            if c.get("industry") else "")
-        + f"<span class='text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700'>总置信 {conf_txt}</span>"
+        + f"<span class='text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700'>"
+        f"总置信 {conf_txt}</span>"
         + _cost_badge(cost)
-        + "</div>"
+        + f"</div></div>"
     )
+
+    layout = layout or parse_layout_from_header(None)
+    display_metas = ordered_display_metas(layout)
+    dim_count = len(display_metas)
+
+    stale_note = ""
+    if c.get("t2_from_stale_cache"):
+        stale_note = (
+            f"<div class='rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 mb-2 "
+            f"text-xs text-amber-800'>📦 本次 live Opus 未成功，已展示历史预拉缓存"
+            f"（非编造 · 可 diting-infra make radar-t0-sync 更新）</div>"
+        )
 
     # 硬失败 / 未开启 / 用户跳过：显式说明，不伪造
     if t2_status != "ok" or not dims:
@@ -631,54 +1607,93 @@ def _render_candidate_report(c: dict) -> str:
             banner_color = "red"
             title = "Opus 深度研报失败"
         body = (
+            f"{stale_note}"
             f"<div class='rounded-lg border border-{banner_color}-200 bg-{banner_color}-50 p-3 text-sm "
             f"text-{banner_color}-700'>⚠️ {title}：{_esc(detail)}"
             f"<div class='text-[11px] text-{banner_color}-600 mt-1'>"
             f"（恪守 no-mock：不以占位/编造数据冒充分析结果）</div></div>"
         )
         return (
-            f"<div class='border border-gray-100 rounded-xl p-4 mb-3 bg-gray-50'>{header}{body}"
-            f"<div class='mt-2'><a href='/api/radar/candidates/{c['id']}/artifacts' "
-            f"class='text-blue-500 text-xs hover:underline'>查看三段 artifact 溯源</a></div></div>"
+            f"<div class='border border-gray-100 rounded-xl p-4 mb-3 bg-gray-50'>{header}{body}</div>"
         )
 
-    overall_block = (
-        f"<div class='rounded-lg bg-indigo-50/60 border border-indigo-100 p-3 mb-3'>"
-        f"<p class='text-sm text-gray-800'><span class='font-semibold'>结论：</span>"
-        f"{_esc(overall.get('conclusion'))}</p>"
-        f"<p class='text-[13px] text-gray-600 mt-1'><span class='font-semibold'>研究 advisory：</span>"
-        f"{_esc(overall.get('action_advisory'))} "
-        f"<span class='text-[11px] text-gray-400'>（全程人工确认 · 非交易指令）</span></p></div>"
-    )
+    conclusion_txt = _esc(overall.get("conclusion") or "—")
+    advisory_txt = _esc(overall.get("action_advisory") or "—")
+    summary_strip = ""
+    if layout.get("show_summary", True):
+        summary_strip = (
+            f"<div id='radar-scan-summary-strip' "
+            f"class='rounded-lg bg-indigo-50/50 border border-indigo-100 px-3 py-2 mb-2'>"
+            f"<p class='text-sm text-gray-800'><span class='font-semibold'>结论摘要：</span>"
+            f"{conclusion_txt}</p>"
+            f"<p class='text-xs text-gray-600 mt-1'><span class='font-semibold'>advisory：</span>"
+            f"{advisory_txt}"
+            f"<span class='text-[11px] text-gray-400'>（人工确认 · 非交易指令）</span></p>"
+            f"<p class='text-[10px] text-gray-400 mt-1'>"
+            f"维度详细推理默认收起；需要时点击「打开行情推理」</p>"
+            f"</div>"
+        )
 
     cards = "".join(
         _render_dimension_card(meta, dims.get(meta["key"]) or {})
-        for meta in DIMENSIONS
+        for meta in display_metas
     )
-    grid = f"<div class='grid grid-cols-1 md:grid-cols-2 gap-2 mb-3'>{cards}</div>"
+    grid = (
+        f"<div id='radar-dim-grid' class='grid grid-cols-2 gap-2 items-stretch'>{cards}</div>"
+        if cards
+        else "<p class='text-sm text-gray-500'>当前未启用展示模块 · 点击 ⋯ 配置维度</p>"
+    )
+
+    detail_panel = (
+        f"<details id='radar-scan-detail-panel' class='radar-scan-detail-panel mb-3 group'>"
+        f"<summary class='cursor-pointer list-none flex flex-wrap items-center justify-between "
+        f"gap-2 py-2.5 px-3 rounded-lg bg-gray-50 border border-gray-200 "
+        f"hover:bg-gray-100/80 [&::-webkit-details-marker]:hidden'>"
+        f"<span class='text-sm font-semibold text-gray-800 flex items-center gap-1.5 min-w-0'>"
+        f"<span class='text-gray-400 text-[10px] group-open:rotate-90 transition-transform shrink-0'>"
+        f"▸</span>📊 维度详细推理"
+        f"<span class='text-[11px] font-normal text-gray-400'>（{dim_count} 项 · 拖动 ⠿ 排序）</span></span>"
+        f"<span class='flex items-center gap-1.5 shrink-0 z-10'>"
+        f"<button type='button' id='radar-scan-toggle-btn' "
+        f"class='text-xs px-2.5 py-1 rounded-lg border border-indigo-200 bg-indigo-50 "
+        f"text-indigo-800 hover:bg-indigo-100' "
+        f"onclick='window.radarScanToggleDetail(event)'>打开行情推理</button>"
+        f"<button type='button' id='radar-dim-menu-btn' "
+        f"class='text-xs w-8 h-7 rounded-lg border border-gray-200 bg-white text-gray-600 "
+        f"hover:bg-gray-50 leading-none' title='维度展示设置' "
+        f"onclick='window.radarDimMenuToggle(event)'>⋯</button>"
+        f"</span></summary>"
+        f"<div class='border border-t-0 border-gray-200 rounded-b-lg p-3 bg-white mt-0'>"
+        f"{grid}</div></details>"
+    )
 
     footer = (
-        f"<details class='mb-2'><summary class='text-xs text-gray-500 cursor-pointer "
-        f"hover:text-gray-700'>三段流水线溯源（T0 akshare → T1 矩阵 → T2 Opus）</summary>"
-        f"<a href='/api/radar/candidates/{c['id']}/artifacts' "
-        f"class='text-blue-500 text-xs hover:underline'>artifact JSON</a></details>"
-        f"<form hx-post='/api/radar/candidates/{c['id']}/promote' hx-swap='none' class='inline'>"
-        f"<input type='hidden' name='new_theme' value='雷达晋级 · {_esc(c['name'])}'>"
+        f"<div class='border-t border-gray-100 pt-3 mt-1 flex justify-end'>"
+        f"<form hx-post='/api/radar/candidates/{c['id']}/promote' "
+        f"hx-target='#radar-candidates-list' hx-swap='innerHTML'>"
+        f"<input type='hidden' name='new_theme' value='雷达晋级 · {_esc(c.get('name') or sym)}'>"
         f"<button type='submit' class='text-sm px-3 py-1.5 rounded bg-blue-600 text-white "
-        f"hover:bg-blue-700'>➕ 晋级规划区</button></form>"
+        f"hover:bg-blue-700'>➕ 晋级规划</button></form>"
+        f"</div>"
     )
 
     return (
+        f"<div id='radar-scan-report' class='radar-scan-report' data-symbol='{sym_esc}'>"
         f"<div class='border border-gray-100 rounded-xl p-4 mb-3 bg-white shadow-sm'>"
-        f"{header}{overall_block}{grid}{footer}</div>"
+        f"{header}{stale_note}{summary_strip}{detail_panel}{footer}</div></div>"
     )
 
 
-def _render_scan_html(scan: dict) -> HTMLResponse:
+def _render_scan_html(scan: dict, *, layout: dict[str, Any] | None = None) -> HTMLResponse:
     """雷达扫描结果 HTMX 片段：人类可读 9 维深度研报卡 + 成本 + 溯源。"""
     if scan.get("status") != "done":
         return HTMLResponse("<p class='text-sm text-gray-500 py-2'>扫描进行中…</p>")
-    blocks = [_render_candidate_report(c) for c in (scan.get("candidates") or [])]
+    summary = scan.get("summary_json") or {}
+    vid = summary.get("cache_version_id")
+    blocks = [
+        _render_candidate_report(c, cache_version_id=vid, layout=layout)
+        for c in (scan.get("candidates") or [])
+    ]
     if not blocks:
         return HTMLResponse("<p class='text-sm text-gray-500'>无候选结果</p>")
     return HTMLResponse("".join(blocks))
@@ -1022,7 +2037,10 @@ def _render_falsify_html(
         )
 
     body = (
-        f"<div class='space-y-4'>"
+        f"<div class='space-y-4' data-falsify-panel-content='1'>"
+        f"<div class='flex justify-end'>"
+        f"<button type='button' class='text-xs text-gray-500 hover:text-gray-800 "
+        f"falsify-panel-collapse' data-symbol='{symbol}'>收起面板 ▴</button></div>"
         f"<div><h3 class='text-sm font-semibold text-gray-800 mb-2'>"
         f"认知快照 · {symbol}</h3>{snap_html}</div>"
         f"<div class='px-3 py-2 rounded-lg text-sm {ready_cls}'>"
@@ -1184,3 +2202,70 @@ async def api_planning_panel(
     if "text/html" in request.headers.get("accept", "") or request.headers.get("hx-request"):
         return _render_falsify_html(campaign_id, tasks, readiness, snapshot, sym)
     return {"snapshot": snapshot, "falsify_tasks": tasks, "readiness": readiness}
+
+
+@router.get("/api/planning/sandbox/{symbol}")
+async def api_planning_sandbox(
+    symbol: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    sb = (await get_asset_sandbox(session, symbol)).model_dump(mode="json")
+    await session.commit()
+    if "text/html" in request.headers.get("accept", "") or request.headers.get("hx-request"):
+        return HTMLResponse(_render_sandbox_panel(sb))
+    return sb
+
+
+@router.post("/api/planning/sandbox/{symbol}/plan")
+async def api_planning_sandbox_plan(
+    symbol: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    await one_shot_plan_probes(session, symbol)
+    sb = (await get_asset_sandbox(session, symbol)).model_dump(mode="json")
+    await session.commit()
+    if request.headers.get("hx-request"):
+        return HTMLResponse(_render_sandbox_panel(sb))
+    return sb
+
+
+@router.post("/api/planning/sandbox/probes/{probe_task_id}/result")
+async def api_planning_sandbox_probe_result(
+    probe_task_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    mock_result: str = Form(""),
+):
+    payload: dict[str, Any]
+    try:
+        payload = json.loads(mock_result) if mock_result.strip() else {"note": "manual_ready"}
+    except Exception:  # noqa: BLE001
+        payload = {"note": mock_result.strip()[:240] or "manual_ready"}
+    task = await update_probe_result(session, probe_task_id, payload)
+    asset = await session.scalar(select(AssetState).where(AssetState.id == task.asset_id))
+    if asset is None:
+        raise HTTPException(status_code=404, detail="asset_state not found")
+    sb = (await get_asset_sandbox(session, asset.symbol_code)).model_dump(mode="json")
+    await session.commit()
+    if request.headers.get("hx-request"):
+        return HTMLResponse(_render_sandbox_panel(sb))
+    return sb
+
+
+@router.post("/api/planning/sandbox/{symbol}/deduce")
+async def api_planning_sandbox_deduce(
+    symbol: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    try:
+        await one_shot_global_deduction(session, symbol)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    sb = (await get_asset_sandbox(session, symbol)).model_dump(mode="json")
+    await session.commit()
+    if request.headers.get("hx-request"):
+        return HTMLResponse(_render_sandbox_panel(sb))
+    return sb
