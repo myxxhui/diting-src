@@ -108,12 +108,16 @@ async def create_symbol_scan(
     *,
     query_text: str,
     redis_client: Any = None,
-    enable_t2: bool = True,
+    enable_t0: bool = True,
+    enable_t1: bool = True,
+    enable_t2: bool = False,
+    t1_mode: str | None = None,
+    t2_model: str | None = None,
     force_refresh: bool = False,
     progress_cb: Any = None,
     scan_id: int | None = None,
 ) -> dict[str, Any]:
-    """模式 C：模糊标的深度分析（默认含 T2 Opus 9 维）。"""
+    """模式 C：按勾选阶段执行 T0/T1/T2。"""
     try:
         sym, name = resolve_radar_query(query_text)
     except RadarSymbolResolveError as exc:
@@ -152,8 +156,12 @@ async def create_symbol_scan(
         scan_id=scan.id,
         candidate_id=candidate.id,
         redis_client=redis_client,
+        enable_t0=enable_t0,
+        enable_t1=enable_t1,
         enable_t2=enable_t2,
-        force_refresh_t0=force_refresh,
+        t1_mode=t1_mode,
+        t2_model=t2_model,
+        force_refresh_t0=force_refresh and enable_t0,
         force_refresh_t2=force_refresh and enable_t2,
         progress_cb=progress_cb,
     )
@@ -188,11 +196,12 @@ async def create_symbol_scan(
         if hasattr(candidate, k):
             setattr(candidate, k, v)
 
+    artifact_ids = [x for x in (pipe["t0_id"], pipe["t1_id"], pipe["t2_id"]) if x]
     snapshot = {
         "symbol": sym,
         "name": name,
         "workspace_artifact_id": pipe["wa_id"],
-        "artifact_ids": [pipe["t0_id"], pipe["t1_id"], pipe["t2_id"]],
+        "artifact_ids": artifact_ids,
     }
     candidate.raw_json = {**field_raw_json, "analysis_snapshot": snapshot}
 
@@ -201,7 +210,11 @@ async def create_symbol_scan(
     scan.summary_json = {
         "candidate_count": 1,
         "symbol": sym,
+        "enable_t0": enable_t0,
+        "enable_t1": enable_t1,
         "enable_t2": enable_t2,
+        "t1_mode": t1_mode,
+        "t2_model": t2_model,
         "t0_cache_hit": bool(pipe["t0_raw"].get("cache_hit")),
         "t2_from_cache": bool(pipe.get("t2_from_cache")),
         "force_refresh": force_refresh,
@@ -229,7 +242,11 @@ async def run_scan_job(
     scan_id: int,
     query_text: str,
     *,
+    enable_t0: bool,
+    enable_t1: bool,
     enable_t2: bool,
+    t1_mode: str | None,
+    t2_model: str | None,
     force_refresh: bool,
     redis_client: Any,
 ) -> None:
@@ -244,7 +261,11 @@ async def run_scan_job(
                 session,
                 query_text=query_text,
                 redis_client=redis_client,
+                enable_t0=enable_t0,
+                enable_t1=enable_t1,
                 enable_t2=enable_t2,
+                t1_mode=t1_mode,
+                t2_model=t2_model,
                 force_refresh=force_refresh,
                 progress_cb=cb,
                 scan_id=scan_id,
@@ -309,6 +330,8 @@ async def collect_symbol_t0_only(
             session,
             symbol=sym,
             name=name,
+            enable_t0=True,
+            enable_t1=run_t1,
             enable_t2=False,
             force_refresh_t0=True,
             force_refresh_t2=False,

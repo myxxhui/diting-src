@@ -37,33 +37,43 @@ def radar_t1_mode() -> str:
 
 
 def radar_t1_uses_deepseek() -> bool:
-    mode = radar_t1_mode()
-    if mode == "rule":
+    return t1_uses_deepseek_mode(None)
+
+
+def t1_uses_deepseek_mode(mode: str | None) -> bool:
+    """UI/请求指定 T1 模式；None 时走 RADAR_T1_MODE 环境默认。"""
+    m = (mode or "").strip().lower() or radar_t1_mode()
+    if m == "rule":
         return False
-    if mode == "deepseek":
+    if m == "deepseek":
         return bool(os.getenv("DEEPSEEK_API_KEY", "").strip())
     return bool(os.getenv("DEEPSEEK_API_KEY", "").strip())
 
 
-def t1_step_label() -> str:
-    if radar_t1_uses_deepseek():
+def t1_step_label(*, t1_mode: str | None = None) -> str:
+    if t1_uses_deepseek_mode(t1_mode):
         mid = os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip() or "deepseek-chat"
         return f"T1 DeepSeek 事实矩阵压缩（{mid}）"
     return "T1 规则事实矩阵压缩"
 
 
-def _default_t1_model_id() -> str:
-    if radar_t1_uses_deepseek():
+def _default_t1_model_id(*, t1_mode: str | None = None) -> str:
+    if t1_uses_deepseek_mode(t1_mode):
         mid = os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip() or "deepseek-chat"
         return f"deepseek:{mid}"
     return "rule:context_matrix"
 
 
-def resolve_model(workspace: str, task: str) -> dict[str, Any]:
+def resolve_model(
+    workspace: str,
+    task: str,
+    *,
+    t1_mode: str | None = None,
+) -> dict[str, Any]:
     for p in DEFAULT_PROFILES:
         if p["workspace"] == workspace and p["task"] == task:
             out = dict(p)
             if task == "t1_distill":
-                out["model_id"] = _default_t1_model_id()
+                out["model_id"] = _default_t1_model_id(t1_mode=t1_mode)
             return out
     return {"workspace": workspace, "task": task, "tier": "T0", "model_id": "rule:default"}

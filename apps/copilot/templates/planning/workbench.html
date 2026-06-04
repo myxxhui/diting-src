@@ -42,57 +42,78 @@
     <span class="text-lg">🔭</span>
     <h2 class="text-base font-semibold text-gray-900">推理分析 · 行情雷达</h2>
   </div>
-  <form id="radar-scan-form" class="flex flex-wrap gap-3 items-end mb-4"
+  <form id="radar-scan-form" class="mb-4"
         hx-post="/api/radar/scans"
         hx-target="#radar-scan-result"
         hx-swap="innerHTML"
         hx-indicator="#radar-scan-loading">
     <input type="hidden" name="input_type" value="symbol">
-    <div class="relative">
-      <label class="block text-xs text-gray-500 mb-1">标的代码或简称</label>
-      <input type="text" name="query_text" id="radar-query-input" value="601138" maxlength="32"
-             class="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 w-56"
-             placeholder="代码 / 简称 / 模糊拼音汉字"
-             autocomplete="off"
-             aria-autocomplete="list"
-             aria-controls="radar-suggest-list"
-             aria-expanded="false">
-      <ul id="radar-suggest-list" role="listbox"
-          class="hidden absolute left-0 top-full z-20 mt-1 w-72 max-h-48 overflow-y-auto
-                 bg-white border border-gray-200 rounded-lg shadow-lg text-sm"></ul>
+    <div class="flex flex-wrap gap-2 items-end">
+      <div class="relative min-w-[12rem] flex-1 max-w-xs">
+        <label class="block text-xs text-gray-500 mb-1">标的</label>
+        <input type="text" name="query_text" id="radar-query-input" value="601138" maxlength="32"
+               class="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 w-full"
+               placeholder="代码 / 简称"
+               autocomplete="off"
+               aria-autocomplete="list"
+               aria-controls="radar-suggest-list"
+               aria-expanded="false">
+        <ul id="radar-suggest-list" role="listbox"
+            class="hidden absolute left-0 top-full z-20 mt-1 w-full max-h-48 overflow-y-auto
+                   bg-white border border-gray-200 rounded-lg shadow-lg text-sm"></ul>
+      </div>
+      <div class="flex flex-wrap items-end gap-2 pb-0.5">
+        <input type="hidden" name="enable_t0" id="radar-h-t0" value="false">
+        <button type="button" id="radar-btn-t0" data-stage="t0" title="与 T2 组合：T0+T2 或 T0+T1+T2"
+                class="radar-stage-btn px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
+          T0
+        </button>
+        <input type="hidden" name="enable_t1" id="radar-h-t1" value="false">
+        <button type="button" id="radar-btn-t1" data-stage="t1" title="须 T0+T2：完整链路 T0+T1+T2"
+                class="radar-stage-btn px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
+          T1
+        </button>
+        <select name="t1_mode" id="radar-t1-mode" disabled
+                class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-700 bg-gray-50 disabled:opacity-40">
+          <option value="rule">规则</option>
+          <option value="deepseek">DeepSeek</option>
+        </select>
+        <input type="hidden" name="enable_t2" id="radar-h-t2" value="false">
+        <details id="radar-t2-details" class="inline-block align-bottom">
+          <summary id="radar-t2-summary" title="必选其一：仅 T2 / T0+T2 / T0+T1+T2"
+                   class="radar-stage-btn list-none cursor-pointer px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
+            T2
+          </summary>
+          <select name="t2_model" id="radar-t2-model"
+                  class="mt-1 block text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-800 w-36 max-w-full">
+            {% for mid, label in radar_chat_models|default([]) %}
+            <option value="{{ mid }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </details>
+        <label class="flex items-center gap-1 text-xs text-gray-600 cursor-pointer pb-1">
+          <input type="hidden" name="force_refresh" value="false">
+          <input type="checkbox" name="force_refresh" value="true"
+                 class="rounded border-gray-300 text-amber-600 focus:ring-amber-500">
+          刷新
+        </label>
+        <button type="submit" id="radar-scan-submit-btn"
+                class="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700
+                       disabled:opacity-50 disabled:cursor-wait">
+          分析
+        </button>
+      </div>
     </div>
-    <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer pb-2">
-      <input type="hidden" name="enable_t2" value="false">
-      <input type="checkbox" name="enable_t2" value="true" checked
-             class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-      <span>深度推理 <span class="text-xs text-gray-400">（Opus · 默认见<a href="/settings#radar-prefs" class="text-blue-600 hover:underline">设置</a>）</span></span>
-    </label>
-    <p class="text-xs text-gray-500 pb-1 col-span-full">流水线：T0 采集 → <strong>T1 DeepSeek</strong> 事实矩阵压缩 → T2 Opus 九维研报（可在设置中切换 T1 为规则模式）</p>
-    <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer pb-2">
-      <input type="hidden" name="force_refresh" value="false">
-      <input type="checkbox" name="force_refresh" value="true"
-             class="rounded border-gray-300 text-amber-600 focus:ring-amber-500">
-      <span>强制刷新 <span class="text-xs text-gray-400">（忽略缓存 · 最新 T0+T2 · 新版本入库）</span></span>
-    </label>
-    <button type="submit" id="radar-scan-submit-btn"
-            class="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700
-                   disabled:opacity-50 disabled:cursor-wait">
-      启动扫描
-    </button>
-    <button type="button" id="radar-collect-btn"
-            class="px-4 py-2 rounded-lg border border-emerald-300 text-emerald-800 text-sm font-semibold hover:bg-emerald-50
-                   disabled:opacity-50 disabled:cursor-wait"
-            hx-indicator="#radar-collect-spinner">
-      仅采集 T0
-    </button>
-    <span id="radar-collect-spinner" class="htmx-indicator text-xs text-emerald-600 flex items-center gap-1">
-      <svg class="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
-      </svg>
-      提交中…
-    </span>
   </form>
+  <style>
+    .radar-stage-btn.radar-stage-on {
+      background-color: rgb(37 99 235);
+      border-color: rgb(37 99 235);
+      color: #fff;
+    }
+    #radar-t2-summary::-webkit-details-marker { display: none; }
+    #radar-t2-summary::marker { content: ''; }
+  </style>
   {# 维度 ⋯ 菜单与配置弹窗（固定于雷达工作区，HTMX 换结果后仍可用） #}
   <div id="radar-dim-menu-pop"
        class="hidden fixed z-40 min-w-[10rem] rounded-lg border border-gray-200 bg-white shadow-lg py-1 text-sm">
@@ -690,13 +711,121 @@
       }
     };
 
+    window.RADAR_STAGE_COMBO_MSG = '仅支持三种组合：仅 T2、T0+T2、T0+T1+T2';
+
+    window.radarStageSet = function (stage, on) {
+      var h = document.getElementById('radar-h-' + stage);
+      var btn = document.getElementById('radar-btn-' + stage);
+      if (h) h.value = on ? 'true' : 'false';
+      if (btn) btn.classList.toggle('radar-stage-on', !!on);
+      if (stage === 't1') {
+        var sel = document.getElementById('radar-t1-mode');
+        if (sel) sel.disabled = !on;
+      }
+      if (stage === 't0' && !on) {
+        window.radarStageSet('t1', false);
+      }
+    };
+
+    window.radarOpenT2 = function () {
+      var detailsT2 = document.getElementById('radar-t2-details');
+      if (!detailsT2) return;
+      if (!detailsT2.open) detailsT2.open = true;
+      var h2 = document.getElementById('radar-h-t2');
+      var sum = document.getElementById('radar-t2-summary');
+      if (h2) h2.value = 'true';
+      if (sum) sum.classList.add('radar-stage-on');
+    };
+
+    window.radarStageComboOk = function (on0, on1, on2) {
+      if (on0 && on1 && on2) return true;
+      if (on0 && !on1 && on2) return true;
+      if (!on0 && !on1 && on2) return true;
+      return false;
+    };
+
+    window.radarStageInit = function () {
+      var btnT0 = document.getElementById('radar-btn-t0');
+      var btnT1 = document.getElementById('radar-btn-t1');
+      var detailsT2 = document.getElementById('radar-t2-details');
+      var summaryT2 = document.getElementById('radar-t2-summary');
+      function syncT2() {
+        var on = detailsT2 && detailsT2.open;
+        var h2 = document.getElementById('radar-h-t2');
+        if (h2) h2.value = on ? 'true' : 'false';
+        if (summaryT2) summaryT2.classList.toggle('radar-stage-on', !!on);
+        if (!on) {
+          window.radarStageSet('t0', false);
+          window.radarStageSet('t1', false);
+        }
+      }
+      if (btnT0 && !btnT0._radarBound) {
+        btnT0._radarBound = true;
+        btnT0.addEventListener('click', function () {
+          var next = document.getElementById('radar-h-t0').value !== 'true';
+          if (next) {
+            window.radarOpenT2();
+            window.radarStageSet('t0', true);
+          } else {
+            window.radarStageSet('t0', false);
+          }
+        });
+      }
+      if (btnT1 && !btnT1._radarBound) {
+        btnT1._radarBound = true;
+        btnT1.addEventListener('click', function () {
+          var want = document.getElementById('radar-h-t1').value !== 'true';
+          if (want) {
+            window.radarOpenT2();
+            window.radarStageSet('t0', true);
+            window.radarStageSet('t1', true);
+          } else {
+            window.radarStageSet('t1', false);
+          }
+        });
+      }
+      if (detailsT2 && !detailsT2._radarBound) {
+        detailsT2._radarBound = true;
+        detailsT2.addEventListener('toggle', syncT2);
+        syncT2();
+      }
+    };
+
+    window.radarValidateScanStages = function () {
+      var t0 = document.getElementById('radar-h-t0');
+      var t1 = document.getElementById('radar-h-t1');
+      var t2 = document.getElementById('radar-h-t2');
+      var on0 = t0 && t0.value === 'true';
+      var on1 = t1 && t1.value === 'true';
+      var on2 = t2 && t2.value === 'true';
+      if (window.radarStageComboOk(on0, on1, on2)) return true;
+      alert(window.RADAR_STAGE_COMBO_MSG);
+      return false;
+    };
+
     window.radarApplyWorkbenchPrefs = function () {
       var PREFS_KEY = 'radar_workbench_prefs_v1';
       function apply(p) {
         if (!p) return;
-        var t2 = document.querySelector('#radar-scan-form input[name="enable_t2"][value="true"]');
+        var on0 = !!p.enable_t0_default;
+        var on1 = !!p.enable_t1_default;
+        var on2 = !!p.enable_t2_default;
+        if (!window.radarStageComboOk(on0, on1, on2)) {
+          on0 = false;
+          on1 = false;
+          on2 = false;
+        }
+        var d2 = document.getElementById('radar-t2-details');
+        if (d2) {
+          d2.open = on2;
+          var h2 = document.getElementById('radar-h-t2');
+          var sum = document.getElementById('radar-t2-summary');
+          if (h2) h2.value = on2 ? 'true' : 'false';
+          if (sum) sum.classList.toggle('radar-stage-on', on2);
+        }
+        window.radarStageSet('t0', on0);
+        window.radarStageSet('t1', on1);
         var fr = document.querySelector('#radar-scan-form input[name="force_refresh"][value="true"]');
-        if (t2) t2.checked = !!p.enable_t2_default;
         if (fr) fr.checked = !!p.force_refresh_default;
       }
       var local = null;
@@ -718,12 +847,20 @@
       layoutReady.finally(function () {
         if (typeof window.radarLayoutInit === 'function') window.radarLayoutInit();
       });
+      if (typeof window.radarStageInit === 'function') window.radarStageInit();
       if (typeof window.radarApplyWorkbenchPrefs === 'function') window.radarApplyWorkbenchPrefs();
       if (typeof window.radarInitDimDrag === 'function') window.radarInitDimDrag();
       var input = document.getElementById('radar-query-input');
-      var btn = document.getElementById('radar-collect-btn');
       var suggest = document.getElementById('radar-suggest-list');
       var form = document.getElementById('radar-scan-form');
+      if (form && !form._radarValidateBound) {
+        form._radarValidateBound = true;
+        form.addEventListener('htmx:beforeRequest', function (ev) {
+          if (!window.radarValidateScanStages || !window.radarValidateScanStages()) {
+            ev.preventDefault();
+          }
+        });
+      }
       var suggestTimer = null;
       var suggestSeq = 0;
       var suggestItems = [];
@@ -815,81 +952,6 @@
         }
       }
 
-      function pollCollect(jobId, box, collectBtn) {
-        fetch('/api/radar/collect/jobs/' + jobId, {
-          headers: { 'Accept': 'text/html', 'HX-Request': 'true' }
-        })
-          .then(function (r) {
-            if (!r.ok) throw new Error(String(r.status));
-            return r.text();
-          })
-          .then(function (html) {
-            box.innerHTML = html;
-            var panel = box.querySelector('#radar-collect-progress');
-            if (panel && panel.getAttribute('data-running') === '1') {
-              setTimeout(function () { pollCollect(jobId, box, collectBtn); }, 1000);
-            } else {
-              if (collectBtn) collectBtn.disabled = false;
-              if (typeof htmx !== 'undefined') {
-                htmx.trigger('#radar-candidates-list', 'load');
-              }
-            }
-          })
-          .catch(function () {
-            setTimeout(function () { pollCollect(jobId, box, collectBtn); }, 2000);
-          });
-      }
-
-      function startCollect() {
-        var q = sym();
-        if (!q) { alert('请先输入标的代码或简称'); return; }
-        var box = document.getElementById('radar-scan-result');
-        if (!box) return;
-        hideSuggest();
-        box.innerHTML = (
-          '<div class="rounded-xl border border-emerald-100 bg-emerald-50/40 p-4 text-sm text-gray-600">'
-          + '<span class="inline-flex items-center gap-2">'
-          + '<svg class="animate-spin h-4 w-4 text-emerald-600" fill="none" viewBox="0 0 24 24">'
-          + '<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>'
-          + '<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>'
-          + '正在启动采集任务…</span></div>'
-        );
-        if (btn) btn.disabled = true;
-        var fd = new FormData();
-        fd.append('query_text', q);
-        fetch('/api/radar/collect', {
-          method: 'POST',
-          body: fd,
-          headers: { 'Accept': 'text/html', 'HX-Request': 'true' }
-        })
-          .then(function (r) {
-            if (!r.ok) {
-              return r.json().catch(function () { return {}; }).then(function (j) {
-                throw new Error(j.detail || ('HTTP ' + r.status));
-              });
-            }
-            return r.text();
-          })
-          .then(function (html) {
-            box.innerHTML = html;
-            var panel = box.querySelector('#radar-collect-progress');
-            var jobId = panel && panel.getAttribute('data-job-id');
-            if (jobId && panel.getAttribute('data-running') === '1') {
-              pollCollect(jobId, box, btn);
-            } else if (btn) {
-              btn.disabled = false;
-            }
-            if (typeof htmx !== 'undefined' && panel) {
-              htmx.process(panel);
-            }
-          })
-          .catch(function (err) {
-            if (btn) btn.disabled = false;
-            box.innerHTML = '<p class="text-sm text-red-700">启动采集失败：'
-              + (err && err.message ? err.message : '请重试') + '</p>';
-          });
-      }
-
       if (input) {
         input.addEventListener('input', function () {
           clearTimeout(suggestTimer);
@@ -933,7 +995,6 @@
           }
         });
       }
-      if (btn) btn.addEventListener('click', startCollect);
 
       function processRadarHtmx(root) {
         if (typeof htmx === 'undefined' || !root) return;

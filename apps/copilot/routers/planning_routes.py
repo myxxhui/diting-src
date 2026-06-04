@@ -353,6 +353,7 @@ async def planning_page(
     ctx: dict = {
         "view": view,
         "workbench_prefs": load_prefs(),
+        "radar_chat_models": RADAR_CHAT_MODELS,
     }
     return _tpl(request).TemplateResponse(request, "planning/workbench.html", ctx)
 
@@ -448,6 +449,26 @@ async def api_radar_symbols(
     return items
 
 
+def _form_bool_on(vals: list[str], *, default: bool = False) -> bool:
+    if not vals:
+        return default
+    return any(v.lower() in ("1", "true", "yes", "on") for v in vals)
+
+
+def _parse_radar_scan_stages(form: Any) -> tuple[bool, bool, bool, str, str | None]:
+    from apps.copilot.modules.radar.stage_presets import validate_radar_stage_combo
+
+    t0_on = _form_bool_on(form.getlist("enable_t0"), default=False)
+    t1_on = _form_bool_on(form.getlist("enable_t1"), default=False)
+    t2_on = _form_bool_on(form.getlist("enable_t2"), default=False)
+    t1_mode = (form.get("t1_mode") or "rule").strip().lower()
+    if t1_mode not in ("rule", "deepseek"):
+        t1_mode = "rule"
+    t2_model = (form.get("t2_model") or "").strip() or None
+    validate_radar_stage_combo(t0_on, t1_on, t2_on)
+    return t0_on, t1_on, t2_on, t1_mode, t2_model
+
+
 @router.post("/api/radar/scans", status_code=201)
 async def api_create_radar_scan(
     request: Request,
@@ -461,10 +482,16 @@ async def api_create_radar_scan(
             detail="启动期仅支持模式 C（symbol）；A/B 见 step_14 扩展项",
         )
     form = await request.form()
-    t2_vals = form.getlist("enable_t2")
-    t2_on = any(v.lower() in ("1", "true", "yes", "on") for v in t2_vals) if t2_vals else True
+    try:
+        t0_on, t1_on, t2_on, t1_mode, t2_model = _parse_radar_scan_stages(form)
+    except ValueError as exc:
+        if request.headers.get("hx-request") or "text/html" in request.headers.get(
+            "accept", ""
+        ):
+            return HTMLResponse(_render_radar_resolve_error_html(str(exc)))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     fr_vals = form.getlist("force_refresh")
-    force_refresh = any(v.lower() in ("1", "true", "yes", "on") for v in fr_vals)
+    force_refresh = _form_bool_on(fr_vals, default=False)
     await ensure_model_profiles(session)
     redis_client = _sync_redis()
     try:
@@ -489,7 +516,11 @@ async def api_create_radar_scan(
         run_scan_job(
             scan_id,
             query_text,
+            enable_t0=t0_on,
+            enable_t1=t1_on,
             enable_t2=t2_on,
+            t1_mode=t1_mode,
+            t2_model=t2_model,
             force_refresh=force_refresh,
             redis_client=redis_client,
         )

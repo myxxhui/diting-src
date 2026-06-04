@@ -10,14 +10,22 @@ import logging
 from typing import Any
 
 from apps.copilot.modules.radar.context_matrix import build_context_matrix
-from apps.copilot.modules.radar.model_router import radar_t1_uses_deepseek, t1_step_label
+from apps.copilot.modules.radar.model_router import (
+    radar_t1_uses_deepseek,
+    t1_step_label,
+    t1_uses_deepseek_mode,
+)
 
 logger = logging.getLogger(__name__)
 
 
-async def build_t1_payload(t0_raw: dict[str, Any]) -> dict[str, Any]:
-    """T1 输出：优先 DeepSeek 压缩；失败或未配置则 rule。"""
-    if not radar_t1_uses_deepseek():
+async def build_t1_payload(
+    t0_raw: dict[str, Any],
+    *,
+    t1_mode: str | None = None,
+) -> dict[str, Any]:
+    """T1 输出：优先 DeepSeek 压缩；失败或未配置则 rule。t1_mode: rule | deepseek | None=auto。"""
+    if not t1_uses_deepseek_mode(t1_mode):
         return build_context_matrix(t0_raw)
     try:
         return await _build_context_matrix_deepseek(t0_raw)

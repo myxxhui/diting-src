@@ -49,7 +49,9 @@ def _env_int(name: str, default: int) -> int:
 def _env_defaults() -> dict[str, Any]:
     return {
         "version": 1,
-        "enable_t2_default": True,
+        "enable_t2_default": False,
+        "enable_t0_default": False,
+        "enable_t1_default": False,
         "force_refresh_default": False,
         "file_cache_hours": _env_float("RADAR_FILE_RETENTION_HOURS", 24.0),
         "db_retention_days": _env_float("RADAR_DB_RETENTION_DAYS", 30.0),
@@ -94,6 +96,8 @@ def reset_prefs() -> dict[str, Any]:
 
 def save_prefs(payload: dict[str, Any]) -> dict[str, Any]:
     allowed = {
+        "enable_t0_default",
+        "enable_t1_default",
         "enable_t2_default",
         "force_refresh_default",
         "file_cache_hours",

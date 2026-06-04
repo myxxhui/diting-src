@@ -99,7 +99,9 @@ async def test_pipeline_enable_t2_skipped(cache_root, monkeypatch):
             pass
 
     _Sess._n = 0
-    result = await run_radar_pipeline(_Sess(), symbol="601138", enable_t2=False)
+    result = await run_radar_pipeline(
+        _Sess(), symbol="601138", enable_t0=True, enable_t1=True, enable_t2=False
+    )
     assert result["t2_verdict"]["status"] == "skipped"
 
 
@@ -140,7 +142,14 @@ async def test_pipeline_t2_cache_hit(cache_root, monkeypatch):
 
     _Sess._n = 0
 
-    result = await run_radar_pipeline(_Sess(), symbol="601138", name="工业富联")
+    result = await run_radar_pipeline(
+        _Sess(),
+        symbol="601138",
+        name="工业富联",
+        enable_t0=True,
+        enable_t1=True,
+        enable_t2=True,
+    )
     assert result["t2_verdict"]["cache_hit"] is True
     assert result["t0_raw"].get("cache_hit") is True
 
