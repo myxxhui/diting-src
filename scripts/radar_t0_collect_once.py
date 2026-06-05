@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""T0 一次性采集 · 读 ``radar_t0_collect_symbols`` SoT（禁止 holdings 自动灌表）。
+"""T0 一次性采集 · 读 ``load_generic_t0_collect_symbols()`` SoT（executing ∪ radar）。
+
+禁止 holdings 自动灌表。
 
 用法:
   python scripts/radar_t0_collect_once.py --list
@@ -30,15 +32,22 @@ except ImportError:
 
 async def _list_symbols() -> None:
     from apps.copilot.db.database import AsyncSessionLocal, init_db
-    from apps.copilot.modules.radar.t0.symbol_list import (
-        list_collect_symbol_rows,
-        row_to_dict,
-    )
+    from apps.copilot.modules.radar.t0.jobs.status import build_pipeline_status
 
     await init_db()
     async with AsyncSessionLocal() as session:
-        rows = await list_collect_symbol_rows(session, enabled_only=False)
-    print(json.dumps([row_to_dict(r) for r in rows], ensure_ascii=False, indent=2))
+        out = await build_pipeline_status(session)
+    print(
+        json.dumps(
+            {
+                "sot": out.get("sot"),
+                "generic_collect_symbols": out.get("generic_collect_symbols"),
+                "collect_symbols": out.get("collect_symbols"),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 async def _run(*, symbol: str | None, all_enabled: bool) -> int:
@@ -68,13 +77,15 @@ async def _run(*, symbol: str | None, all_enabled: bool) -> int:
     print(json.dumps(results, ensure_ascii=False, indent=2))
     errors = [r for r in results if r.get("status") == "error"]
     if not results and all_enabled:
-        print("⚠️ collect 表无 enabled 标的", file=sys.stderr)
+        print("⚠️ 通用 T0 采集宇宙为空（executing ∪ radar）", file=sys.stderr)
         return 0
     return 1 if errors else 0
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="雷达 T0 collect-once（SoT: radar_t0_collect_symbols）")
+    p = argparse.ArgumentParser(
+        description="雷达 T0 collect-once（SoT: load_generic_t0_collect_symbols）"
+    )
     p.add_argument("--list", action="store_true", help="打印采集标的列表")
     p.add_argument("--symbol", help="单标的 6 位代码（UPSERT 入表后采集）")
     p.add_argument("--all", action="store_true", help="采集表内全部 enabled 标的")

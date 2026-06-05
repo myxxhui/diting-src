@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from datetime import date, datetime, timedelta
@@ -248,7 +249,61 @@ def _collect_block_trade(symbol: str) -> dict[str, Any]:
     )
 
 
+_INSIDER_PCT_RE = re.compile(
+    r"(?:不超过|不超)\s*([\d.]+)\s*%|(?:拟)?减持(?:股份)?[^%]{0,24}?([\d.]+)\s*%"
+)
+
+
+def _parse_insider_sell_pct(titles: list[str]) -> float | None:
+    """从巨潮/快讯标题解析减持占股本比例上限。"""
+    best: float | None = None
+    for title in titles:
+        if "减持" not in title:
+            continue
+        m0 = re.search(r"不超(?:过)?\s*([\d.]+)\s*%", title)
+        if m0:
+            try:
+                pct = float(m0.group(1))
+                best = pct if best is None else max(best, pct)
+                continue
+            except (TypeError, ValueError):
+                pass
+        for m in _INSIDER_PCT_RE.finditer(title):
+            for g in m.groups():
+                if not g:
+                    continue
+                try:
+                    pct = float(g)
+                except (TypeError, ValueError):
+                    continue
+                best = pct if best is None else max(best, pct)
+    return best
+
+
 def _collect_retail_concentration(symbol: str) -> dict[str, Any]:
+    from apps.copilot.modules.radar.t0.collectors._em_fetch import fetch_holder_num_detail
+
+    em = fetch_holder_num_detail(symbol)
+    if em and em.get("holder_num_change_pct") is not None:
+        as_of = str(em.get("as_of") or "")
+        year_digits = "".join(c for c in as_of if c.isdigit())[:4]
+        if year_digits and int(year_digits) < 2023:
+            return _block_typed(
+                "retail_concentration",
+                "C",
+                f"股东户数截止日过旧({as_of})·非当前动态口径",
+            )
+        return _ok(
+            "retail_concentration",
+            {
+                "holder_num": em.get("holder_num"),
+                "prev_holder_num": em.get("prev_holder_num"),
+                "holder_num_change_pct": em.get("holder_num_change_pct"),
+                "as_of": as_of,
+            },
+            "eastmoney:RPT_HOLDERNUM_DET",
+        )
+
     try:
         import akshare as ak  # type: ignore
     except ImportError:
@@ -259,9 +314,9 @@ def _collect_retail_concentration(symbol: str) -> dict[str, Any]:
     if df is None or df.empty:
         return _block("retail_concentration", "股东户数表为空")
     row = df.iloc[0]
-    holder = row.get("股东户数") or row.get("HOLDER_NUM")
-    prev = row.get("上期股东户数") or row.get("PRE_HOLDER_NUM")
-    chg = row.get("股东户数增幅") or row.get("HOLDER_NUM_CHANGE")
+    holder = row.get("股东户数-本次") or row.get("股东户数")
+    prev = row.get("股东户数-上次") or row.get("上期股东户数")
+    chg = row.get("股东户数-增减比例") or row.get("股东户数增幅")
     as_of = str(row.get("股东户数统计截止日") or row.get("END_DATE") or "")
     if holder is None and prev is None:
         return _block_typed("retail_concentration", "B", "股东户数字段为空")
@@ -284,6 +339,26 @@ def _collect_retail_concentration(symbol: str) -> dict[str, Any]:
         },
         "akshare stock_zh_a_gdhs_detail_em",
     )
+
+
+def _collect_financial_kpi_probe(symbol: str, key: str, field: str, label: str) -> dict[str, Any]:
+    from apps.copilot.modules.radar.t0.collectors._em_fetch import fetch_financial_kpis
+
+    kpi = fetch_financial_kpis(symbol)
+    if not kpi:
+        return _block_typed(key, "B", f"东财 RPT_F10_FINANCE_MAINFINADATA 无{label}")
+    val = kpi.get(field)
+    if val is None:
+        return _block_typed(key, "C", f"财报指标缺{label}字段")
+    payload: dict[str, Any] = {
+        "report_date": kpi.get("report_date"),
+        field: val,
+    }
+    if field == "gross_margin_pct":
+        payload["gross_margin_qoq_pct"] = kpi.get("gross_margin_qoq_pct")
+    elif field == "contract_liabilities":
+        payload["contract_liabilities_qoq_pct"] = kpi.get("contract_liabilities_qoq_pct")
+    return _ok(key, payload, "eastmoney:RPT_F10_FINANCE_MAINFINADATA")
 
 
 def _collect_level2_super_order(symbol: str) -> dict[str, Any]:
@@ -579,28 +654,104 @@ def collect_l4_micro(symbol: str) -> list[dict[str, Any]]:
         )
     )
 
-    v3 = sum(vols[-3:]) / 3 if len(vols) >= 3 else 0
-    v60 = sum(vols[-60:]) / 60 if len(vols) >= 60 else 1e-9
-    out.append(
-        _ok(
-            "turnover_acceleration",
-            {"vol_avg_3d": v3, "vol_avg_60d": v60, "accel": round(v3 / v60, 4) if v60 else None},
-            "HK Pod·成交量3/60均值比",
-        )
-    )
+    from apps.copilot.modules.radar.t0.collectors._em_fetch import fetch_daily_kline_closes
 
-    rets = []
-    for i in range(-11, -1):
-        if closes[i - 1] > 0:
-            rets.append((closes[i] - closes[i - 1]) / closes[i - 1])
-    vol10 = (sum(r * r for r in rets) / len(rets)) ** 0.5 if rets else None
-    out.append(
-        _block_typed(
-            "tech_beta_correlation",
-            "A",
-            "601138与中证1000/AI指数10日滚动ρ未实现（禁止用波动率顶替）",
+    kline = fetch_daily_kline_closes(symbol, days=65)
+    turnovers = [t for _d, _c, t in kline if t is not None]
+    if len(turnovers) < 60:
+        try:
+            import akshare as ak  # type: ignore
+
+            sym6 = symbol.zfill(6)[-6:]
+            hist = _ak_call(
+                ak.stock_zh_a_hist,
+                symbol=sym6,
+                period="daily",
+                adjust="qfq",
+            )
+            if hist is not None and not hist.empty and "换手率" in hist.columns:
+                turnovers = [
+                    float(x)
+                    for x in hist["换手率"].tail(65).tolist()
+                    if x is not None and str(x) not in ("", "nan")
+                ]
+        except Exception:
+            pass
+    if len(turnovers) >= 60:
+        t3 = sum(turnovers[-3:]) / 3
+        t60 = sum(turnovers[-60:]) / 60
+        out.append(
+            _ok(
+                "turnover_acceleration",
+                {
+                    "turnover_avg_3d": round(t3, 4),
+                    "turnover_avg_60d": round(t60, 4),
+                    "accel": round(t3 / t60, 4) if t60 else None,
+                },
+                "eastmoney:push2delay/kline_turnover",
+            )
         )
-    )
+    else:
+        v3 = sum(vols[-3:]) / 3 if len(vols) >= 3 else 0
+        v60 = sum(vols[-60:]) / 60 if len(vols) >= 60 else 1e-9
+        out.append(
+            _block_typed(
+                "turnover_acceleration",
+                "C",
+                f"换手率序列不足({len(turnovers)})·禁止仅用成交量比 ok",
+            )
+        )
+
+    from apps.state_watch.probes.datasource.quote_adapter import fetch_bars
+
+    idx_kline = fetch_daily_kline_closes("000852", days=15)
+    sym_kline = fetch_daily_kline_closes(symbol, days=15)
+    if len(sym_kline) < 11:
+        bars15 = fetch_bars(symbol, 15)
+        sym_kline = [(b.date, b.close, None) for b in bars15]
+    if len(idx_kline) < 11:
+        idx_bars = fetch_bars("000852", 15)
+        idx_kline = [(b.date, b.close, None) for b in idx_bars]
+    if len(idx_kline) >= 11 and len(sym_kline) >= 11:
+        sym_map = {d: c for d, c, _t in sym_kline}
+        idx_map = {d: c for d, c, _t in idx_kline}
+        dates = sorted(set(sym_map) & set(idx_map))[-11:]
+        sym_rets = []
+        idx_rets = []
+        for i in range(1, len(dates)):
+            d0, d1 = dates[i - 1], dates[i]
+            s0, s1 = sym_map[d0], sym_map[d1]
+            i0, i1 = idx_map[d0], idx_map[d1]
+            if s0 > 0 and i0 > 0:
+                sym_rets.append((s1 - s0) / s0)
+                idx_rets.append((i1 - i0) / i0)
+        if len(sym_rets) >= 10:
+            n = len(sym_rets)
+            ms = sum(sym_rets) / n
+            mi = sum(idx_rets) / n
+            cov = sum((sym_rets[j] - ms) * (idx_rets[j] - mi) for j in range(n)) / n
+            vs = (sum((sym_rets[j] - ms) ** 2 for j in range(n)) / n) ** 0.5
+            vi = (sum((idx_rets[j] - mi) ** 2 for j in range(n)) / n) ** 0.5
+            rho = cov / (vs * vi) if vs > 0 and vi > 0 else None
+            if rho is not None:
+                out.append(
+                    _ok(
+                        "tech_beta_correlation",
+                        {
+                            "rho_10d": round(rho, 4),
+                            "benchmark": "000852",
+                            "benchmark_name": "中证1000",
+                            "window_days": n,
+                        },
+                        "eastmoney:kline_returns_corr",
+                    )
+                )
+            else:
+                out.append(_block_typed("tech_beta_correlation", "C", "10日收益率协方差为0"))
+        else:
+            out.append(_block_typed("tech_beta_correlation", "C", "有效收益率样本不足10日"))
+    else:
+        out.append(_block_typed("tech_beta_correlation", "B", "标的或中证1000 K线不足"))
 
     try:
         import akshare as ak  # type: ignore
@@ -612,17 +763,40 @@ def collect_l4_micro(symbol: str) -> list[dict[str, Any]]:
                 break
         if nb is not None and not nb.empty:
             tail = nb.tail(3)
-            if "持股数量变化" not in tail.columns:
-                out.append(_block_typed("northbound_net_flow", "C", "表结构缺持股数量变化列"))
-            else:
-                net = float(tail["持股数量变化"].sum())
+            share_col = next(
+                (c for c in ("今日增持股数", "持股数量变化", "增持数量") if c in tail.columns),
+                None,
+            )
+            fund_col = "今日增持资金" if "今日增持资金" in tail.columns else None
+            if share_col:
+                net_shares = float(tail[share_col].astype(float).sum())
+                payload: dict[str, Any] = {
+                    "net_3d_shares_change": net_shares,
+                    "rows": len(tail),
+                }
+                if fund_col:
+                    payload["net_3d_fund_yi"] = round(
+                        float(tail[fund_col].astype(float).sum()) / 1e8,
+                        4,
+                    )
                 out.append(
                     _ok(
                         "northbound_net_flow",
-                        {"net_3d_shares_change": net, "rows": len(tail)},
+                        payload,
                         "akshare stock_hsgt_individual_em",
                     )
                 )
+            elif fund_col:
+                net_yi = round(float(tail[fund_col].astype(float).sum()) / 1e8, 4)
+                out.append(
+                    _ok(
+                        "northbound_net_flow",
+                        {"net_3d_fund_yi": net_yi, "rows": len(tail)},
+                        "akshare stock_hsgt_individual_em",
+                    )
+                )
+            else:
+                out.append(_block_typed("northbound_net_flow", "C", "表结构缺增持股数/资金列"))
         else:
             out.append(_block_typed("northbound_net_flow", "B", "北向个股表为空或超时"))
     except Exception as exc:
@@ -636,30 +810,43 @@ def collect_l4_micro(symbol: str) -> list[dict[str, Any]]:
 
 def collect_l3_daily(symbol: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    try:
-        import akshare as ak  # type: ignore
+    from apps.copilot.modules.radar.t0.collectors._em_fetch import fetch_usd_cny_30d_pct
 
-        fx = _ak_call(ak.fx_spot_quote)
-        if fx is not None and not fx.empty:
-            usd = fx[fx["货币对"].astype(str).str.contains("USD/CNY", na=False)]
-            if not usd.empty:
-                rate = float(usd.iloc[0].get("最新价", 0) or 0)
-                if rate > 0:
-                    out.append(
-                        _block_typed(
-                            "exchange_rate_impact",
-                            "C",
-                            f"仅现货{rate}·28_要求30日升贬值%序列未实现",
-                        )
-                    )
-                else:
-                    out.append(_block_typed("exchange_rate_impact", "B", "USD/CNY 最新价为0或无效"))
-            else:
-                out.append(_block_typed("exchange_rate_impact", "B", "fx_spot_quote 无 USD/CNY 行"))
+    try:
+        fx30 = fetch_usd_cny_30d_pct()
+        if fx30 and fx30.get("pct_30d") is not None:
+            out.append(
+                _ok(
+                    "exchange_rate_impact",
+                    fx30,
+                    "akshare currency_boc_sina USD 30d",
+                )
+            )
         else:
-            out.append(_block_typed("exchange_rate_impact", "B", "fx_spot_quote 空/失败"))
-        if not any(x["probe_key"] == "exchange_rate_impact" for x in out):
-            out.append(_block_typed("exchange_rate_impact", "B", "fx 接口未调用"))
+            import akshare as ak  # type: ignore
+
+            fx = _ak_call(ak.fx_spot_quote)
+            if fx is not None and not fx.empty:
+                usd = fx[fx["货币对"].astype(str).str.contains("USD/CNY", na=False)]
+                if not usd.empty:
+                    row0 = usd.iloc[0]
+                    rate = float(
+                        row0.get("买报价") or row0.get("卖报价") or row0.get("最新价") or 0
+                    )
+                    if rate > 0:
+                        out.append(
+                            _block_typed(
+                                "exchange_rate_impact",
+                                "C",
+                                f"仅现货{rate}·30日序列未获取",
+                            )
+                        )
+                    else:
+                        out.append(_block_typed("exchange_rate_impact", "B", "USD/CNY 报价无效"))
+                else:
+                    out.append(_block_typed("exchange_rate_impact", "B", "fx_spot_quote 无 USD/CNY 行"))
+            else:
+                out.append(_block_typed("exchange_rate_impact", "B", "fx 接口空/失败"))
     except Exception as exc:
         out.append(_block("exchange_rate_impact", str(exc)[:200]))
 
@@ -698,17 +885,40 @@ def collect_l3_daily(symbol: str) -> list[dict[str, Any]]:
                 news_source,
             )
         )
-        ins = _headline_probe(titles, "insider_sell_actual", ("减持",), news_source)
-        if ins.get("ok"):
+        sell_titles = [t for t in titles if "减持" in t]
+        sell_pct = _parse_insider_sell_pct(sell_titles)
+        if sell_pct is not None:
+            out.append(
+                _ok(
+                    "insider_sell_actual",
+                    {
+                        "sell_pct_of_float": sell_pct,
+                        "matched_headlines": sell_titles[:5],
+                        "match_count": len(sell_titles),
+                    },
+                    news_source,
+                )
+            )
+        elif sell_titles:
             out.append(
                 _block_typed(
                     "insider_sell_actual",
                     "A",
-                    "巨潮减持解析·占总股本%未实现（禁止仅标题命中 ok）",
+                    "有减持标题但未解析出占总股本%（禁止仅标题 ok）",
                 )
             )
         else:
-            out.append(ins)
+            out.append(
+                _ok(
+                    "insider_sell_actual",
+                    {
+                        "sell_pct_of_float": 0.0,
+                        "match_count": 0,
+                        "disclosure": "cninfo_no_insider_sell_in_365d",
+                    },
+                    news_source,
+                )
+            )
     else:
         out.append(_block_typed("gb200_iteration_node", "B", "标的公告+快讯均为空"))
         out.append(_block_typed("insider_sell_actual", "B", "标的公告+快讯均为空"))
@@ -735,13 +945,22 @@ def collect_l3_daily(symbol: str) -> list[dict[str, Any]]:
         )
     )
 
-    for k, msg in (
-        ("gross_margin_trend", "财报毛利率 QoQ 解析未实现（禁止 financial_abstract 原表顶替）"),
-        ("inventory_turnover", "存货周转天数未实现"),
-        ("contract_liabilities", "合同负债环比%未实现"),
-        ("related_party_trans", "D1 关联交易表环比未接入"),
-    ):
-        out.append(_collect_unimplemented_l3(k, msg))
+    out.append(
+        _collect_financial_kpi_probe(
+            symbol, "gross_margin_trend", "gross_margin_pct", "毛利率"
+        )
+    )
+    out.append(
+        _collect_financial_kpi_probe(
+            symbol, "inventory_turnover", "inventory_turnover_days", "存货周转天数"
+        )
+    )
+    out.append(
+        _collect_financial_kpi_probe(
+            symbol, "contract_liabilities", "contract_liabilities", "合同负债"
+        )
+    )
+    out.append(_collect_unimplemented_l3("related_party_trans", "D1 关联交易表环比未接入"))
 
     out.append(_collect_parent_honhai_revenue())
     out.append(_collect_cpi_ppi_spread())

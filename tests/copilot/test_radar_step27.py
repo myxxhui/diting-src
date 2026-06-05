@@ -9,10 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from apps.copilot.db.database import Base
 from apps.copilot.modules.radar.t0.symbol_list import (
+    load_generic_t0_collect_symbols,
     load_t0_collect_symbols,
     row_to_dict,
     upsert_collect_symbol,
 )
+from apps.copilot.modules.executing.universe import upsert_executing_collect
 from apps.copilot.modules.radar.t1.fact_matrix_builder import enrich_t1_payload
 from apps.copilot.modules.radar.t1.operators.micro_ops import (
     op_t08_price_action,
@@ -33,6 +35,16 @@ async def db_session():
 
 
 @pytest.mark.asyncio
+async def test_load_generic_t0_collect_symbols_union(db_session: AsyncSession):
+    await upsert_executing_collect(db_session, "300502", profile="601138", enabled=True)
+    await upsert_collect_symbol(db_session, symbol="601138", name="工业富联")
+    await db_session.commit()
+
+    syms = await load_generic_t0_collect_symbols(db_session)
+    assert syms == ["300502", "601138"]
+
+
+@pytest.mark.asyncio
 async def test_upsert_and_load_collect_symbols(db_session: AsyncSession):
     await upsert_collect_symbol(db_session, symbol="601138", name="工业富联")
     await upsert_collect_symbol(db_session, symbol="300308", name="中际旭创", enabled=False)
@@ -48,6 +60,8 @@ async def test_upsert_and_load_collect_symbols(db_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_row_to_dict(db_session: AsyncSession):
     row = await upsert_collect_symbol(db_session, symbol="002837", name="英维克")
+    await db_session.commit()
+    await db_session.refresh(row)
     d = row_to_dict(row)
     assert d["symbol"] == "002837"
     assert d["name"] == "英维克"

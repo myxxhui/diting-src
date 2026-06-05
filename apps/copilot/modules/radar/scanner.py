@@ -147,10 +147,14 @@ async def collect_t0_live(
 
 async def _safe_domains(sym: str) -> dict[str, Any]:
     try:
-        from apps.copilot.modules.radar.t0.collectors.market_sentiment import load_macro_for_scan
+        from apps.copilot.db.database import AsyncSessionLocal
+        from apps.copilot.modules.radar.t0.collectors.market_sentiment import load_macro_for_scan_async
         from apps.copilot.modules.radar.t0.collectors.symbol_bundle import collect_symbol_domains
+        from apps.copilot.services.redis_wait import wait_for_sync_redis
 
-        macro = load_macro_for_scan()
+        redis_client = wait_for_sync_redis()
+        async with AsyncSessionLocal() as session:
+            macro = await load_macro_for_scan_async(session, redis_client)
         return await asyncio.wait_for(
             asyncio.to_thread(collect_symbol_domains, sym, macro_snapshot=macro),
             timeout=120.0,

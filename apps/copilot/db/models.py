@@ -597,6 +597,27 @@ class RadarT0CollectSymbol(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
+class RadarSectorDaily(Base):
+    """T0-2/3 板块动能与资金 · 每股按东财行业日级 UPSERT。
+
+    [Ref: 27_ §2.2 · 28_ §9.2]
+    """
+
+    __tablename__ = "radar_sector_daily"
+
+    symbol: Mapped[str] = mapped_column(String(6), primary_key=True)
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    industry: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    board_code: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    board_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    pct_chg_3d: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    net_inflow_5d_yi: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    momentum_json: Mapped[dict] = mapped_column(JSON_TYPE, nullable=False, default=dict)
+    flow_json: Mapped[dict] = mapped_column(JSON_TYPE, nullable=False, default=dict)
+    collected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    source: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+
 class RadarMarketSentimentDaily(Base):
     """T0-1 全市场情绪日定稿。
 

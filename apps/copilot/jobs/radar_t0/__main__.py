@@ -39,9 +39,12 @@ async def _main_async(job_id: str | None, *, status: bool, force: bool) -> int:
         logger.error("缺少 job_id")
         return 2
 
+    from apps.copilot.services.redis_wait import wait_for_sync_redis
+
+    redis_client = wait_for_sync_redis()
     async with AsyncSessionLocal() as session:
         try:
-            result = await run_job(session, job_id, force=force)
+            result = await run_job(session, job_id, redis_client=redis_client, force=force)
             await session.commit()
         except Exception as exc:  # noqa: BLE001
             await session.rollback()

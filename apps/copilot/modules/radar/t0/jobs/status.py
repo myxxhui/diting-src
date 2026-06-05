@@ -12,13 +12,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.copilot.modules.radar.t0.jobs.registry import JOB_REGISTRY, JobScope, cron_jobs
 from apps.copilot.modules.radar.t0.jobs.runner import is_watermark_stale, stale_hours_for
 from apps.copilot.modules.radar.t0.jobs.watermarks import list_watermarks, watermark_to_dict
-from apps.copilot.modules.radar.t0.symbol_list import list_collect_symbol_rows, row_to_dict
+from apps.copilot.modules.radar.t0.symbol_list import (
+    list_collect_symbol_rows,
+    load_generic_t0_collect_symbols,
+    row_to_dict,
+    sync_executing_collect_mirror,
+)
 
 
 async def build_pipeline_status(session: AsyncSession) -> dict[str, Any]:
-    """仅报告 **collect 表内** 标的 + 各 job watermark stale。"""
-    rows = await list_collect_symbol_rows(session, enabled_only=True)
-    symbols = [row_to_dict(r) for r in rows]
+    """报告 **通用 T0 采集宇宙**（executing ∪ radar）+ 各 job watermark stale。"""
+    await sync_executing_collect_mirror(session)
+    generic = await load_generic_t0_collect_symbols(session, enabled_only=True)
+    radar_by_sym = {
+        r.symbol: r for r in await list_collect_symbol_rows(session, enabled_only=True)
+    }
+    symbols: list[dict[str, Any]] = []
+    for sym in generic:
+        row = radar_by_sym.get(sym)
+        if row is not None:
+            d = row_to_dict(row)
+            d["source"] = (
+                "executing_mirror" if row.enrolled_by == "executing_mirror" else "radar_table"
+            )
+        else:
+            d = {
+                "symbol": sym,
+                "name": sym,
+                "enabled": True,
+                "enrolled_by": "executing_only",
+                "source": "executing_only",
+            }
+        symbols.append(d)
     wm_rows = {w.job_id: w for w in await list_watermarks(session)}
 
     jobs: list[dict[str, Any]] = []
@@ -63,7 +88,9 @@ async def build_pipeline_status(session: AsyncSession) -> dict[str, Any]:
     return {
         "collect_symbol_count": len(symbols),
         "collect_symbols": symbols,
+        "generic_collect_symbols": generic,
         "symbol_freshness": symbol_stale,
         "jobs": jobs,
         "collect_list_empty": len(symbols) == 0,
+        "sot": "load_generic_t0_collect_symbols",
     }

@@ -10,7 +10,7 @@ from enum import Enum
 
 class JobScope(str, Enum):
     GLOBAL = "global"
-    COLLECT = "collect"  # load_t0_collect_symbols()
+    COLLECT = "collect"  # load_generic_t0_collect_symbols()
 
 
 class JobCadence(str, Enum):
@@ -199,6 +199,16 @@ JOB_REGISTRY: tuple[JobSpec, ...] = (
         JobCadence.ONESHOT,
         "",
         "前端/API 一次性全量 T0",
+        implemented=True,
+    ),
+    JobSpec(
+        "sentiment-backfill",
+        (1,),
+        JobScope.GLOBAL,
+        JobCadence.ONESHOT,
+        "",
+        "近 N 交易日 T0-1 日表补录（交易所成交额+环比）",
+        active_deadline_seconds=900,
         implemented=True,
     ),
     JobSpec(

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.copilot.modules.radar.t0.jobs.registry import JOB_REGISTRY, JobCadence, JobScope, cron_jobs
 from apps.copilot.modules.radar.t0.jobs.runner import is_watermark_stale, run_job
 from apps.copilot.modules.radar.t0.jobs.watermarks import get_watermark, upsert_watermark
-from apps.copilot.modules.radar.t0.symbol_list import load_t0_collect_symbols
+from apps.copilot.modules.radar.t0.symbol_list import load_generic_t0_collect_symbols
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ async def run_bootstrap_sync(
     redis_client: Any = None,
     force: bool = False,
 ) -> dict[str, Any]:
-    symbols = await load_t0_collect_symbols(session, enabled_only=True)
+    symbols = await load_generic_t0_collect_symbols(session, enabled_only=True)
     results: list[dict[str, Any]] = []
 
     targets = [s for s in cron_jobs()]

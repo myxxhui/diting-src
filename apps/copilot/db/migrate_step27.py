@@ -56,6 +56,26 @@ async def migrate_step27(engine: AsyncEngine) -> None:
         await conn.execute(
             text(
                 """
+                CREATE TABLE IF NOT EXISTS radar_sector_daily (
+                  symbol VARCHAR(6) NOT NULL,
+                  trade_date DATE NOT NULL,
+                  industry VARCHAR(64),
+                  board_code VARCHAR(16),
+                  board_name VARCHAR(64),
+                  pct_chg_3d REAL,
+                  net_inflow_5d_yi REAL,
+                  momentum_json TEXT NOT NULL DEFAULT '{}',
+                  flow_json TEXT NOT NULL DEFAULT '{}',
+                  collected_at DATETIME,
+                  source VARCHAR(64),
+                  PRIMARY KEY (symbol, trade_date)
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
                 CREATE TABLE IF NOT EXISTS radar_market_sentiment_daily (
                   trade_date DATE PRIMARY KEY,
                   total_turnover_yi REAL,

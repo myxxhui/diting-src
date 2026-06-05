@@ -110,6 +110,46 @@ def fetch_pledge_ratio(symbol: str) -> dict[str, Any] | None:
     }
 
 
+def fetch_industry_boards_pct_3d() -> list[dict[str, Any]]:
+    """行业板块近 3 交易日涨跌幅 · push2delay clist（stat=3 · f127）。"""
+    data = em_get_json(
+        f"{_PUSH2}/api/qt/clist/get",
+        params={
+            "pn": "1",
+            "pz": "200",
+            "po": "1",
+            "np": "1",
+            "ut": "b2884a393a59ad64002292a3e90d46a5",
+            "fltt": "2",
+            "invt": "2",
+            "fid0": "f3",
+            "fs": "m:90+t:2",
+            "stat": "3",
+            "fields": "f12,f14,f2,f127",
+        },
+        referer="https://data.eastmoney.com/bkzj/hy.html",
+    )
+    if not data:
+        return []
+    diff = (data.get("data") or {}).get("diff") or []
+    out: list[dict[str, Any]] = []
+    for item in diff:
+        if not isinstance(item, dict):
+            continue
+        try:
+            pct_3d = float(item.get("f127"))
+        except (TypeError, ValueError):
+            pct_3d = None
+        out.append(
+            {
+                "board_code": item.get("f12"),
+                "board_name": item.get("f14"),
+                "pct_chg_3d": pct_3d,
+            }
+        )
+    return out
+
+
 def fetch_industry_boards() -> list[dict[str, Any]]:
     """行业板块列表 · push2delay（涨跌幅 f3）。"""
     data = em_get_json(
@@ -416,55 +456,242 @@ def fetch_margin_series(symbol: str, *, lookback_days: int = 10) -> dict[str, An
 
 
 def fetch_board_pct_3d(board_code: str) -> float | None:
-    """行业板块近 3 交易日涨跌幅（push2his · 不依赖 akshare hist）。"""
+    """行业板块近 3 交易日涨跌幅（push2delay clist 优先 · push2his K 线回退）。"""
     code = str(board_code or "").strip()
     if not code:
         return None
+    for row in fetch_industry_boards_pct_3d():
+        if str(row.get("board_code") or "").strip() == code:
+            pct = row.get("pct_chg_3d")
+            if pct is not None:
+                return float(pct)
     secid = f"90.{code}"
-    data = em_get_json(
-        "https://push2his.eastmoney.com/api/qt/stock/kline/get",
-        params={
-            "secid": secid,
-            "fields1": "f1,f2,f3,f4,f5,f6",
-            "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-            "klt": "101",
-            "fqt": "1",
-            "end": "20500101",
-            "lmt": "8",
-        },
-        referer="https://data.eastmoney.com/bkzj/hy.html",
-    )
-    if not data:
-        return None
-    klines = (data.get("data") or {}).get("klines") or []
-    if len(klines) < 2:
-        return None
-    closes: list[float] = []
-    for line in klines[-5:]:
+    for base in (_PUSH2, "https://push2his.eastmoney.com"):
+        data = em_get_json(
+            f"{base.rstrip('/')}/api/qt/stock/kline/get",
+            params={
+                "secid": secid,
+                "fields1": "f1,f2,f3,f4,f5,f6",
+                "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+                "klt": "101",
+                "fqt": "1",
+                "end": "20500101",
+                "lmt": "8",
+            },
+            referer="https://data.eastmoney.com/bkzj/hy.html",
+        )
+        if not data:
+            continue
+        klines = (data.get("data") or {}).get("klines") or []
+        if len(klines) < 2:
+            continue
+        closes: list[float] = []
+        for line in klines[-5:]:
+            parts = str(line).split(",")
+            if len(parts) >= 3:
+                try:
+                    closes.append(float(parts[2]))
+                except ValueError:
+                    continue
+        if len(closes) < 2:
+            continue
+        last = closes[-1]
+        ref = closes[-4] if len(closes) >= 4 else closes[0]
+        if ref in (0, None):
+            continue
+        return round((last - ref) / ref * 100, 2)
+    return None
+
+
+def _board_secid(board_code: str) -> str:
+    return f"90.{str(board_code or '').strip()}"
+
+
+def fetch_board_daily_momentum(
+    board_code: str,
+    *,
+    days: int = 10,
+    board_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """板块近 N 交易日日涨跌幅序列 · push2delay kline · akshare hist 回退。"""
+    import time
+
+    code = str(board_code or "").strip()
+    if not code:
+        return []
+    secid = _board_secid(code)
+    params = {
+        "secid": secid,
+        "fields1": "f1,f2,f3,f4,f5,f6",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+        "klt": "101",
+        "fqt": "1",
+        "end": "20500101",
+        "lmt": str(days + 5),
+        "ut": "b2884a393a59ad64002292a3e90d46a5",
+        "_": int(time.time() * 1000),
+    }
+    payload = None
+    for base in (_PUSH2, "https://push2his.eastmoney.com", "https://push2.eastmoney.com"):
+        payload = em_get_json(
+            f"{base.rstrip('/')}/api/qt/stock/kline/get",
+            params=dict(params, _=int(time.time() * 1000)),
+            referer="https://data.eastmoney.com/bkzj/hy.html",
+            retries=4,
+        )
+        if payload and (payload.get("data") or {}).get("klines"):
+            break
+        _sleep_throttle()
+    if not payload:
+        return []
+    klines = (payload.get("data") or {}).get("klines") or []
+    out: list[dict[str, Any]] = []
+    for line in klines[-days:]:
         parts = str(line).split(",")
-        if len(parts) >= 3:
-            try:
-                closes.append(float(parts[2]))
-            except ValueError:
-                continue
-    if len(closes) < 2:
-        return None
-    last = closes[-1]
-    ref = closes[-4] if len(closes) >= 4 else closes[0]
-    if ref in (0, None):
-        return None
-    return round((last - ref) / ref * 100, 2)
+        if len(parts) < 9:
+            continue
+        try:
+            pct = float(parts[8])
+        except ValueError:
+            continue
+        out.append({"trade_date": parts[0], "pct_chg": round(pct, 2)})
+    if out:
+        return out
+
+    if board_name:
+        try:
+            import akshare as ak  # type: ignore
+            from datetime import datetime, timedelta, timezone
+
+            from apps.copilot.modules.radar.t0.collectors._ak_util import ak_call
+
+            end = datetime.now(timezone(timedelta(hours=8)))
+            start = end - timedelta(days=days + 20)
+            df = ak_call(
+                ak.stock_board_industry_hist_em,
+                symbol=board_name,
+                start_date=start.strftime("%Y%m%d"),
+                end_date=end.strftime("%Y%m%d"),
+                adjust="",
+            )
+            if df is not None and not df.empty:
+                pct_col = "涨跌幅" if "涨跌幅" in df.columns else None
+                date_col = "日期" if "日期" in df.columns else df.columns[0]
+                if pct_col:
+                    for _, row in df.tail(days).iterrows():
+                        try:
+                            out.append(
+                                {
+                                    "trade_date": str(row[date_col])[:10],
+                                    "pct_chg": round(float(row[pct_col]), 2),
+                                }
+                            )
+                        except (TypeError, ValueError):
+                            continue
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("board daily momentum akshare 回退失败: %s", exc)
+    return out
+
+
+def fetch_board_daily_fund_flow(
+    board_code: str,
+    *,
+    days: int = 10,
+    board_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """板块近 N 交易日主力净流入序列 · push2delay fflow/daykline · akshare hist 回退。"""
+    import time
+
+    code = str(board_code or "").strip()
+    if not code:
+        return []
+    secid = _board_secid(code)
+    params = {
+        "lmt": "0",
+        "klt": "101",
+        "secid": secid,
+        "fields1": "f1,f2,f3,f7",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65",
+        "ut": "b2884a393a59ad64002292a3e90d46a5",
+        "_": int(time.time() * 1000),
+    }
+    payload = None
+    for base in (_PUSH2, "https://push2his.eastmoney.com", "https://push2.eastmoney.com"):
+        payload = em_get_json(
+            f"{base.rstrip('/')}/api/qt/stock/fflow/daykline/get",
+            params=dict(params, _=int(time.time() * 1000)),
+            referer="https://data.eastmoney.com/bkzj/hy.html",
+            retries=4,
+        )
+        if payload and (payload.get("data") or {}).get("klines"):
+            break
+        _sleep_throttle()
+    if not payload:
+        return []
+    klines = (payload.get("data") or {}).get("klines") or []
+    out: list[dict[str, Any]] = []
+    for line in klines[-days:]:
+        parts = str(line).split(",")
+        if len(parts) < 2:
+            continue
+        try:
+            net = float(parts[1])
+        except ValueError:
+            continue
+        out.append({"trade_date": parts[0], "net_inflow_yi": round(net / 1e8, 2)})
+    if len(out) >= min(days, 3):
+        return out[-days:]
+
+    if board_name:
+        try:
+            import akshare as ak  # type: ignore
+
+            from apps.copilot.modules.radar.t0.collectors._ak_util import ak_call
+
+            df = ak_call(ak.stock_sector_fund_flow_hist, symbol=board_name)
+            if df is not None and not df.empty:
+                date_col = "日期" if "日期" in df.columns else df.columns[0]
+                net_col = next(
+                    (c for c in df.columns if "主力净流入" in str(c) and "净额" in str(c)),
+                    None,
+                )
+                if net_col:
+                    for _, row in df.tail(days).iterrows():
+                        try:
+                            net = float(row[net_col])
+                            out.append(
+                                {
+                                    "trade_date": str(row[date_col])[:10],
+                                    "net_inflow_yi": round(net / 1e8, 2),
+                                }
+                            )
+                        except (TypeError, ValueError):
+                            continue
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("board daily fund flow akshare 回退失败: %s", exc)
+    return out[-days:] if out else []
 
 
 def match_industry_row(rows: list[dict[str, Any]], industry: str) -> dict[str, Any] | None:
-    """按行业名模糊匹配板块行（先全匹配再前缀）。"""
+    """按行业名匹配板块行（精确优先 · 最长包含次优 · 禁止短词误匹配）。"""
     ind = str(industry or "").strip()
     if not ind or not rows:
         return None
     for row in rows:
-        name = str(row.get("board_name") or "")
-        if name == ind or ind in name or name in ind:
+        name = str(row.get("board_name") or "").strip()
+        if name == ind:
             return row
+    candidates: list[tuple[int, int, dict[str, Any]]] = []
+    for row in rows:
+        name = str(row.get("board_name") or "").strip()
+        if not name:
+            continue
+        if ind in name or name in ind:
+            # 更长板块名优先，避免「电子」抢在「消费电子」前
+            candidates.append((len(name), -abs(len(name) - len(ind)), row))
+    if candidates:
+        candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        return candidates[0][2]
     for n in (4, 3, 2):
         if len(ind) < n:
             continue
@@ -572,3 +799,194 @@ def fetch_etf_spot_rows(*, max_pages: int = 5, page_size: int = 100) -> list[dic
             break
         _sleep_throttle()
     return rows
+
+
+def _secucode(symbol: str) -> str:
+    sym = str(symbol).zfill(6)[-6:]
+    return f"{sym}.SH" if sym.startswith(("5", "6", "9")) else f"{sym}.SZ"
+
+
+def fetch_holder_num_detail(symbol: str) -> dict[str, Any] | None:
+    """股东户数最新期 · RPT_HOLDERNUM_DET（按 SECURITY_CODE 过滤）。"""
+    sym = str(symbol).zfill(6)[-6:]
+    payload = em_get_json(
+        _DATACENTER,
+        params={
+            "reportName": "RPT_HOLDERNUM_DET",
+            "columns": "SECURITY_CODE,HOLDER_NUM,PRE_HOLDER_NUM,HOLDER_NUM_RATIO,END_DATE,HOLD_NOTICE_DATE",
+            "filter": f'(SECURITY_CODE="{sym}")',
+            "pageNumber": "1",
+            "pageSize": "3",
+            "sortColumns": "END_DATE",
+            "sortTypes": "-1",
+            "source": "WEB",
+            "client": "WEB",
+        },
+        referer="https://data.eastmoney.com/gdhs/",
+    )
+    if not payload:
+        return None
+    rows = (payload.get("result") or {}).get("data") or []
+    if not rows:
+        return None
+    row = rows[0]
+    try:
+        holder = float(row.get("HOLDER_NUM"))
+        chg_pct = float(row.get("HOLDER_NUM_RATIO"))
+    except (TypeError, ValueError):
+        return None
+    return {
+        "holder_num": holder,
+        "prev_holder_num": row.get("PRE_HOLDER_NUM"),
+        "holder_num_change_pct": chg_pct,
+        "as_of": str(row.get("END_DATE") or "")[:10],
+        "notice_date": str(row.get("HOLD_NOTICE_DATE") or "")[:10],
+    }
+
+
+def fetch_financial_kpis(symbol: str) -> dict[str, Any] | None:
+    """财报主要指标 · RPT_F10_FINANCE_MAINFINADATA（毛利率/存货周转/合同负债）。"""
+    sc = _secucode(symbol)
+    payload = em_get_json(
+        "https://datacenter.eastmoney.com/securities/api/data/get",
+        params={
+            "type": "RPT_F10_FINANCE_MAINFINADATA",
+            "sty": "APP_F10_MAINFINADATA",
+            "filter": f'(SECUCODE="{sc}")',
+            "p": "1",
+            "ps": "5",
+            "sr": "-1",
+            "st": "REPORT_DATE",
+            "source": "HSF10",
+            "client": "PC",
+        },
+        referer=f"https://emweb.securities.eastmoney.com/pc_hsf10/pages/index.html?code={sc}",
+    )
+    if not payload:
+        return None
+    rows = (payload.get("result") or {}).get("data") or []
+    if not rows:
+        return None
+    cur = rows[0]
+    prev = rows[1] if len(rows) > 1 else None
+
+    def _f(row: dict[str, Any], key: str) -> float | None:
+        try:
+            v = row.get(key)
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    gm = _f(cur, "XSMLL")
+    gm_prev = _f(prev, "XSMLL") if prev else None
+    gm_qoq = round((gm - gm_prev) / gm_prev * 100, 4) if gm is not None and gm_prev else None
+
+    inv_days = _f(cur, "CHZZTS")
+    contract_liab = _f(cur, "FC_LIABILITIES")
+    contract_prev = _f(prev, "FC_LIABILITIES") if prev else None
+    contract_qoq = (
+        round((contract_liab - contract_prev) / contract_prev * 100, 4)
+        if contract_liab is not None and contract_prev
+        else None
+    )
+
+    return {
+        "report_date": str(cur.get("REPORT_DATE") or "")[:10],
+        "gross_margin_pct": gm,
+        "gross_margin_qoq_pct": gm_qoq,
+        "inventory_turnover_days": inv_days,
+        "contract_liabilities": contract_liab,
+        "contract_liabilities_qoq_pct": contract_qoq,
+    }
+
+
+def fetch_usd_cny_30d_pct() -> dict[str, Any] | None:
+    """离岸人民币 30 日升贬值% · 中行历史汇率（完善期 · 禁止现货 0 顶替）。"""
+    try:
+        import akshare as ak  # type: ignore
+    except ImportError:
+        return None
+
+    from datetime import date, timedelta
+
+    end = date.today()
+    start = end - timedelta(days=45)
+    df = ak.currency_boc_sina(
+        symbol="美元",
+        start_date=start.strftime("%Y%m%d"),
+        end_date=end.strftime("%Y%m%d"),
+    )
+    if df is None or getattr(df, "empty", True):
+        return None
+    col = "中行汇买价" if "中行汇买价" in df.columns else "央行中间价"
+    if col not in df.columns:
+        return None
+    series: list[tuple[str, float]] = []
+    for _, row in df.iterrows():
+        raw = row.get(col)
+        try:
+            v = float(raw)
+        except (TypeError, ValueError):
+            continue
+        rate = v / 100.0 if v > 20 else v
+        if rate <= 0:
+            continue
+        series.append((str(row.get("日期", "")), rate))
+    if len(series) < 2:
+        return None
+    series = series[-31:]
+    latest_date, latest = series[-1]
+    ref_date, ref = series[0] if len(series) >= 30 else series[0]
+    chg = round((latest - ref) / ref * 100, 4) if ref else None
+    return {
+        "usd_cny": latest,
+        "pct_30d": chg,
+        "as_of": latest_date,
+        "ref_date": ref_date,
+        "series_len": len(series),
+    }
+
+
+def fetch_daily_kline_closes(symbol: str, *, days: int = 30) -> list[tuple[str, float, float | None]]:
+    """日 K 收盘 + 换手率 · push2his/push2delay day kline。"""
+    sym = str(symbol).zfill(6)[-6:]
+    secid = f"1.{sym}" if sym.startswith(("5", "6", "9")) else f"0.{sym}"
+    import time
+
+    params = {
+        "secid": secid,
+        "fields1": "f1,f2,f3,f4,f5,f6",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+        "klt": "101",
+        "fqt": "1",
+        "end": "20500101",
+        "lmt": str(days + 5),
+        "ut": "b2884a393a59ad64002292a3e90d46a5",
+        "_": int(time.time() * 1000),
+    }
+    payload = None
+    for base in (_PUSH2, "https://push2his.eastmoney.com", "https://push2.eastmoney.com"):
+        payload = em_get_json(
+            f"{base.rstrip('/')}/api/qt/stock/kline/get",
+            params=dict(params, _=int(time.time() * 1000)),
+            referer="https://quote.eastmoney.com/",
+            retries=3,
+        )
+        if payload and (payload.get("data") or {}).get("klines"):
+            break
+        _sleep_throttle()
+    if not payload:
+        return []
+    klines = (payload.get("data") or {}).get("klines") or []
+    out: list[tuple[str, float, float | None]] = []
+    for line in klines[-days:]:
+        parts = str(line).split(",")
+        if len(parts) < 4:
+            continue
+        try:
+            close = float(parts[2])
+            turnover = float(parts[10]) if len(parts) > 10 else None
+        except ValueError:
+            continue
+        out.append((parts[0], close, turnover))
+    return out

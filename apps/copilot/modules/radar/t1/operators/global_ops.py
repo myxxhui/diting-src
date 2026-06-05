@@ -33,10 +33,13 @@ def op_t02_sector_momentum(t0_raw: dict[str, Any]) -> OpResult:
     tag = "板块领涨" if pct is not None and pct >= 3 else "板块中性"
     if pct is not None and pct <= -3:
         tag = "板块退潮"
+    sym = sm.get("symbol") or (t0_raw.get("symbol") or "")
+    board = sm.get("board_name") or sm.get("industry")
+    ctx = f"{sym} 所属板块 {board} 近3日涨跌 {pct}%"
     return OpResult(
         "global_and_meso",
         "sector_momentum",
-        node(pct, tag, f"行业 {sm.get('industry')} 近3日涨跌 {pct}%"),
+        node(pct, tag, ctx),
     )
 
 

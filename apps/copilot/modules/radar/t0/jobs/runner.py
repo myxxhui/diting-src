@@ -19,7 +19,11 @@ from apps.copilot.modules.radar.t0.jobs.cache_merge import (
 )
 from apps.copilot.modules.radar.t0.jobs.registry import JobCadence, JobScope, JobSpec, get_job_spec
 from apps.copilot.modules.radar.t0.jobs.watermarks import upsert_watermark
-from apps.copilot.modules.radar.t0.symbol_list import load_t0_collect_symbols, touch_collect_symbol
+from apps.copilot.modules.radar.t0.symbol_list import (
+    load_generic_t0_collect_symbols,
+    sync_executing_collect_mirror,
+    touch_generic_collect_symbol,
+)
 from apps.copilot.modules.radar.t0.jobs.collect_once import collect_once
 
 logger = logging.getLogger(__name__)
@@ -81,6 +85,11 @@ async def run_job(
 
         return await run_bootstrap_sync(session, redis_client=redis_client, force=force)
 
+    if job_id == "sentiment-backfill":
+        from apps.copilot.modules.radar.t0.collectors.sentiment_backfill import backfill_sentiment_daily
+
+        return await backfill_sentiment_daily(session, days=7, overwrite=force)
+
     if job_id == "collect-once":
         rows = await collect_once(session, job_id=job_id, redis_client=redis_client)
         ok = sum(1 for r in rows if r.get("status") != "error" and "error" not in r)
@@ -95,7 +104,8 @@ async def run_job(
 
     symbols: list[str] = []
     if spec.scope == JobScope.COLLECT:
-        symbols = await load_t0_collect_symbols(session, enabled_only=True)
+        await sync_executing_collect_mirror(session)
+        symbols = await load_generic_t0_collect_symbols(session, enabled_only=True)
         if not symbols:
             await upsert_watermark(
                 session,
@@ -136,6 +146,7 @@ async def _run_global_job(
 ) -> dict[str, Any]:
     from apps.copilot.modules.radar.t0.collectors.market_sentiment import (
         collect_market_sentiment_snapshot,
+        enrich_turnover_vs_prev,
         upsert_sentiment_pg,
         write_sentiment_redis,
     )
@@ -143,7 +154,8 @@ async def _run_global_job(
     finalized = spec.job_id == "sentiment-eod"
     payload = await asyncio.to_thread(collect_market_sentiment_snapshot, finalized=finalized)
     if payload.get("status") == "ok":
-        write_sentiment_redis(redis_client, payload)
+        await enrich_turnover_vs_prev(session, payload)
+        write_sentiment_redis(redis_client, payload, force=finalized)
         write_global_macro_cache(payload)
         if finalized:
             await upsert_sentiment_pg(session, payload)
@@ -216,10 +228,11 @@ async def _run_domain_job(
                 continue
             if mode == "macro_sector":
                 merge_macro_sector(sym, payload)
-                st = "ok" if any(
-                    (payload.get(k) or {}).get("status") == "ok"
-                    for k in ("sector_momentum", "sector_flow")
-                ) else "skip"
+                from apps.copilot.modules.radar.t0.collectors.sector import upsert_sector_pg
+
+                pg_ok = await upsert_sector_pg(session, sym, payload)
+                mom = (payload.get("sector_momentum") or {}).get("status")
+                st = "ok" if mom == "ok" and pg_ok else "skip"
             else:
                 domain = payload["domain"]
                 patch = payload["patch"]
@@ -230,7 +243,9 @@ async def _run_domain_job(
                 ok += 1
             else:
                 skip += 1
-            await touch_collect_symbol(session, sym, job_id=spec.job_id, trade_date=_today_cn())
+            await touch_generic_collect_symbol(
+                session, sym, job_id=spec.job_id, trade_date=_today_cn()
+            )
         except Exception:  # noqa: BLE001
             err += 1
             logger.exception("domain job %s symbol=%s failed", spec.job_id, sym)
@@ -278,7 +293,9 @@ async def _run_micro_job(
                 skip += 1
             else:
                 err += 1
-            await touch_collect_symbol(session, sym, job_id=spec.job_id, trade_date=_today_cn())
+            await touch_generic_collect_symbol(
+                session, sym, job_id=spec.job_id, trade_date=_today_cn()
+            )
         except Exception:  # noqa: BLE001
             err += 1
             logger.exception("micro job %s symbol=%s failed", spec.job_id, sym)

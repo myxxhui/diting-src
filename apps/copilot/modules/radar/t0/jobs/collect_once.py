@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.copilot.modules.radar.symbol_resolve import display_name_for_symbol
-from apps.copilot.modules.radar.t0.symbol_list import load_t0_collect_symbols
+from apps.copilot.modules.radar.t0.symbol_list import load_generic_t0_collect_symbols
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +24,11 @@ async def collect_once(
 ) -> list[dict[str, Any]]:
     """对 collect 表内 enabled 标的（或指定列表）执行 T0+T1 采集并落缓存/库。
 
-    禁止全 A 股遍历；symbols 为空时仅读 ``load_t0_collect_symbols()``。
+    禁止全 A 股遍历；symbols 为空时读 ``load_generic_t0_collect_symbols()``。
     """
     from apps.copilot.modules.radar.service import collect_symbol_t0_only
 
-    target = symbols if symbols is not None else await load_t0_collect_symbols(
+    target = symbols if symbols is not None else await load_generic_t0_collect_symbols(
         session, enabled_only=True
     )
     if not target:

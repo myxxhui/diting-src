@@ -1356,16 +1356,16 @@ radar-t0-clean:
 .PHONY: radar-t0-collect-list radar-t0-collect radar-t0-collect-all
 
 radar-t0-collect-list: _ensure-deps
-	@echo "▶ [radar-t0-collect-list] radar_t0_collect_symbols 表"
+	@echo "▶ [radar-t0-collect-list] 通用 T0 宇宙（executing ∪ radar）"
 	PYTHONPATH=. python3 scripts/radar_t0_collect_once.py --list
 
 radar-t0-collect: _ensure-deps
 	@test -n "$(SYMBOL)" || (echo "用法: make radar-t0-collect SYMBOL=601138" && exit 1)
-	@echo "▶ [radar-t0-collect] UPSERT + T0+T1 · $(SYMBOL)"
+	@echo "▶ [radar-t0-collect] UPSERT radar 表 + T0+T1 · $(SYMBOL)"
 	PYTHONPATH=. python3 scripts/radar_t0_collect_once.py --symbol $(SYMBOL)
 
 radar-t0-collect-all: _ensure-deps
-	@echo "▶ [radar-t0-collect-all] 表内 enabled 标的批量 T0+T1"
+	@echo "▶ [radar-t0-collect-all] 通用宇宙全部 enabled 标的 · T0+T1"
 	PYTHONPATH=. python3 scripts/radar_t0_collect_once.py --all
 
 .PHONY: radar-t1-build
