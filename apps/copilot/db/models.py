@@ -810,6 +810,31 @@ class ExecutingDailyBar(Base):
     )
 
 
+class ExecutingMoneyflowDaily(Base):
+    """#17 smart_money_flow · Tushare moneyflow 日终聚合底库（目标 250 交易日）。
+
+    [Ref: 28_ §3.2.1]
+    """
+
+    __tablename__ = "executing_moneyflow_daily"
+
+    symbol: Mapped[str] = mapped_column(String(6), primary_key=True)
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    buy_elg_vol: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    sell_elg_vol: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    buy_lg_vol: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    sell_lg_vol: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    buy_md_vol: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    sell_md_vol: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    buy_sm_vol: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    sell_sm_vol: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    net_mf_vol: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    source: Mapped[str] = mapped_column(String(64), nullable=False, default="Tushare API (moneyflow)")
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
 class ExecutingT0Raw(Base):
     """T0 原始采集落库（按 probe_key 追加）。"""
 

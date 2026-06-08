@@ -116,17 +116,19 @@ def build_volume_price_div_node(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_smart_money_flow_node(metrics: dict[str, Any], *, source: str = "") -> dict[str, Any]:
-    """#17 L2 主力大单 · T1 节点。"""
+    """#17 L2 主力大单 · T1 白盒节点（value 保留 2 位小数）。"""
     value = metrics.get("value_pct")
     if value is None:
         raise ValueError("smart_money_flow value_pct 缺失")
+    value_f = round(float(value), 2)
     raw_metrics = dict(metrics.get("raw_metrics") or {})
+    src = source or str(metrics.get("source") or "Tushare API (moneyflow)")
     return {
         "indicator_name": probe_indicator_name("smart_money_flow"),
-        "value": value,
+        "value": value_f,
         "fact_statement": str(metrics.get("fact_statement") or ""),
         "calculation_logic": str(metrics.get("calculation_logic") or ""),
-        "source": source or str(metrics.get("source") or "Tushare API (moneyflow)"),
+        "source": src,
         "raw_metrics": raw_metrics,
     }
 

@@ -540,3 +540,129 @@ async def vol_div_15m_job(
         "source": source,
         "divergence_index": (t1_payload or {}).get("value"),
     }
+
+
+async def run_smart_money_sync_symbol(
+    session: AsyncSession,
+    symbol: str,
+    redis_client: Any,
+    *,
+    mode: str = "incremental",
+) -> dict[str, Any]:
+    """#17 单标的：Tushare → PG 250 底库 + Redis + T0 摘要 + T1 快照。"""
+    from apps.copilot.modules.executing.indicator_nodes import build_smart_money_flow_node
+    from apps.copilot.modules.executing.moneyflow_storage import MONEYFLOW_TARGET_TRADING_DAYS
+    from apps.copilot.modules.executing.smart_money_flow import (
+        SOURCE_TUSHARE,
+        compute_smart_money_metrics,
+        sync_smart_money_symbol,
+        tushare_token,
+    )
+    from apps.copilot.modules.executing.storage import save_t0_batch, upsert_t1_snapshot
+
+    sym = symbol.zfill(6)[-6:]
+    if not tushare_token():
+        return {"symbol": sym, "status": "error", "error": "TUSHARE_TOKEN 未配置"}
+
+    try:
+        result = await sync_smart_money_symbol(
+            session, sym, redis_client=redis_client, mode=mode
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[smart-money] sync 失败 symbol=%s: %s", sym, exc)
+        return {"symbol": sym, "status": "error", "error": str(exc)[:200]}
+
+    payload = result.get("payload") or {}
+    rows_n = len(payload.get("moneyflow_rows") or [])
+    ok = rows_n >= 3 and bool(payload.get("free_float_shares"))
+    t0_item = {
+        "probe_key": "smart_money_flow",
+        "ok": ok,
+        "payload": result.get("t0_summary") or {},
+        "source": SOURCE_TUSHARE,
+    }
+    if not ok:
+        t0_item["blocker"] = (
+            f"moneyflow PG 行数={result.get('pg_count')} free_float="
+            f"{payload.get('free_float_shares')}"
+        )[:200]
+    await save_t0_batch(session, sym, [t0_item], trade_date=date.today())
+
+    t1_value = None
+    if ok:
+        metrics = compute_smart_money_metrics(payload)
+        node = build_smart_money_flow_node(metrics, source=SOURCE_TUSHARE)
+        await upsert_t1_snapshot(
+            session, sym, "smart_money_flow", node, trade_date=date.today(), source=SOURCE_TUSHARE
+        )
+        t1_value = node.get("value")
+
+    return {
+        **result,
+        "symbol": sym,
+        "status": "ok" if ok else "error",
+        "t1_value": t1_value,
+        "target_trading_days": MONEYFLOW_TARGET_TRADING_DAYS,
+    }
+
+
+async def run_smart_money_backfill_check(
+    session: AsyncSession,
+    symbols: list[str],
+    redis_client: Any,
+) -> dict[str, Any]:
+    """14:00 · 检查执行区全标的是否满 250 交易日，不足则 full 回填。"""
+    from apps.copilot.modules.executing.moneyflow_storage import (
+        MONEYFLOW_TARGET_TRADING_DAYS,
+        count_moneyflow_rows,
+    )
+
+    results: list[dict[str, Any]] = []
+    for sym in symbols:
+        n = await count_moneyflow_rows(session, sym.zfill(6)[-6:])
+        if n < MONEYFLOW_TARGET_TRADING_DAYS:
+            results.append(
+                await run_smart_money_sync_symbol(
+                    session, sym, redis_client, mode="full"
+                )
+            )
+        else:
+            results.append(
+                {"symbol": sym.zfill(6)[-6:], "status": "skip", "pg_count": n, "reason": "already_full"}
+            )
+    ok = [r for r in results if r.get("status") == "ok"]
+    await upsert_watermark(
+        session,
+        "l4-smart-money-backfill",
+        "*",
+        success=bool(ok) or all(r.get("status") == "skip" for r in results),
+        trade_date=date.today(),
+        row_count=sum(r.get("pg_count", 0) or r.get("upserted", 0) for r in results),
+    )
+    return {"job_id": "l4-smart-money-backfill", "status": "ok", "results": results}
+
+
+async def run_smart_money_eod(
+    session: AsyncSession,
+    symbols: list[str],
+    redis_client: Any,
+) -> dict[str, Any]:
+    """17:00 · 全执行区标的增量日更 + T1 快照。"""
+    results = []
+    for sym in symbols:
+        results.append(
+            await run_smart_money_sync_symbol(
+                session, sym, redis_client, mode="incremental"
+            )
+        )
+    ok = [r for r in results if r.get("status") == "ok"]
+    await upsert_watermark(
+        session,
+        "l4-smart-money-eod",
+        "*",
+        success=bool(ok),
+        trade_date=date.today(),
+        row_count=len(ok),
+        error=None if ok else "smart_money_eod_failed",
+    )
+    return {"job_id": "l4-smart-money-eod", "status": "ok" if ok else "error", "results": results}

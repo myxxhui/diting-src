@@ -82,4 +82,4 @@ def test_render_smart_money_flow_card():
     html = render_smart_money_flow_card(node)
     assert "smart_money_flow" in html
     assert "L2主力大单" in html or "L2主力大单资金流向" in html
-    assert "-0.7144" in html
+    assert "-0.71" in html

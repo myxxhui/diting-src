@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import html as _html
+import json
 from typing import Any
 
 from apps.copilot.db.datetime_util import utc_naive_to_shanghai_display
@@ -257,13 +258,24 @@ def render_smart_money_flow_card(node: dict[str, Any]) -> str:
         if audit_rows
         else ""
     )
+    t1_json = {
+        "smart_money_flow": {
+            "indicator_name": name,
+            "value": val,
+            "fact_statement": node.get("fact_statement"),
+            "calculation_logic": node.get("calculation_logic"),
+            "source": node.get("source"),
+            "raw_metrics": rm,
+        }
+    }
+    json_block = _esc(json.dumps(t1_json, ensure_ascii=False, indent=2))
 
     return f"""
 <div class="rounded-lg border border-violet-100 bg-violet-50/30 p-3 mb-2">
   <div class="flex flex-wrap items-center gap-2 mb-1">
     <span class="text-sm font-semibold text-gray-900">{_esc(name)}</span>
     <span class="text-[10px] text-gray-500">({short})</span>
-    <span class="text-[10px] font-mono text-gray-400">smart_money_flow</span>
+    <span class="text-[10px] font-mono text-gray-400">smart_money_flow · #17</span>
     <span class="text-sm ml-auto">{dot} <strong>{_esc(pct_disp)}</strong></span>
   </div>
   <p class="text-xs text-gray-600 mb-1">近3交易日主力（特大单+大单）相对自由流通盘 · {direction}</p>
@@ -271,6 +283,10 @@ def render_smart_money_flow_card(node: dict[str, Any]) -> str:
   <p class="text-[11px] text-gray-500 mt-1 font-mono">{_esc(node.get('calculation_logic', ''))}</p>
   <p class="text-[10px] text-gray-400 mt-1">来源：{_esc(node.get('source', '—'))}</p>
   {audit_html}
+  <details class="mt-2">
+    <summary class="text-[11px] text-violet-800 cursor-pointer font-medium">T1 白盒 JSON（喂 T2）</summary>
+    <pre class="text-[10px] bg-gray-900 text-green-100 p-2 rounded mt-1 overflow-x-auto font-mono">{json_block}</pre>
+  </details>
 </div>
 """
 

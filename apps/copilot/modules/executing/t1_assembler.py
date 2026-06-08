@@ -30,7 +30,6 @@ from apps.copilot.modules.executing.storage import (
 from apps.copilot.modules.executing.t1_build import (
     _degraded_line,
     _position_context_batch,
-    _probe_node_from_raw,
     _symbol_exchange,
 )
 from apps.copilot.modules.executing.money_unit import attach_money_unit, round_price
@@ -135,21 +134,29 @@ async def _calc_smart_money_flow(
     session: AsyncSession,
     symbol: str,
     *,
+    redis_client: Any,
     raw_by_key: dict[str, dict[str, Any]],
 ) -> OperatorResult:
-    """#17：T0 raw → T1；失败时读 PG T1 快照。"""
+    """#17：PG/Redis 全量底库 → Smart Money Delta T1。"""
+    from apps.copilot.modules.executing.indicator_nodes import build_smart_money_flow_node
+    from apps.copilot.modules.executing.smart_money_flow import (
+        SOURCE_TUSHARE,
+        compute_smart_money_metrics,
+        load_smart_money_payload,
+    )
+
     sym = symbol.zfill(6)[-6:]
-    raw = raw_by_key.get("smart_money_flow")
-    node = _probe_node_from_raw("smart_money_flow", raw)
-    if node is not None:
-        return "smart_money_flow", node
+    payload = await load_smart_money_payload(session, sym, redis_client=redis_client)
+    if payload is None:
+        snap = await load_t1_snapshot(session, sym, "smart_money_flow")
+        if snap:
+            return "smart_money_flow", snap
+        raw = raw_by_key.get("smart_money_flow")
+        raise ValueError(raw.get("blocker") if raw else "smart_money_flow 未采集")
 
-    snap = await load_t1_snapshot(session, sym, "smart_money_flow")
-    if snap:
-        return "smart_money_flow", snap
-
-    blocker = raw.get("blocker") if raw else "smart_money_flow 未采集"
-    raise ValueError(blocker)
+    metrics = compute_smart_money_metrics(payload)
+    node = build_smart_money_flow_node(metrics, source=SOURCE_TUSHARE)
+    return "smart_money_flow", node
 
 
 async def _gather_stock_indicators(
@@ -176,7 +183,9 @@ async def _gather_stock_indicators(
                 session, symbol, redis_client=redis_client, raw_by_key=raw_by_key
             )
         if probe_key == "smart_money_flow":
-            return await _calc_smart_money_flow(session, symbol, raw_by_key=raw_by_key)
+            return await _calc_smart_money_flow(
+                session, symbol, redis_client=redis_client, raw_by_key=raw_by_key
+            )
         raise ValueError(f"未实现的 live 算子: {probe_key}")
 
     for probe_key in PROBE_KEYS:

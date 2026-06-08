@@ -18,6 +18,8 @@ from apps.copilot.modules.executing.orchestrator import (
     run_daily_bars_sync,
     run_daily_bars_sync_all,
     run_daily_pipeline,
+    run_smart_money_backfill_check,
+    run_smart_money_eod,
     run_t0_collect,
     vol_div_15m_job,
 )
@@ -56,6 +58,8 @@ async def run_job(
             "l4-vol-div-15m-open",
             "l4-vol-div-15m-close",
             "l4-atr-bars-sync",
+            "l4-smart-money-backfill",
+            "l4-smart-money-eod",
             "daily-pipeline",
         }
     )
@@ -173,54 +177,13 @@ async def run_job(
             "results": out,
         }
 
-    if job_id == "l4-smart-money-eod":
-        from apps.copilot.modules.executing.indicator_nodes import build_smart_money_flow_node
-        from apps.copilot.modules.executing.smart_money_flow import compute_smart_money_metrics
-        from apps.copilot.modules.executing.storage import save_t0_batch, upsert_t1_snapshot
-        from apps.copilot.modules.executing.t0_collectors import _collect_smart_money_flow
+    if job_id == "l4-smart-money-backfill":
+        result = await run_smart_money_backfill_check(session, symbols, redis)
+        return result
 
-        out = []
-        for sym in symbols:
-            item = _collect_smart_money_flow(sym)
-            n = await save_t0_batch(session, sym, [item])
-            t1_saved = False
-            if item.get("ok"):
-                try:
-                    metrics = compute_smart_money_metrics(item.get("payload") or {})
-                    node = build_smart_money_flow_node(
-                        metrics, source=str(item.get("source") or "")
-                    )
-                    await upsert_t1_snapshot(
-                        session,
-                        sym,
-                        "smart_money_flow",
-                        node,
-                        trade_date=date.today(),
-                        source=item.get("source"),
-                    )
-                    t1_saved = True
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("[smart-money] T1 落库失败 symbol=%s: %s", sym, exc)
-            out.append(
-                {
-                    "symbol": sym,
-                    "collected": n,
-                    "ok": bool(item.get("ok")),
-                    "t1_saved": t1_saved,
-                    "probe_key": item.get("probe_key"),
-                }
-            )
-        ok = [r for r in out if r.get("ok")]
-        await upsert_watermark(
-            session,
-            job_id,
-            "*",
-            success=bool(ok),
-            trade_date=date.today(),
-            row_count=len(ok),
-            error=None if ok else "smart_money_flow_failed",
-        )
-        return {"job_id": job_id, "status": "ok" if ok else "error", "results": out}
+    if job_id == "l4-smart-money-eod":
+        result = await run_smart_money_eod(session, symbols, redis)
+        return result
 
     if job_id in ("l4-micro-eod", "l3-news-daily", "collect-once"):
         out = []
