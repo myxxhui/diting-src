@@ -115,11 +115,29 @@ def build_volume_price_div_node(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_smart_money_flow_node(metrics: dict[str, Any], *, source: str = "") -> dict[str, Any]:
+    """#17 L2 主力大单 · T1 节点。"""
+    value = metrics.get("value_pct")
+    if value is None:
+        raise ValueError("smart_money_flow value_pct 缺失")
+    raw_metrics = dict(metrics.get("raw_metrics") or {})
+    return {
+        "indicator_name": probe_indicator_name("smart_money_flow"),
+        "value": value,
+        "fact_statement": str(metrics.get("fact_statement") or ""),
+        "calculation_logic": str(metrics.get("calculation_logic") or ""),
+        "source": source or str(metrics.get("source") or "Tushare API (moneyflow)"),
+        "raw_metrics": raw_metrics,
+    }
+
+
 def build_indicator_node(key: str, payload: dict[str, Any]) -> dict[str, Any]:
     if key == "qmt_atr_trailing":
         return build_qmt_atr_trailing_node(payload)
     if key == "volume_price_div":
         return build_volume_price_div_node(payload)
+    if key == "smart_money_flow":
+        return build_smart_money_flow_node(payload, source=str(payload.get("source") or ""))
     val = payload.get("value")
     if val is None:
         raise ValueError(f"{key} value 缺失")

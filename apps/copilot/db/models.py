@@ -826,6 +826,24 @@ class ExecutingT0Raw(Base):
     )
 
 
+class ExecutingT1ProbeSnapshot(Base):
+    """T1 指标节点最新快照（Redis 之外 PG 可回放 · 与 #15 daily_bars 同级）。
+
+    [Ref: 28_ §4.2 · #16/#17 PG 落库]
+    """
+
+    __tablename__ = "executing_t1_probe_snapshots"
+
+    symbol: Mapped[str] = mapped_column(String(6), primary_key=True)
+    probe_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    trade_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    node_json: Mapped[dict] = mapped_column(JSON_TYPE, nullable=False, default=dict)
+    source: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
 class ExecutingDailyAudit(Base):
     """T1 telemetry + T2 audit 日快照。"""
 

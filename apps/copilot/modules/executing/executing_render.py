@@ -226,6 +226,55 @@ def render_volume_price_div_card(node: dict[str, Any]) -> str:
 """
 
 
+def render_smart_money_flow_card(node: dict[str, Any]) -> str:
+    """#17 L2 主力大单 · 3 日 Smart Money Delta。"""
+    val = node.get("value")
+    st = _indicator_status(node)
+    dot = "🟢" if st == "ok" else "🔴"
+    name = node.get("indicator_name") or probe_indicator_name("smart_money_flow")
+    short = probe_label("smart_money_flow")
+    rm = raw_metrics_for_display(node)
+    pct_disp = f"{float(val):+.4f}%" if val is not None else "—"
+    direction = "净流入" if val is not None and float(val) >= 0 else "净流出"
+
+    metric_labels = (
+        ("3日主力净股数", "3d_smart_money_net_vol"),
+        ("3日散户净股数", "3d_retail_net_vol"),
+        ("自由流通股本", "free_float_shares"),
+        ("数据截止日", "last_update_date"),
+    )
+    audit_rows = []
+    for lbl, fld in metric_labels:
+        v = rm.get(fld)
+        if v is not None and v != "":
+            audit_rows.append(
+                f"<span class='inline-flex gap-1 px-2 py-0.5 rounded bg-violet-50 border "
+                f"border-violet-100'><span class='text-gray-500'>{lbl}</span>"
+                f"<strong class='text-gray-800'>{_esc(v)}</strong></span>"
+            )
+    audit_html = (
+        f"<div class='flex flex-wrap gap-1.5 mt-2'>{''.join(audit_rows)}</div>"
+        if audit_rows
+        else ""
+    )
+
+    return f"""
+<div class="rounded-lg border border-violet-100 bg-violet-50/30 p-3 mb-2">
+  <div class="flex flex-wrap items-center gap-2 mb-1">
+    <span class="text-sm font-semibold text-gray-900">{_esc(name)}</span>
+    <span class="text-[10px] text-gray-500">({short})</span>
+    <span class="text-[10px] font-mono text-gray-400">smart_money_flow</span>
+    <span class="text-sm ml-auto">{dot} <strong>{_esc(pct_disp)}</strong></span>
+  </div>
+  <p class="text-xs text-gray-600 mb-1">近3交易日主力（特大单+大单）相对自由流通盘 · {direction}</p>
+  <p class="text-xs text-gray-800 leading-relaxed">{_esc(node.get('fact_statement', ''))}</p>
+  <p class="text-[11px] text-gray-500 mt-1 font-mono">{_esc(node.get('calculation_logic', ''))}</p>
+  <p class="text-[10px] text-gray-400 mt-1">来源：{_esc(node.get('source', '—'))}</p>
+  {audit_html}
+</div>
+"""
+
+
 def render_generic_probe_card(key: str, node: dict[str, Any]) -> str:
     val = node.get("value")
     st = _indicator_status(node)
@@ -304,6 +353,8 @@ def render_probe_domain(
             cards.append(render_qmt_atr_trailing_card(node, quote_job_at=quote_at))
         elif k == "volume_price_div":
             cards.append(render_volume_price_div_card(node))
+        elif k == "smart_money_flow":
+            cards.append(render_smart_money_flow_card(node))
         else:
             cards.append(render_generic_probe_card(k, node))
     body = "".join(cards) or "<p class='text-xs text-gray-500'>尚无 T1 数据</p>"

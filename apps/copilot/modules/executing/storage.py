@@ -17,6 +17,7 @@ from apps.copilot.db.models import (
     ExecutingT0ProbeState,
     ExecutingT0Raw,
     ExecutingT0SyncWatermark,
+    ExecutingT1ProbeSnapshot,
 )
 from apps.copilot.modules.executing.collectors.daily_bars import DailyBarRow
 from apps.copilot.modules.executing.profile import PROBE_KEYS, load_profile
@@ -241,6 +242,72 @@ async def latest_raw_map(session: AsyncSession, symbol: str) -> dict[str, dict[s
                 "source": row.source or "",
             }
     return out
+
+
+async def upsert_t1_snapshot(
+    session: AsyncSession,
+    symbol: str,
+    probe_key: str,
+    node: dict[str, Any],
+    *,
+    trade_date: date | None = None,
+    source: str | None = None,
+) -> None:
+    """T1 指标节点 UPSERT（Redis 之外 PG 权威快照）。"""
+    sym = symbol.zfill(6)[-6:]
+    now = utc_now_naive()
+    row = await session.get(
+        ExecutingT1ProbeSnapshot, {"symbol": sym, "probe_key": probe_key}
+    )
+    if row is None:
+        row = ExecutingT1ProbeSnapshot(symbol=sym, probe_key=probe_key)
+        session.add(row)
+    row.trade_date = trade_date or date.today()
+    row.node_json = _sanitize_json_value(node)
+    row.source = (source or node.get("source") or "")[:256] or None
+    row.collected_at = now
+    await session.flush()
+
+
+async def load_t1_snapshot(
+    session: AsyncSession,
+    symbol: str,
+    probe_key: str,
+) -> dict[str, Any] | None:
+    sym = symbol.zfill(6)[-6:]
+    row = await session.get(
+        ExecutingT1ProbeSnapshot, {"symbol": sym, "probe_key": probe_key}
+    )
+    if row is None or not row.node_json:
+        return None
+    node = dict(row.node_json)
+    if row.source and not node.get("source"):
+        node["source"] = row.source
+    return node
+
+
+async def persist_indicator_snapshots(
+    session: AsyncSession,
+    symbol: str,
+    indicators: dict[str, Any],
+    *,
+    trade_date: date | None = None,
+) -> int:
+    """批量持久化已成功装配的 T1 节点。"""
+    n = 0
+    for key, node in indicators.items():
+        if not isinstance(node, dict) or node.get("value") is None:
+            continue
+        await upsert_t1_snapshot(
+            session,
+            symbol,
+            key,
+            node,
+            trade_date=trade_date,
+            source=str(node.get("source") or ""),
+        )
+        n += 1
+    return n
 
 
 async def upsert_watermark(

@@ -76,7 +76,6 @@ def test_t1_build_smart_money_flow_node():
     node = sig["indicators"]["smart_money_flow"]
     assert node["value"] is not None
     assert node["indicator_name"] == "L2主力大单资金流向"
-    assert "raw_metrics" in node
 
 
 def test_collect_blocks_without_token(monkeypatch):

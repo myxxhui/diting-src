@@ -371,7 +371,7 @@ async def api_executing_detail_html(symbol: str, session: AsyncSession = Depends
         f"{layer_b_banner}"
         f"{render_degraded_probes(degraded_hints)}"
         f"{hot_timeline}"
-        f'{render_probe_domain(l4, title="层 B · T1 指标（#15 ATR止盈 · #16 量价背离）", accent="orange", empty_hint="暂无可用指标 · 点「立即跑今日体检」或等待 Cron 采集", symbol=sym, sync=sync)}'
+        f'{render_probe_domain(l4, title="层 B · T1 指标（#15 ATR · #16 量价背离 · #17 主力大单）", accent="orange", empty_hint="暂无可用指标 · 点「立即跑今日体检」或等待 Cron 采集", symbol=sym, sync=sync)}'
     )
 
     return HTMLResponse(

@@ -128,6 +128,23 @@ async def run_daily_bars_incremental_sync(
             ],
             trade_date=td,
         )
+        from apps.copilot.modules.executing.indicator_nodes import build_qmt_atr_trailing_node
+        from apps.copilot.modules.executing.storage import upsert_t1_snapshot
+
+        try:
+            atr_node = build_qmt_atr_trailing_node(
+                {**atr_payload, "source": atr_payload.get("source", SOURCE_PG)}
+            )
+            await upsert_t1_snapshot(
+                session,
+                sym,
+                "qmt_atr_trailing",
+                atr_node,
+                trade_date=td,
+                source=atr_payload.get("source", SOURCE_PG),
+            )
+        except ValueError:
+            pass
     await upsert_watermark(
         session,
         "l4-atr-bars-sync",
@@ -179,6 +196,23 @@ async def run_daily_bars_sync(session: AsyncSession, symbol: str) -> dict[str, A
             ],
             trade_date=td,
         )
+        from apps.copilot.modules.executing.indicator_nodes import build_qmt_atr_trailing_node
+        from apps.copilot.modules.executing.storage import upsert_t1_snapshot
+
+        try:
+            atr_node = build_qmt_atr_trailing_node(
+                {**atr_payload, "source": atr_payload.get("source", SOURCE_PG)}
+            )
+            await upsert_t1_snapshot(
+                session,
+                sym,
+                "qmt_atr_trailing",
+                atr_node,
+                trade_date=td,
+                source=atr_payload.get("source", SOURCE_PG),
+            )
+        except ValueError:
+            pass
     await upsert_watermark(
         session,
         "l4-atr-bars-sync",
@@ -459,6 +493,9 @@ async def vol_div_15m_job(
     if redis_client is not None:
         save_bars_15m_redis(redis_client, sym, payload)
 
+    from apps.copilot.modules.executing.indicator_nodes import build_volume_price_div_node
+    from apps.copilot.modules.executing.storage import upsert_t1_snapshot
+
     await save_t0_batch(
         session,
         sym,
@@ -467,6 +504,7 @@ async def vol_div_15m_job(
                 "probe_key": "volume_price_div",
                 "ok": True,
                 "payload": {
+                    "bars_payload": payload,
                     "bars_meta": {
                         "bars_count": len(bars),
                         "first_datetime": bars[0].datetime,
@@ -480,6 +518,11 @@ async def vol_div_15m_job(
         ],
         trade_date=date.today(),
     )
+    if t1_payload:
+        node = build_volume_price_div_node(t1_payload)
+        await upsert_t1_snapshot(
+            session, sym, "volume_price_div", node, trade_date=date.today(), source=source
+        )
 
     logger.info(
         "[15m] symbol=%s 北京时间=%s bars=%d last=%s → Redis OK",

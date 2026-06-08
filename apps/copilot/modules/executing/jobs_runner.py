@@ -174,18 +174,39 @@ async def run_job(
         }
 
     if job_id == "l4-smart-money-eod":
-        from apps.copilot.modules.executing.storage import save_t0_batch
+        from apps.copilot.modules.executing.indicator_nodes import build_smart_money_flow_node
+        from apps.copilot.modules.executing.smart_money_flow import compute_smart_money_metrics
+        from apps.copilot.modules.executing.storage import save_t0_batch, upsert_t1_snapshot
         from apps.copilot.modules.executing.t0_collectors import _collect_smart_money_flow
 
         out = []
         for sym in symbols:
             item = _collect_smart_money_flow(sym)
             n = await save_t0_batch(session, sym, [item])
+            t1_saved = False
+            if item.get("ok"):
+                try:
+                    metrics = compute_smart_money_metrics(item.get("payload") or {})
+                    node = build_smart_money_flow_node(
+                        metrics, source=str(item.get("source") or "")
+                    )
+                    await upsert_t1_snapshot(
+                        session,
+                        sym,
+                        "smart_money_flow",
+                        node,
+                        trade_date=date.today(),
+                        source=item.get("source"),
+                    )
+                    t1_saved = True
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[smart-money] T1 落库失败 symbol=%s: %s", sym, exc)
             out.append(
                 {
                     "symbol": sym,
                     "collected": n,
                     "ok": bool(item.get("ok")),
+                    "t1_saved": t1_saved,
                     "probe_key": item.get("probe_key"),
                 }
             )
