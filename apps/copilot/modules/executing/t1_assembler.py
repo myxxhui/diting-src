@@ -26,7 +26,6 @@ from apps.copilot.modules.executing.storage import (
     load_daily_bars,
     load_t1_snapshot,
     persist_indicator_snapshots,
-    upsert_t1_snapshot,
 )
 from apps.copilot.modules.executing.t1_build import (
     _degraded_line,
@@ -115,13 +114,6 @@ async def _calc_volume_price_div_live(
     if bars_payload:
         payload = process_volume_price_div_from_redis(bars_payload)
         node = build_volume_price_div_node(payload)
-        await upsert_t1_snapshot(
-            session,
-            sym,
-            "volume_price_div",
-            node,
-            source=str(bars_payload.get("source") or payload.get("source") or ""),
-        )
         return "volume_price_div", node
 
     snap = await load_t1_snapshot(session, sym, "volume_price_div")
@@ -150,13 +142,6 @@ async def _calc_smart_money_flow(
     raw = raw_by_key.get("smart_money_flow")
     node = _probe_node_from_raw("smart_money_flow", raw)
     if node is not None:
-        await upsert_t1_snapshot(
-            session,
-            sym,
-            "smart_money_flow",
-            node,
-            source=str((raw or {}).get("source") or node.get("source") or ""),
-        )
         return "smart_money_flow", node
 
     snap = await load_t1_snapshot(session, sym, "smart_money_flow")
