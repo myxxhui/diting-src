@@ -22,3 +22,33 @@ def as_utc_aware(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+def shanghai_now() -> datetime:
+    """Cron/盘中热数据日志用北京时间（Asia/Shanghai）。"""
+    from zoneinfo import ZoneInfo
+
+    return datetime.now(ZoneInfo("Asia/Shanghai"))
+
+
+def shanghai_now_iso() -> str:
+    return shanghai_now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def utc_naive_to_shanghai_display(dt: datetime | str | None) -> str | None:
+    """DB/API 的 naive UTC → 北京时间展示串（YYYY-MM-DD HH:MM:SS）。"""
+    if dt is None:
+        return None
+    from zoneinfo import ZoneInfo
+
+    if isinstance(dt, str):
+        raw = dt.strip().replace("Z", "")
+        if not raw:
+            return None
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            return dt
+        dt = parsed
+    aware = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+    return aware.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")

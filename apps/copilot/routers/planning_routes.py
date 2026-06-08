@@ -70,6 +70,7 @@ from apps.copilot.modules.radar.display_layout import (
 )
 from apps.copilot.modules.radar.audit_render import render_audit_page
 from apps.copilot.modules.radar.chat import (
+    DEFAULT_CHAT_MODEL,
     RADAR_CHAT_MODELS,
     chat_turn,
     clear_session,
@@ -358,8 +359,33 @@ async def planning_page(
         "view": view,
         "workbench_prefs": load_prefs(),
         "radar_chat_models": RADAR_CHAT_MODELS,
+        "radar_default_model": DEFAULT_CHAT_MODEL,
     }
     return _tpl(request).TemplateResponse(request, "planning/workbench.html", ctx)
+
+
+@router.get("/planning/panel", response_class=HTMLResponse)
+async def planning_panel(
+    request: Request,
+    view: str = "radar",
+):
+    """工作台内容区片段（HTMX 切换 Tab · 避免整页刷新）。"""
+    allowed = ("radar", "planning", "executing", "roadmap")
+    if view not in allowed:
+        view = "radar"
+    from apps.copilot.modules.radar.workbench_prefs import load_prefs
+
+    ctx: dict = {
+        "view": view,
+        "workbench_prefs": load_prefs(),
+        "radar_chat_models": RADAR_CHAT_MODELS,
+        "radar_default_model": DEFAULT_CHAT_MODEL,
+    }
+    return _tpl(request).TemplateResponse(
+        request,
+        "planning/_workbench_panel.html",
+        ctx,
+    )
 
 
 @router.get("/portfolio-guard", response_class=HTMLResponse)
@@ -477,9 +503,18 @@ def _parse_radar_scan_stages(form: Any) -> tuple[bool, bool, bool, str, str | No
 async def api_create_radar_scan(
     request: Request,
     session: AsyncSession = Depends(get_db),
-    query_text: str = Form(...),
+    query_text: str = Form(""),
     input_type: str = Form("symbol"),
 ):
+    q = (query_text or "").strip()
+    if not q:
+        msg = "请输入股票代码或简称"
+        if request.headers.get("hx-request") or "text/html" in request.headers.get(
+            "accept", ""
+        ):
+            return HTMLResponse(_render_radar_resolve_error_html(msg))
+        raise HTTPException(status_code=400, detail=msg)
+    query_text = q
     if input_type != "symbol":
         raise HTTPException(
             status_code=501,
@@ -496,11 +531,14 @@ async def api_create_radar_scan(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     scan_origin = (form.get("scan_origin") or "workbench").strip() or "workbench"
     fr_vals = form.getlist("force_refresh")
-    force_refresh = _form_bool_on(fr_vals, default=scan_origin == "workbench")
+    # 工作台「分析」默认 live 重新推演；历史缓存单独在 cached-report 区展示
+    force_refresh = _form_bool_on(fr_vals, default=True)
     await ensure_model_profiles(session)
     redis_client = _sync_redis()
+    import asyncio
+
     try:
-        sym, name = resolve_radar_query(query_text)
+        sym, name = await asyncio.to_thread(resolve_radar_query, query_text)
     except RadarSymbolResolveError as exc:
         if request.headers.get("hx-request") or "text/html" in request.headers.get(
             "accept", ""
@@ -619,18 +657,70 @@ def _layout_from_request(request: Request) -> dict[str, Any]:
     return resolve_layout_for_request(raw)
 
 
+@router.get("/api/radar/scans/{scan_id}/progress")
+async def api_radar_scan_progress(
+    scan_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """轻量进度轮询（仅 Redis · 不 hydrate T2 / 不扫 DB 候选）。"""
+    from apps.copilot.modules.radar.scan_progress import load as load_scan_progress
+
+    redis_client = _sync_redis()
+    state = load_scan_progress(redis_client, scan_id)
+    if not state:
+        scan_row = await session.get(RadarScan, scan_id)
+        if scan_row is None:
+            raise HTTPException(status_code=404, detail="scan not found")
+        db_status, query_text = scan_row.status, scan_row.query_text
+        if db_status == "done":
+            return await api_get_radar_scan(scan_id, request, session)
+        if db_status == "error":
+            return await api_get_radar_scan(scan_id, request, session)
+        state = {
+            "scan_id": scan_id,
+            "status": "running",
+            "symbol": query_text or "",
+            "name": "",
+            "pct": 5,
+            "step_label": "任务排队中…",
+        }
+    status = state.get("status") or "running"
+    if status == "done":
+        return await api_get_radar_scan(scan_id, request, session)
+    if status == "error":
+        return HTMLResponse(_render_scan_progress_panel(state))
+    return HTMLResponse(_render_scan_progress_panel(state))
+
+
 @router.get("/api/radar/scans/{scan_id}")
 async def api_get_radar_scan(
     scan_id: int,
     request: Request,
     session: AsyncSession = Depends(get_db),
 ):
+    from apps.copilot.modules.radar.scan_progress import load as load_scan_progress
+
+    redis_client = _sync_redis()
     try:
-        result = await get_scan(session, scan_id)
+        result = await get_scan(session, scan_id, hydrate_t2=False)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if result.get("status") == "running":
+        state = load_scan_progress(redis_client, scan_id) or {
+            "scan_id": scan_id,
+            "status": "running",
+            "symbol": result.get("query_text") or "",
+            "name": "",
+            "pct": 5,
+            "step_label": "任务排队中…",
+        }
+        if "text/html" in request.headers.get("accept", "") or request.headers.get("hx-request"):
+            return HTMLResponse(_render_scan_progress_panel(state))
+        return {**result, "progress": state}
+    if result.get("status") == "done":
+        result = await get_scan(session, scan_id, hydrate_t2=True)
     if "text/html" in request.headers.get("accept", "") or request.headers.get("hx-request"):
-        redis_client = _sync_redis()
         view_cached = (
             request.headers.get("x-radar-view-mode", "").strip().lower() == "cached"
         )
@@ -690,11 +780,77 @@ def _start_radar_collect(query_text: str, redis_client: Any) -> tuple[str, dict]
     return job_id, state
 
 
+@router.get("/api/radar/cached-report")
+async def api_radar_cached_report(
+    request: Request,
+    q: str = "",
+    session: AsyncSession = Depends(get_db),
+):
+    """标的已有历史 ok T2 研报时，在分析区下方展示（非 live 重推）。"""
+    import asyncio
+
+    from apps.copilot.modules.radar.symbol_resolve import display_name_for_symbol, resolve_radar_query
+    from apps.copilot.modules.radar.t2_resolve import hydrate_candidate_t2, resolve_ok_t2_verdict
+
+    raw = (q or "").strip()
+    if not raw:
+        return HTMLResponse("")
+    try:
+        sym, name = await asyncio.to_thread(resolve_radar_query, raw)
+    except RadarSymbolResolveError:
+        sym = raw.zfill(6)[-6:] if raw.isdigit() else raw
+        name = display_name_for_symbol(sym, allow_network=False)
+
+    t2 = await resolve_ok_t2_verdict(session, sym)
+    if not t2 or t2.get("status") != "ok":
+        return HTMLResponse(
+            "<p class='text-xs text-gray-400 py-2'>暂无历史研报缓存</p>"
+        )
+    c = hydrate_candidate_t2(
+        {"symbol": sym, "name": name, "cost": {}},
+        t2,
+        note="历史缓存",
+    )
+    block = _render_candidate_report(
+        c,
+        layout=_layout_from_request(request),
+        view_cached=True,
+    )
+    return HTMLResponse(
+        f"<div class='mt-2'><p class='text-xs font-medium text-gray-500 mb-2'>"
+        f"📋 历史研报缓存（点击「分析」将 live 重新推演）</p>{block}</div>"
+    )
+
+
 @router.get("/api/radar/symbols/suggest")
 async def api_radar_symbol_suggest(q: str = "", limit: int = 8):
-    """搜索栏模糊建议（JSON）。"""
-    items = suggest_radar_symbols(q, limit=min(12, max(1, limit)))
-    return {"query": q, "items": items}
+    """搜索栏模糊建议（JSON）· 线程池执行，避免阻塞事件循环。"""
+    import asyncio
+
+    from apps.copilot.modules.radar.symbol_resolve import market_name_index_ready
+
+    lim = min(12, max(1, limit))
+    try:
+        items = await asyncio.wait_for(
+            asyncio.to_thread(suggest_radar_symbols, q, limit=lim),
+            timeout=2.5,
+        )
+    except asyncio.TimeoutError:
+        import re
+
+        from apps.copilot.modules.radar.symbol_resolve import _name_from_cache_or_sot
+
+        digits = re.sub(r"\D", "", q or "")
+        if len(digits) >= 6:
+            sym = digits[-6:]
+            items = [{"symbol": sym, "name": _name_from_cache_or_sot(sym), "score": 1.0}]
+        else:
+            items = []
+    return {
+        "query": q,
+        "items": items,
+        "index_ready": market_name_index_ready(),
+    }
 
 
 @router.post("/api/radar/collect")
@@ -1416,15 +1572,35 @@ def _render_workspace_symbols_html(
                 f"</div>"
             )
         else:  # executing
+            pct = s.get("position_pct")
+            opened = s.get("opened_at") or "未填"
+            if opened and "T" in str(opened):
+                opened = str(opened)[:10]
+            qty = s.get("quantity")
+            cost = s.get("cost_price")
+            pct_txt = f"{pct:.2f}%" if isinstance(pct, (int, float)) else "—"
+            cost_txt = f"{cost}" if cost else "—"
+            summary_tail = (
+                f"<span class='text-xs text-gray-500'>仓位 {pct_txt}"
+                f" · 股数 {qty if qty else '—'}"
+                f" · 成本 {cost_txt}"
+                f" · 建仓 {opened}</span>"
+            )
             cards.append(
-                f"<div class='border border-gray-100 rounded-lg p-4 mb-3'>"
-                f"<div class='flex flex-wrap items-center gap-2 mb-2'>"
+                f"<details class='executing-symbol-card group border border-gray-100 rounded-lg mb-3 "
+                f"bg-white overflow-hidden'>"
+                f"<summary class='cursor-pointer list-none px-4 py-3 hover:bg-gray-50 flex flex-wrap "
+                f"items-center gap-2 [&::-webkit-details-marker]:hidden'>"
+                f"<span class='text-gray-400 text-[10px] group-open:rotate-90 transition-transform "
+                f"shrink-0'>▸</span>"
                 f"<span class='font-semibold text-gray-900'>{name}</span>"
-                f"<span class='text-gray-400 text-sm'>{sym}</span>"
+                f"<span class='text-gray-400 text-sm font-mono'>{sym}</span>"
                 f"{phase}"
                 f"<span class='text-xs px-2 py-0.5 rounded bg-green-50 text-green-700'>执行中</span>"
-                f"</div>"
-                f"<div class='flex flex-wrap gap-2 items-center'>"
+                f"{summary_tail}"
+                f"</summary>"
+                f"<div class='px-4 pb-4 border-t border-gray-100 pt-3'>"
+                f"<div class='flex flex-wrap gap-2 items-center mb-3'>"
                 f"<form hx-post='/api/campaigns/{container_id}/execution/advise' "
                 f"hx-target='#exec-{sym}' hx-swap='innerHTML' class='inline'>"
                 f"<input type='hidden' name='symbol' value='{sym}'>"
@@ -1444,10 +1620,10 @@ def _render_workspace_symbols_html(
                 f"<button type='submit' class='text-xs px-2 py-1 rounded border border-gray-200 "
                 f"text-gray-600'>移除</button></form>"
                 f"</div>"
-                f"<div id='exec-{sym}' class='mt-3'></div>"
-                f"<div hx-get='/api/executing/{sym}/detail' hx-trigger='load' hx-swap='outerHTML' "
-                f"class='mt-3 border-t pt-3'></div>"
-                f"</div>"
+                f"<div id='exec-{sym}' class='mb-2'></div>"
+                f"<div hx-get='/api/executing/{sym}/detail' hx-trigger='revealed once' "
+                f"hx-swap='outerHTML' class='executing-detail-slot'></div>"
+                f"</div></details>"
             )
     return HTMLResponse("".join(cards))
 
@@ -1767,8 +1943,8 @@ def _render_candidate_report(
     if view_cached:
         stale_note = (
             "<div class='rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 mb-2 "
-            "text-xs text-blue-800'>📋 候选池缓存报告（非重新扫描）；"
-            "索引框分析请使用「开始分析」重新推演。</div>"
+            "text-xs text-blue-800'>📋 历史研报缓存；"
+            "点击上方「分析」将 live 重新推演。</div>"
         )
     elif c.get("t2_from_stale_cache"):
         stale_note = (
@@ -1918,8 +2094,8 @@ def _render_scan_progress_panel(state: dict) -> str:
     if status == "running" and scan_id:
         poll_attrs = (
             f" id='radar-scan-progress' data-scan-id='{scan_id}' data-running='1'"
-            f" hx-get='/api/radar/scans/{scan_id}'"
-            f" hx-trigger='every 2s'"
+            f" hx-get='/api/radar/scans/{scan_id}/progress'"
+            f" hx-trigger='every 3s'"
             f" hx-target='#radar-scan-result'"
             f" hx-swap='innerHTML'"
             f" hx-indicator='#radar-scan-loading'"

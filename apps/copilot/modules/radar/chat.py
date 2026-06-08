@@ -28,18 +28,33 @@ _MAX_USER_CHARS = 4000
 _REDIS_TTL_SEC = 7 * 24 * 3600
 _memory_sessions: dict[str, list[dict[str, str]]] = {}
 
-# 雷达对话可选 Opus 型号（model_id, 展示名）
+# 雷达可选 Opus 型号（model_id, 展示名）· 仅保留生产 API 实测可用的 slug
 RADAR_CHAT_MODELS: list[tuple[str, str]] = [
+    ("claude-opus-4-6", "Opus 4.6（推荐）"),
     ("claude-opus-4-5-20251101", "Opus 4.5"),
-    ("claude-opus-4-6", "Opus 4.6"),
     ("claude-opus-4-7", "Opus 4.7"),
     ("claude-opus-4-8", "Opus 4.8"),
-    ("claude-opus-4-9", "Opus 4.9"),
-    ("claude-opus-4-20250514", "Opus 4（20250514）"),
-    ("claude-3-opus-20240229", "Opus 3"),
 ]
 
+# 历史/简写别名 → 正式 slug（避免下拉旧值或手填导致 404）
+OPUS_MODEL_ALIASES: dict[str, str] = {
+    "claude-opus-4-5": "claude-opus-4-5-20251101",
+    "claude-opus-4-9": "claude-opus-4-6",
+    "claude-opus-4-20250514": "claude-opus-4-6",
+    "claude-3-opus-20240229": "claude-opus-4-6",
+}
+
 DEFAULT_CHAT_MODEL = os.getenv("RADAR_CHAT_DEFAULT_MODEL", "claude-opus-4-6")
+
+
+def resolve_opus_model(model_id: str | None) -> str:
+    """T2 深度研报 / Opus 对话共用：校验并归一化 Anthropic model slug。"""
+    mid = (model_id or "").strip() or DEFAULT_CHAT_MODEL
+    mid = OPUS_MODEL_ALIASES.get(mid, mid)
+    allowed = {m[0] for m in RADAR_CHAT_MODELS}
+    if mid in allowed:
+        return mid
+    return DEFAULT_CHAT_MODEL
 
 
 def new_session_id() -> str:
@@ -118,11 +133,7 @@ def _build_system_extra(symbol: str | None, context: dict[str, Any] | None) -> s
 
 
 def resolve_chat_model(model_id: str | None) -> str:
-    mid = (model_id or "").strip() or DEFAULT_CHAT_MODEL
-    allowed = {m[0] for m in RADAR_CHAT_MODELS}
-    if mid in allowed:
-        return mid
-    return DEFAULT_CHAT_MODEL
+    return resolve_opus_model(model_id)
 
 
 async def chat_turn(

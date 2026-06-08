@@ -1,0 +1,1210 @@
+{% set active = view|default('radar') %}
+{% if active == 'radar' %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-5">
+  <div class="flex items-center gap-2 mb-4">
+    <span class="text-lg">🔭</span>
+    <h2 class="text-base font-semibold text-gray-900">推理分析 · 行情雷达</h2>
+  </div>
+  <form id="radar-scan-form" class="mb-4"
+        hx-post="/api/radar/scans"
+        hx-target="#radar-scan-result"
+        hx-swap="innerHTML"
+        hx-indicator="#radar-scan-loading">
+    <input type="hidden" name="input_type" value="symbol">
+    <input type="hidden" name="scan_origin" value="workbench">
+    <div class="radar-scan-toolbar flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+      <div class="relative w-40 shrink-0 sm:w-44">
+        <label class="block text-xs text-gray-500 mb-1">标的</label>
+        <input type="text" name="query_text" id="radar-query-input" value="" maxlength="32"
+               class="block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900"
+               placeholder="代码 / 简称"
+               list="radar-query-history"
+               autocomplete="off"
+               aria-autocomplete="list"
+               aria-controls="radar-suggest-list"
+               aria-expanded="false">
+        <datalist id="radar-query-history"></datalist>
+        <ul id="radar-suggest-list" role="listbox"
+            class="hidden absolute left-0 top-full z-20 mt-1 w-44 max-h-48 overflow-y-auto
+                   bg-white border border-gray-200 rounded-lg shadow-lg text-sm"></ul>
+      </div>
+      <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:gap-2.5">
+        <input type="hidden" name="enable_t0" id="radar-h-t0" value="false">
+        <button type="button" id="radar-btn-t0" data-stage="t0" title="与 T2 组合：T0+T2 或 T0+T1+T2"
+                class="radar-stage-btn shrink-0 px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
+          T0
+        </button>
+        <input type="hidden" name="enable_t1" id="radar-h-t1" value="false">
+        <div class="flex shrink-0 items-center gap-1.5">
+          <button type="button" id="radar-btn-t1" data-stage="t1" title="须 T0+T2：完整链路 T0+T1+T2"
+                  class="radar-stage-btn px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
+            T1
+          </button>
+          <select name="t1_mode" id="radar-t1-mode" disabled
+                  class="h-[2.125rem] shrink-0 rounded-lg border border-gray-200 px-2 text-xs text-gray-700 bg-gray-50 disabled:opacity-40">
+            <option value="rule">规则</option>
+            <option value="deepseek">DeepSeek</option>
+          </select>
+        </div>
+        <input type="hidden" name="enable_t2" id="radar-h-t2" value="false">
+        <details id="radar-t2-details" class="radar-t2-details shrink-0">
+          <summary id="radar-t2-summary" title="必选其一：仅 T2 / T0+T2 / T0+T1+T2"
+                   class="radar-stage-btn list-none cursor-pointer px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
+            T2
+          </summary>
+          <select name="t2_model" id="radar-t2-model"
+                  class="radar-t2-model-select h-[2.125rem] rounded-lg border border-gray-200 px-2 text-xs text-gray-800 bg-white">
+            {% for mid, label in radar_chat_models|default([]) %}
+            <option value="{{ mid }}" {% if mid == radar_default_model|default('claude-opus-4-6') %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </details>
+      </div>
+      <div class="flex shrink-0 items-center gap-3 pb-0.5 sm:ml-auto">
+        <input type="hidden" name="force_refresh" value="true">
+        <button type="submit" id="radar-scan-submit-btn"
+                class="shrink-0 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700
+                       aria-busy:opacity-50 aria-busy:cursor-wait">
+          分析
+        </button>
+      </div>
+    </div>
+  </form>
+  <style>
+    .radar-stage-btn.radar-stage-on {
+      background-color: rgb(37 99 235);
+      border-color: rgb(37 99 235);
+      color: #fff;
+    }
+    /* T2：summary 与模型下拉同一行，避免叠到下一行 */
+    .radar-t2-details {
+      display: inline-flex;
+      flex-wrap: nowrap;
+      align-items: center;
+      gap: 0.375rem;
+    }
+    .radar-t2-details > summary {
+      list-style: none;
+    }
+    .radar-t2-details > summary::-webkit-details-marker { display: none; }
+    .radar-t2-details > summary::marker { content: ''; }
+    .radar-t2-details:not([open]) .radar-t2-model-select {
+      display: none;
+    }
+    .radar-t2-details[open] .radar-t2-model-select {
+      display: block;
+      min-width: 7.5rem;
+      max-width: 9.5rem;
+    }
+  </style>
+  {# 维度 ⋯ 菜单与配置弹窗（固定于雷达工作区，HTMX 换结果后仍可用） #}
+  <div id="radar-dim-menu-pop"
+       class="hidden fixed z-40 min-w-[10rem] rounded-lg border border-gray-200 bg-white shadow-lg py-1 text-sm">
+    <button type="button" id="radar-dim-menu-open-modal"
+            class="block w-full text-left px-3 py-2 hover:bg-violet-50 text-gray-800">
+      自定义维度模块…
+    </button>
+    <button type="button" id="radar-dim-menu-reset-layout"
+            class="block w-full text-left px-3 py-2 hover:bg-gray-50 text-gray-600 text-xs border-t border-gray-100">
+      恢复默认维度顺序
+    </button>
+  </div>
+  <div id="radar-layout-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4"
+       aria-hidden="true">
+    <div class="absolute inset-0 bg-black/30" id="radar-layout-modal-backdrop"></div>
+    <div class="relative bg-white rounded-xl shadow-xl border border-gray-200 w-full max-w-lg max-h-[85vh] overflow-y-auto p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-semibold text-gray-900">维度展示配置</h3>
+        <button type="button" id="radar-layout-modal-close"
+                class="text-gray-400 hover:text-gray-700 text-lg leading-none">&times;</button>
+      </div>
+      <p class="text-xs text-gray-500 mb-3">显隐与顺序保存在本浏览器；研报区内可拖动 ⠿ 即时调序。自定义维需重新扫描后才有数据。</p>
+      <label class="text-xs text-gray-700 flex items-center gap-2 mb-3">
+        <input type="checkbox" id="radar-layout-show-summary" checked class="rounded">
+        显示结论摘要条
+      </label>
+      <p class="text-xs font-medium text-gray-600 mb-1">内置维度（勾选显示）</p>
+      <ul id="radar-layout-builtin-list" class="space-y-1 mb-3 text-sm max-h-40 overflow-y-auto"></ul>
+      <p class="text-xs font-medium text-violet-800 mb-1">自定义维度</p>
+      <div class="border border-dashed border-violet-200 rounded-lg p-3 mb-2 bg-violet-50/30 text-xs">
+        <input id="radar-custom-id" placeholder="id：supply_chain" class="w-full border rounded px-2 py-1 mb-1">
+        <input id="radar-custom-label" placeholder="显示名" class="w-full border rounded px-2 py-1 mb-1">
+        <input id="radar-custom-emoji" placeholder="emoji" maxlength="4" class="w-16 border rounded px-2 py-1 mb-1">
+        <input id="radar-custom-hint" placeholder="一句话说明" class="w-full border rounded px-2 py-1 mb-1">
+        <textarea id="radar-custom-prompt" rows="3" class="w-full border rounded px-2 py-1 mb-1"
+                  placeholder="prompt 片段（可选）"></textarea>
+        <details class="text-gray-600">
+          <summary class="cursor-pointer text-violet-700">提示词指南</summary>
+          <pre id="radar-prompt-guide" class="mt-1 whitespace-pre-wrap text-[10px] bg-white p-2 rounded border"></pre>
+        </details>
+        <button type="button" id="radar-custom-add-btn"
+                class="mt-2 px-2 py-1 rounded bg-violet-600 text-white text-xs">添加</button>
+      </div>
+      <ul id="radar-layout-custom-list" class="space-y-1 mb-3 text-sm"></ul>
+      <div class="flex gap-2">
+        <button type="button" id="radar-layout-save-btn"
+                class="flex-1 px-3 py-2 rounded-lg bg-violet-600 text-white text-xs font-semibold">保存并刷新研报</button>
+        <button type="button" id="radar-layout-reset-btn"
+                class="px-3 py-2 rounded-lg border border-gray-300 text-xs">恢复默认</button>
+      </div>
+    </div>
+  </div>
+  <p id="radar-scan-loading"
+     class="htmx-indicator text-sm text-blue-700 py-2 flex items-center gap-2 mb-2">
+    <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+    </svg>
+    正在分析，请稍候…
+  </p>
+  <div id="radar-scan-result" class="mb-4 min-h-[2rem]"
+       hx-on::after-swap="this.scrollIntoView({behavior:'smooth', block:'start'})"></div>
+  <div id="radar-scan-cached" class="mb-4 border-t border-gray-100 pt-3"></div>
+  <style>
+    #radar-dim-grid .radar-dim-details { cursor: grab; touch-action: pan-y; transition: box-shadow 0.15s ease; }
+    #radar-dim-grid .radar-dim-details:active { cursor: grabbing; }
+    #radar-dim-grid .radar-dim-details.radar-dim-dragging {
+      cursor: grabbing; opacity: 0.62; z-index: 40; position: relative;
+      box-shadow: 0 10px 28px rgba(79, 70, 229, 0.18);
+      outline: 2px solid rgb(165 180 252); outline-offset: 1px;
+    }
+    #radar-dim-grid .radar-dim-details.radar-dim-drop-target {
+      outline: 2px dashed rgb(129 140 248); outline-offset: 2px;
+    }
+    #radar-dim-grid .radar-dim-details summary { user-select: none; }
+    #radar-dim-grid .radar-dim-details .radar-dim-detail-body { cursor: auto; user-select: text; }
+  </style>
+  <script>
+    (function () {
+      var LAYOUT_KEY = 'radar_scan_layout_v1';
+      var LAYOUT_HDR = 'X-Radar-Display-Layout';
+      var LAYOUT_API = '/api/radar/display-layout';
+      var schema = null;
+      var serverLayout = null;
+
+      function normalizeLayoutHidden(layout) {
+        if (!layout || !layout.hidden) return layout;
+        if (layout.hidden instanceof Set) layout.hidden = Array.from(layout.hidden);
+        return layout;
+      }
+
+      function loadRadarLayout() {
+        if (serverLayout) return serverLayout;
+        try {
+          var raw = localStorage.getItem(LAYOUT_KEY);
+          if (raw) return JSON.parse(raw);
+        } catch (e) { /* ignore */ }
+        if (schema && schema.saved) return JSON.parse(JSON.stringify(schema.saved));
+        return schema && schema.default ? JSON.parse(JSON.stringify(schema.default)) : null;
+      }
+
+      function applyServerLayout(layout) {
+        if (!layout || !layout.order) return;
+        serverLayout = layout;
+        normalizeLayoutHidden(serverLayout);
+        try {
+          localStorage.setItem(LAYOUT_KEY, JSON.stringify(serverLayout));
+        } catch (e) { /* ignore */ }
+      }
+
+      function fetchRadarLayoutFromServer() {
+        return fetch(LAYOUT_API)
+          .then(function (r) {
+            if (!r.ok) throw new Error(String(r.status));
+            return r.json();
+          })
+          .then(function (data) {
+            if (data && data.order && data.order.length) applyServerLayout(data);
+            return data;
+          })
+          .catch(function () { return null; });
+      }
+
+      function saveRadarLayout(obj) {
+        if (!obj) return;
+        normalizeLayoutHidden(obj);
+        serverLayout = obj;
+        try {
+          localStorage.setItem(LAYOUT_KEY, JSON.stringify(obj));
+        } catch (e) { /* ignore */ }
+        fetch(LAYOUT_API, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(obj)
+        }).catch(function () { /* 离线时仅 localStorage */ });
+      }
+
+      function resetRadarLayoutRemote(defaultLayout) {
+        serverLayout = null;
+        try { localStorage.removeItem(LAYOUT_KEY); } catch (e) { /* ignore */ }
+        return fetch(LAYOUT_API, { method: 'DELETE' })
+          .then(function () {
+            if (defaultLayout) saveRadarLayout(defaultLayout);
+          })
+          .catch(function () {
+            if (defaultLayout) saveRadarLayout(defaultLayout);
+          });
+      }
+
+      document.body.addEventListener('htmx:configRequest', function (ev) {
+        var layout = loadRadarLayout();
+        if (layout && ev.detail && ev.detail.headers) {
+          ev.detail.headers[LAYOUT_HDR] = JSON.stringify(layout);
+        }
+      });
+
+      function renderBuiltinList(layout) {
+        var ul = document.getElementById('radar-layout-builtin-list');
+        if (!ul || !schema) return;
+        var hidden = {};
+        (layout.hidden || []).forEach(function (k) { hidden[k] = true; });
+        var order = layout.order || [];
+        var byKey = {};
+        schema.builtin_dimensions.forEach(function (d) { byKey[d.key] = d; });
+        var keys = order.filter(function (k) { return byKey[k]; });
+        schema.builtin_dimensions.forEach(function (d) {
+          if (keys.indexOf(d.key) < 0) keys.push(d.key);
+        });
+        ul.innerHTML = keys.map(function (key, idx) {
+          var d = byKey[key];
+          var checked = !hidden[key];
+          return (
+            '<li class="flex flex-wrap items-center gap-2 border border-gray-100 rounded px-2 py-1.5 bg-white" data-key="' + key + '">'
+            + '<input type="checkbox" class="radar-dim-visible rounded" ' + (checked ? 'checked' : '') + '>'
+            + '<span class="flex-1">' + d.emoji + ' ' + d.label + ' <span class="text-gray-400 font-mono text-[10px]">' + key + '</span></span>'
+            + '<button type="button" class="radar-dim-up text-[10px] px-1 border rounded">↑</button>'
+            + '<button type="button" class="radar-dim-down text-[10px] px-1 border rounded">↓</button>'
+            + '</li>'
+          );
+        }).join('');
+        ul.querySelectorAll('.radar-dim-up').forEach(function (b) {
+          b.addEventListener('click', function () {
+            var li = b.closest('li');
+            var prev = li && li.previousElementSibling;
+            if (prev) { ul.insertBefore(li, prev); }
+          });
+        });
+        ul.querySelectorAll('.radar-dim-down').forEach(function (b) {
+          b.addEventListener('click', function () {
+            var li = b.closest('li');
+            var next = li && li.nextElementSibling;
+            if (next) { ul.insertBefore(next, li); }
+          });
+        });
+      }
+
+      function renderCustomList(layout) {
+        var ul = document.getElementById('radar-layout-custom-list');
+        if (!ul) return;
+        var customs = layout.custom || [];
+        if (!customs.length) {
+          ul.innerHTML = '<li class="text-xs text-gray-400">暂无自定义模块</li>';
+          return;
+        }
+        ul.innerHTML = customs.map(function (c, i) {
+          return (
+            '<li class="flex flex-wrap items-center gap-2 border border-violet-100 rounded px-2 py-1.5 bg-white">'
+            + '<span class="flex-1 text-xs">' + (c.emoji || '📌') + ' ' + (c.label || c.id)
+            + ' <span class="font-mono text-gray-400">' + c.id + '</span></span>'
+            + '<button type="button" class="radar-custom-rm text-[10px] text-red-600" data-idx="' + i + '">移除</button>'
+            + '</li>'
+          );
+        }).join('');
+        ul.querySelectorAll('.radar-custom-rm').forEach(function (b) {
+          b.addEventListener('click', function () {
+            var idx = parseInt(b.getAttribute('data-idx'), 10);
+            layout.custom.splice(idx, 1);
+            renderCustomList(layout);
+          });
+        });
+      }
+
+      function collectLayoutFromUi() {
+        var layout = loadRadarLayout() || (schema && schema.default ? JSON.parse(JSON.stringify(schema.default)) : { version: 1, order: [], hidden: [], custom: [] });
+        var ul = document.getElementById('radar-layout-builtin-list');
+        var order = [];
+        var hidden = [];
+        if (ul) {
+          ul.querySelectorAll('li[data-key]').forEach(function (li) {
+            var key = li.getAttribute('data-key');
+            order.push(key);
+            var cb = li.querySelector('.radar-dim-visible');
+            if (cb && !cb.checked) hidden.push(key);
+          });
+        }
+        layout.order = order;
+        layout.hidden = hidden;
+        layout.custom = layout.custom || [];
+        var ss = document.getElementById('radar-layout-show-summary');
+        layout.show_summary = ss ? ss.checked : true;
+        layout.show_overall_in_detail = false;
+        layout.max_visible = null;
+        return layout;
+      }
+
+      function saveDimOrderFromGrid() {
+        var grid = document.getElementById('radar-dim-grid');
+        if (!grid) return;
+        var layout = loadRadarLayout();
+        if (!layout || !schema) return;
+        var keys = [];
+        grid.querySelectorAll('.radar-dim-details[data-dim-key]').forEach(function (c) {
+          keys.push(c.getAttribute('data-dim-key'));
+        });
+        (layout.custom || []).forEach(function (c) {
+          if (c.id && keys.indexOf(c.id) < 0) keys.push(c.id);
+        });
+        (schema.builtin_dimensions || []).forEach(function (d) {
+          if (keys.indexOf(d.key) < 0) keys.push(d.key);
+        });
+        layout.order = keys;
+        saveRadarLayout(layout);
+      }
+
+      window.radarInitDimDrag = function () {
+        if (window._radarDimPointerDragReady) return;
+        window._radarDimPointerDragReady = true;
+        var dragCard = null;
+        var pointerId = null;
+        var startX = 0;
+        var startY = 0;
+        var dragging = false;
+        var suppressClick = false;
+        var moveRaf = 0;
+        var DRAG_THRESH = 8;
+
+        function gridEl() {
+          return document.getElementById('radar-dim-grid');
+        }
+
+        function listCards(grid) {
+          return Array.prototype.slice.call(
+            grid.querySelectorAll('.radar-dim-details[data-dim-key]')
+          );
+        }
+
+        function cardAtY(grid, clientY) {
+          var list = listCards(grid);
+          for (var i = 0; i < list.length; i++) {
+            var r = list[i].getBoundingClientRect();
+            if (clientY >= r.top && clientY <= r.bottom) return { card: list[i], rect: r };
+          }
+          return null;
+        }
+
+        function clearDropMarkers(grid) {
+          grid.querySelectorAll('.radar-dim-drop-target').forEach(function (el) {
+            el.classList.remove('radar-dim-drop-target');
+          });
+        }
+
+        function reorderAtY(grid, clientY) {
+          if (!dragCard) return;
+          var hit = cardAtY(grid, clientY);
+          if (!hit || hit.card === dragCard) return;
+          var mid = hit.rect.top + hit.rect.height / 2;
+          if (clientY < mid) {
+            grid.insertBefore(dragCard, hit.card);
+          } else if (hit.card.nextSibling) {
+            grid.insertBefore(dragCard, hit.card.nextSibling);
+          } else {
+            grid.appendChild(dragCard);
+          }
+        }
+
+        function finishDrag(grid, save) {
+          if (!dragCard) return;
+          dragCard.classList.remove('radar-dim-dragging');
+          try { dragCard.releasePointerCapture(pointerId); } catch (err) { /* ignore */ }
+          clearDropMarkers(grid);
+          if (save) saveDimOrderFromGrid();
+          dragCard = null;
+          pointerId = null;
+          dragging = false;
+        }
+
+        document.addEventListener('pointerdown', function (e) {
+          if (e.button !== 0) return;
+          var grid = gridEl();
+          if (!grid) return;
+          var card = e.target.closest('.radar-dim-details');
+          if (!card || !grid.contains(card)) return;
+          if (e.target.closest('a, button, input, textarea, select, label')) return;
+          dragCard = card;
+          pointerId = e.pointerId;
+          startX = e.clientX;
+          startY = e.clientY;
+          dragging = false;
+          suppressClick = false;
+        });
+
+        document.addEventListener('pointermove', function (e) {
+          if (!dragCard || e.pointerId !== pointerId) return;
+          var grid = gridEl();
+          if (!grid || !grid.contains(dragCard)) {
+            finishDrag(grid || document.createElement('div'), false);
+            return;
+          }
+          var dx = e.clientX - startX;
+          var dy = e.clientY - startY;
+          if (!dragging) {
+            if (Math.abs(dx) + Math.abs(dy) < DRAG_THRESH) return;
+            dragging = true;
+            suppressClick = true;
+            dragCard.classList.add('radar-dim-dragging');
+            try { dragCard.setPointerCapture(pointerId); } catch (err) { /* ignore */ }
+          }
+          e.preventDefault();
+          var y = e.clientY;
+          if (moveRaf) return;
+          moveRaf = requestAnimationFrame(function () {
+            moveRaf = 0;
+            clearDropMarkers(grid);
+            var hit = cardAtY(grid, y);
+            if (hit && hit.card !== dragCard) hit.card.classList.add('radar-dim-drop-target');
+            reorderAtY(grid, y);
+          });
+        });
+
+        document.addEventListener('pointerup', function (e) {
+          if (!dragCard || e.pointerId !== pointerId) return;
+          var grid = gridEl();
+          if (dragging && grid) finishDrag(grid, true);
+          else finishDrag(grid || document.createElement('div'), false);
+        });
+
+        document.addEventListener('pointercancel', function (e) {
+          if (!dragCard || e.pointerId !== pointerId) return;
+          var grid = gridEl();
+          finishDrag(grid || document.createElement('div'), false);
+        });
+
+        document.addEventListener('click', function (e) {
+          if (!suppressClick) return;
+          var grid = gridEl();
+          if (!grid) return;
+          if (e.target.closest('#radar-dim-grid .radar-dim-details')) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+          suppressClick = false;
+        }, true);
+      };
+
+      window.radarDimMenuToggle = function (ev) {
+        if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+        var pop = document.getElementById('radar-dim-menu-pop');
+        var btn = document.getElementById('radar-dim-menu-btn');
+        if (!pop || !btn) return;
+        if (!pop.classList.contains('hidden')) {
+          pop.classList.add('hidden');
+          return;
+        }
+        var r = btn.getBoundingClientRect();
+        pop.style.position = 'fixed';
+        pop.style.top = (r.bottom + 4) + 'px';
+        pop.style.left = Math.max(8, r.right - 160) + 'px';
+        pop.classList.remove('hidden');
+      };
+
+      window.radarLayoutOpenModal = function () {
+        var modal = document.getElementById('radar-layout-modal');
+        var pop = document.getElementById('radar-dim-menu-pop');
+        if (pop) pop.classList.add('hidden');
+        if (modal) {
+          modal.classList.remove('hidden');
+          if (typeof window.radarLayoutInit === 'function') window.radarLayoutInit();
+        }
+      };
+
+      window.radarLayoutCloseModal = function () {
+        var modal = document.getElementById('radar-layout-modal');
+        if (modal) modal.classList.add('hidden');
+      };
+
+      window.radarLayoutReloadScan = function () {
+        if (!window._radarLastScanId || typeof htmx === 'undefined') return;
+        htmx.ajax('GET', '/api/radar/scans/' + window._radarLastScanId, {
+          target: '#radar-scan-result',
+          swap: 'innerHTML',
+          headers: { 'Accept': 'text/html', 'HX-Request': 'true' }
+        });
+      };
+
+      window.radarLayoutInit = function () {
+        return fetch('/api/radar/display-layout/schema')
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            schema = data;
+            if (data.saved) applyServerLayout(data.saved);
+            var guide = document.getElementById('radar-prompt-guide');
+            if (guide && data.prompt_writing_guide) guide.textContent = data.prompt_writing_guide;
+            var layout = loadRadarLayout();
+            if (!layout) layout = JSON.parse(JSON.stringify(data.default));
+            renderBuiltinList(layout);
+            renderCustomList(layout);
+            var ss = document.getElementById('radar-layout-show-summary');
+            if (ss) ss.checked = layout.show_summary !== false;
+            var addBtn = document.getElementById('radar-custom-add-btn');
+            if (addBtn) addBtn.onclick = function () {
+              var id = (document.getElementById('radar-custom-id').value || '').trim().replace(/\s+/g, '_');
+              if (!id || !/^[a-z][a-z0-9_]*$/i.test(id)) {
+                alert('id 须为英文/数字/下划线，且勿与内置 9 维重复');
+                return;
+              }
+              layout.custom = layout.custom || [];
+              layout.custom.push({
+                id: id,
+                label: document.getElementById('radar-custom-label').value || id,
+                emoji: document.getElementById('radar-custom-emoji').value || '📌',
+                hint: document.getElementById('radar-custom-hint').value || '',
+                prompt_guide: document.getElementById('radar-custom-prompt').value || '',
+                enabled: true
+              });
+              if (layout.order.indexOf(id) < 0) layout.order.push(id);
+              renderCustomList(layout);
+            };
+            var saveBtn = document.getElementById('radar-layout-save-btn');
+            if (saveBtn) saveBtn.onclick = function () {
+              var L = collectLayoutFromUi();
+              saveRadarLayout(L);
+              window.radarLayoutReloadScan();
+              window.radarLayoutCloseModal();
+            };
+            var resetBtn = document.getElementById('radar-layout-reset-btn');
+            if (resetBtn) resetBtn.onclick = function () {
+              var def = JSON.parse(JSON.stringify(data.default));
+              resetRadarLayoutRemote(def).then(function () {
+                window.radarLayoutInit();
+                window.radarLayoutReloadScan();
+                window.radarLayoutCloseModal();
+              });
+            };
+            var closeBtn = document.getElementById('radar-layout-modal-close');
+            var backdrop = document.getElementById('radar-layout-modal-backdrop');
+            if (closeBtn) closeBtn.onclick = window.radarLayoutCloseModal;
+            if (backdrop) backdrop.onclick = window.radarLayoutCloseModal;
+            var menuOpen = document.getElementById('radar-dim-menu-open-modal');
+            if (menuOpen) menuOpen.onclick = function () { window.radarLayoutOpenModal(); };
+            var menuReset = document.getElementById('radar-dim-menu-reset-layout');
+            if (menuReset) menuReset.onclick = function () {
+              var def = JSON.parse(JSON.stringify(data.default));
+              resetRadarLayoutRemote(def).then(function () {
+                window.radarLayoutReloadScan();
+                var pop = document.getElementById('radar-dim-menu-pop');
+                if (pop) pop.classList.add('hidden');
+              });
+            };
+          })
+          .catch(function () { /* schema optional */ });
+      };
+
+      document.addEventListener('click', function () {
+        var pop = document.getElementById('radar-dim-menu-pop');
+        var btn = document.getElementById('radar-dim-menu-btn');
+        if (pop && !pop.classList.contains('hidden') && btn && !pop.contains(event.target) && event.target !== btn) {
+          pop.classList.add('hidden');
+        }
+      });
+
+      document.body.addEventListener('htmx:afterSwap', function (ev) {
+        var t = ev.detail && ev.detail.target;
+        if (t && t.id === 'radar-scan-result') {
+          processRadarHtmx(t);
+          if (t.querySelector('#radar-dim-grid') && typeof window.radarInitDimDrag === 'function') {
+            window.radarInitDimDrag();
+          }
+          if (t.querySelector('#radar-scan-report')) {
+            var m = (ev.detail.requestConfig && ev.detail.requestConfig.path) || '';
+            var match = m.match(/\/api\/radar\/scans\/(\d+)/);
+            if (match) window._radarLastScanId = match[1];
+            window.radarScanInitDetailPanel(true);
+            if (typeof htmx !== 'undefined') {
+              htmx.trigger('#radar-candidates-list', 'load');
+            }
+          }
+        }
+      });
+
+    })();
+
+    window.radarScanSyncToggleBtn = function () {
+      var panel = document.getElementById('radar-scan-detail-panel');
+      var btn = document.getElementById('radar-scan-toggle-btn');
+      if (!panel || !btn) return;
+      btn.textContent = panel.open ? '收起行情推理' : '打开行情推理';
+    };
+
+    window.radarScanToggleDetail = function (ev) {
+      if (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+      var panel = document.getElementById('radar-scan-detail-panel');
+      if (!panel) return;
+      panel.open = !panel.open;
+      window.radarScanSyncToggleBtn();
+      var wrap = document.getElementById('radar-scan-report');
+      var sym = wrap && wrap.getAttribute('data-symbol');
+      if (sym) {
+        try {
+          sessionStorage.setItem('radar-scan-fold-' + sym, panel.open ? '0' : '1');
+        } catch (e) { /* ignore */ }
+      }
+    };
+
+    window.radarScanInitDetailPanel = function (forceOpen) {
+      var wrap = document.getElementById('radar-scan-report');
+      var panel = document.getElementById('radar-scan-detail-panel');
+      var btn = document.getElementById('radar-scan-toggle-btn');
+      if (!panel) return;
+      var sym = (wrap && wrap.getAttribute('data-symbol')) || '';
+      var openPref = false;
+      if (forceOpen !== true) {
+        try {
+          openPref = sessionStorage.getItem('radar-scan-fold-' + sym) === '0';
+        } catch (e) { /* ignore */ }
+      }
+      panel.open = forceOpen === true ? true : openPref;
+      window.radarScanSyncToggleBtn();
+      if (!panel._radarToggleBound) {
+        panel._radarToggleBound = true;
+        panel.addEventListener('toggle', function () {
+          window.radarScanSyncToggleBtn();
+          if (sym) {
+            try {
+              sessionStorage.setItem('radar-scan-fold-' + sym, panel.open ? '0' : '1');
+            } catch (e) { /* ignore */ }
+          }
+        });
+      }
+    };
+
+    window.RADAR_STAGE_COMBO_MSG = '仅支持三种组合：仅 T2、T0+T2、T0+T1+T2';
+
+    window.radarStageSet = function (stage, on) {
+      var h = document.getElementById('radar-h-' + stage);
+      var btn = document.getElementById('radar-btn-' + stage);
+      if (h) h.value = on ? 'true' : 'false';
+      if (btn) btn.classList.toggle('radar-stage-on', !!on);
+      if (stage === 't1') {
+        var sel = document.getElementById('radar-t1-mode');
+        if (sel) sel.disabled = !on;
+      }
+      if (stage === 't0' && !on) {
+        window.radarStageSet('t1', false);
+      }
+    };
+
+    window.radarOpenT2 = function () {
+      var detailsT2 = document.getElementById('radar-t2-details');
+      if (!detailsT2) return;
+      if (!detailsT2.open) detailsT2.open = true;
+      var h2 = document.getElementById('radar-h-t2');
+      var sum = document.getElementById('radar-t2-summary');
+      if (h2) h2.value = 'true';
+      if (sum) sum.classList.add('radar-stage-on');
+    };
+
+    window.radarStageComboOk = function (on0, on1, on2) {
+      if (on0 && on1 && on2) return true;
+      if (on0 && !on1 && on2) return true;
+      if (!on0 && !on1 && on2) return true;
+      return false;
+    };
+
+    window.radarStageInit = function () {
+      var btnT0 = document.getElementById('radar-btn-t0');
+      var btnT1 = document.getElementById('radar-btn-t1');
+      var detailsT2 = document.getElementById('radar-t2-details');
+      var summaryT2 = document.getElementById('radar-t2-summary');
+      function syncT2() {
+        var on = detailsT2 && detailsT2.open;
+        var h2 = document.getElementById('radar-h-t2');
+        if (h2) h2.value = on ? 'true' : 'false';
+        if (summaryT2) summaryT2.classList.toggle('radar-stage-on', !!on);
+        if (!on) {
+          window.radarStageSet('t0', false);
+          window.radarStageSet('t1', false);
+        }
+      }
+      if (btnT0 && !btnT0._radarBound) {
+        btnT0._radarBound = true;
+        btnT0.addEventListener('click', function () {
+          var next = document.getElementById('radar-h-t0').value !== 'true';
+          if (next) {
+            window.radarOpenT2();
+            window.radarStageSet('t0', true);
+          } else {
+            window.radarStageSet('t0', false);
+          }
+        });
+      }
+      if (btnT1 && !btnT1._radarBound) {
+        btnT1._radarBound = true;
+        btnT1.addEventListener('click', function () {
+          var want = document.getElementById('radar-h-t1').value !== 'true';
+          if (want) {
+            window.radarOpenT2();
+            window.radarStageSet('t0', true);
+            window.radarStageSet('t1', true);
+          } else {
+            window.radarStageSet('t1', false);
+          }
+        });
+      }
+      if (detailsT2 && !detailsT2._radarBound) {
+        detailsT2._radarBound = true;
+        detailsT2.addEventListener('toggle', syncT2);
+        syncT2();
+      }
+    };
+
+    window.radarShowScanError = function (title, message) {
+      var box = document.getElementById('radar-scan-result');
+      if (!box) return;
+      box.innerHTML = (
+        '<div class="rounded-xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-900">'
+        + '<p class="font-medium">' + (title || '无法开始分析') + '</p>'
+        + '<p class="mt-1">' + (message || '') + '</p></div>'
+      );
+    };
+
+    window.radarValidateScanStages = function () {
+      var t0 = document.getElementById('radar-h-t0');
+      var t1 = document.getElementById('radar-h-t1');
+      var t2 = document.getElementById('radar-h-t2');
+      var on0 = t0 && t0.value === 'true';
+      var on1 = t1 && t1.value === 'true';
+      var on2 = t2 && t2.value === 'true';
+      if (window.radarStageComboOk(on0, on1, on2)) return true;
+      alert(window.RADAR_STAGE_COMBO_MSG);
+      return false;
+    };
+
+    window.radarValidateScanQuery = function (input) {
+      var q = (input && input.value || '').trim();
+      if (q) return true;
+      window.radarShowScanError(
+        '请先输入标的',
+        '在「代码 / 简称」框中输入 6 位代码或简称，或从下拉历史中选择后再点「分析」。'
+      );
+      return false;
+    };
+
+    window.radarApplyWorkbenchPrefs = function () {
+      var PREFS_KEY = 'radar_workbench_prefs_v1';
+      function apply(p) {
+        if (!p) return;
+        var on0 = !!p.enable_t0_default;
+        var on1 = !!p.enable_t1_default;
+        var on2 = !!p.enable_t2_default;
+        if (!window.radarStageComboOk(on0, on1, on2)) {
+          on0 = false;
+          on1 = false;
+          on2 = false;
+        }
+        var d2 = document.getElementById('radar-t2-details');
+        if (d2) {
+          d2.open = on2;
+          var h2 = document.getElementById('radar-h-t2');
+          var sum = document.getElementById('radar-t2-summary');
+          if (h2) h2.value = on2 ? 'true' : 'false';
+          if (sum) sum.classList.toggle('radar-stage-on', on2);
+        }
+        window.radarStageSet('t0', on0);
+        window.radarStageSet('t1', on1);
+      }
+      var local = null;
+      try {
+        var raw = localStorage.getItem(PREFS_KEY);
+        if (raw) local = JSON.parse(raw);
+      } catch (e) { /* ignore */ }
+      if (local) { apply(local); return; }
+      fetch('/api/radar/workbench-prefs')
+        .then(function (r) { return r.json(); })
+        .then(apply)
+        .catch(function () { /* ignore */ });
+    };
+
+    var RADAR_QUERY_HISTORY_KEY = 'radar_query_history_v1';
+    var RADAR_QUERY_LAST_KEY = 'radar_query_last_v1';
+
+    window.radarLoadQueryHistory = function () {
+      try {
+        var raw = localStorage.getItem(RADAR_QUERY_HISTORY_KEY);
+        return raw ? JSON.parse(raw) : [];
+      } catch (e) { return []; }
+    };
+
+    window.radarRenderQueryHistory = function () {
+      var dl = document.getElementById('radar-query-history');
+      if (!dl) return;
+      var hist = window.radarLoadQueryHistory();
+      dl.innerHTML = hist.map(function (q) {
+        return '<option value="' + String(q).replace(/"/g, '&quot;') + '"></option>';
+      }).join('');
+    };
+
+    window.radarRememberQuery = function (q) {
+      q = (q || '').trim();
+      if (!q) return;
+      var hist = window.radarLoadQueryHistory().filter(function (x) { return x !== q; });
+      hist.unshift(q);
+      hist = hist.slice(0, 10);
+      try {
+        localStorage.setItem(RADAR_QUERY_HISTORY_KEY, JSON.stringify(hist));
+        localStorage.setItem(RADAR_QUERY_LAST_KEY, q);
+      } catch (e) { /* ignore */ }
+      window.radarRenderQueryHistory();
+    };
+
+    window.radarRestoreLastQuery = function (input) {
+      if (!input) return;
+      var last = '';
+      try { last = localStorage.getItem(RADAR_QUERY_LAST_KEY) || ''; } catch (e) { /* ignore */ }
+      if (!last) {
+        var hist = window.radarLoadQueryHistory();
+        last = hist[0] || '';
+      }
+      if (last && !input.value) input.value = last;
+    };
+
+    window.radarLoadCachedReport = function () {
+      var input = document.getElementById('radar-query-input');
+      var box = document.getElementById('radar-scan-cached');
+      if (!box) return;
+      var q = (input && input.value || '').trim();
+      if (!q) {
+        box.innerHTML = '';
+        return;
+      }
+      fetch('/api/radar/cached-report?q=' + encodeURIComponent(q), {
+        headers: { Accept: 'text/html', 'HX-Request': 'true' }
+      })
+        .then(function (r) { return r.text(); })
+        .then(function (html) { box.innerHTML = html || ''; })
+        .catch(function () { box.innerHTML = ''; });
+    };
+
+    window.radarBootRadarPanel = function () {
+      if (!document.getElementById('radar-query-input')) return;
+      var layoutReady = (typeof fetchRadarLayoutFromServer === 'function')
+        ? fetchRadarLayoutFromServer()
+        : Promise.resolve();
+      layoutReady.finally(function () {
+        if (typeof window.radarLayoutInit === 'function') window.radarLayoutInit();
+      });
+      if (typeof window.radarStageInit === 'function') window.radarStageInit();
+      if (typeof window.radarApplyWorkbenchPrefs === 'function') window.radarApplyWorkbenchPrefs();
+      if (typeof window.radarInitDimDrag === 'function') window.radarInitDimDrag();
+      var input = document.getElementById('radar-query-input');
+      var suggest = document.getElementById('radar-suggest-list');
+      var form = document.getElementById('radar-scan-form');
+      window.radarRenderQueryHistory();
+      window.radarRestoreLastQuery(input);
+      window.radarLoadCachedReport();
+      if (form && !form._radarValidateBound) {
+        form._radarValidateBound = true;
+        form.addEventListener('htmx:beforeRequest', function (ev) {
+          if (!window.radarValidateScanQuery || !window.radarValidateScanQuery(input)) {
+            ev.preventDefault();
+            return;
+          }
+          if (!window.radarValidateScanStages || !window.radarValidateScanStages()) {
+            ev.preventDefault();
+            return;
+          }
+          var q = (input && input.value || '').trim();
+          if (q) window.radarRememberQuery(q);
+          if (typeof window.radarAnalyzeBtnBusy === 'function') window.radarAnalyzeBtnBusy(true);
+        });
+      }
+      var cachedTimer = null;
+      if (input && !input._radarCachedBound) {
+        input._radarCachedBound = true;
+        input.addEventListener('input', function () {
+          clearTimeout(cachedTimer);
+          cachedTimer = setTimeout(window.radarLoadCachedReport, 400);
+        });
+        input.addEventListener('change', window.radarLoadCachedReport);
+      }
+      var suggestTimer = null;
+      var suggestSeq = 0;
+      var suggestItems = [];
+
+      function sym() { return (input && input.value || '').trim(); }
+
+      function hideSuggest() {
+        if (!suggest) return;
+        suggest.classList.add('hidden');
+        suggest.innerHTML = '';
+        suggestItems = [];
+        if (input) input.setAttribute('aria-expanded', 'false');
+      }
+
+      function showSuggestLoading() {
+        if (!suggest) return;
+        suggest.innerHTML = (
+          '<li class="px-3 py-2 text-xs text-gray-400 flex items-center gap-2">'
+          + '<svg class="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">'
+          + '<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>'
+          + '<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>'
+          + '搜索中…</li>'
+        );
+        suggest.classList.remove('hidden');
+        if (input) input.setAttribute('aria-expanded', 'true');
+      }
+
+      function showSuggest(items) {
+        suggestItems = items || [];
+        if (!suggest || !items.length) {
+          if (suggest && sym().length >= 1) {
+            suggest.innerHTML = '<li class="px-3 py-2 text-xs text-gray-400">无匹配，请输入 6 位代码</li>';
+            suggest.classList.remove('hidden');
+          } else {
+            hideSuggest();
+          }
+          return;
+        }
+        suggest.innerHTML = items.map(function (it) {
+          var pct = Math.round((it.score || 0) * 100);
+          return (
+            '<li role="option" tabindex="0" data-symbol="' + it.symbol + '" data-name="' + it.name + '"'
+            + ' class="px-3 py-2 cursor-pointer hover:bg-blue-50 border-b border-gray-50 last:border-0">'
+            + '<span class="font-medium text-gray-900">' + it.name + '</span>'
+            + ' <span class="font-mono text-xs text-gray-400">' + it.symbol + '</span>'
+            + ' <span class="text-[10px] text-gray-300 ml-1">' + pct + '%</span></li>'
+          );
+        }).join('');
+        suggest.classList.remove('hidden');
+        if (input) input.setAttribute('aria-expanded', 'true');
+        suggest.querySelectorAll('li').forEach(function (li) {
+          li.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            if (input) input.value = li.getAttribute('data-name') || li.getAttribute('data-symbol');
+            hideSuggest();
+          });
+        });
+      }
+
+      function requestSuggest(q, seq, opts) {
+        opts = opts || {};
+        var digits = (q || '').replace(/\D/g, '');
+        var ctrl = new AbortController();
+        var timer = setTimeout(function () { ctrl.abort(); }, opts.timeoutMs || 6000);
+        var lim = opts.limit || 8;
+        return fetch(
+          '/api/radar/symbols/suggest?q=' + encodeURIComponent(q) + '&limit=' + lim,
+          { signal: ctrl.signal }
+        )
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (seq !== suggestSeq) return null;
+            var items = data.items || [];
+            if (!items.length && !data.index_ready && digits.length >= 1 && !opts.silent) {
+              suggest.innerHTML = '<li class="px-3 py-2 text-xs text-amber-700">简称索引预热中，可直接输入 6 位代码后回车</li>';
+              suggest.classList.remove('hidden');
+              return null;
+            }
+            return items;
+          })
+          .catch(function () {
+            if (seq !== suggestSeq) return null;
+            if (!opts.silent && digits.length >= 1) {
+              suggest.innerHTML = '<li class="px-3 py-2 text-xs text-amber-700">搜索超时，可直接输入完整 6 位代码</li>';
+              suggest.classList.remove('hidden');
+            }
+            return null;
+          })
+          .finally(function () { clearTimeout(timer); });
+      }
+
+      function fetchSuggest(q) {
+        if (!q || q.length < 1) { hideSuggest(); return; }
+        var seq = ++suggestSeq;
+        var digits = (q || '').replace(/\D/g, '');
+        if (digits.length >= 6) {
+          var sym6 = digits.slice(-6);
+          showSuggest([{ symbol: sym6, name: sym6, score: 1 }]);
+          requestSuggest(sym6, seq, { limit: 1, timeoutMs: 4000, silent: true })
+            .then(function (items) {
+              if (!items || !items.length) return;
+              var top = items[0];
+              var nm = (top.name || '').trim();
+              if (nm && nm !== sym6) {
+                showSuggest([{ symbol: top.symbol || sym6, name: nm, score: 1 }]);
+              }
+            });
+          return;
+        }
+        showSuggestLoading();
+        requestSuggest(q, seq).then(function (items) {
+          if (items && items.length) showSuggest(items);
+        });
+      }
+
+      function applyTopSuggest() {
+        if (!suggestItems.length || !input) return false;
+        var top = suggestItems[0];
+        input.value = top.name || top.symbol;
+        hideSuggest();
+        return true;
+      }
+
+      function submitScanForm() {
+        if (typeof htmx !== 'undefined' && form) {
+          htmx.trigger(form, 'submit');
+        } else if (form) {
+          form.requestSubmit();
+        }
+      }
+
+      if (input && !input._radarSuggestBound) {
+        input._radarSuggestBound = true;
+        input.addEventListener('input', function () {
+          clearTimeout(suggestTimer);
+          var q = sym();
+          if (q.length < 1) { hideSuggest(); return; }
+          fetchSuggest(q);
+          suggestTimer = setTimeout(function () { fetchSuggest(q); }, 120);
+        });
+        input.addEventListener('focus', function () {
+          var q = sym();
+          if (q.length >= 1) fetchSuggest(q);
+        });
+        input.addEventListener('blur', function () {
+          setTimeout(hideSuggest, 220);
+        });
+        input.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            var q = sym();
+            function finishEnter() {
+              if (suggest && !suggest.classList.contains('hidden') && suggestItems.length) {
+                applyTopSuggest();
+              }
+              submitScanForm();
+            }
+            if (q.length >= 1 && !suggestItems.length) {
+              fetchSuggest(q);
+              var waited = 0;
+              var timer = setInterval(function () {
+                waited += 80;
+                if (suggestItems.length || waited >= 720) {
+                  clearInterval(timer);
+                  finishEnter();
+                }
+              }, 80);
+            } else {
+              finishEnter();
+            }
+          } else if (e.key === 'Escape') {
+            hideSuggest();
+          }
+        });
+      }
+
+      function processRadarHtmx(root) {
+        if (typeof htmx === 'undefined' || !root) return;
+        htmx.process(root);
+      }
+
+      if (!window._radarHtmxHooksBound) {
+        window._radarHtmxHooksBound = true;
+        document.body.addEventListener('htmx:afterSwap', function (ev) {
+          var t = ev.detail && ev.detail.target;
+          if (t && t.id === 'radar-candidates-list') {
+            processRadarHtmx(t);
+          }
+        });
+        document.body.addEventListener('htmx:load', function (ev) {
+          var t = ev.detail && ev.detail.elt;
+          if (t && (t.id === 'radar-candidates-list' || t.id === 'radar-scan-result')) {
+            processRadarHtmx(t);
+          }
+        });
+      }
+    };
+    window.addEventListener('load', function () {
+      if (typeof window.radarBootRadarPanel === 'function') window.radarBootRadarPanel();
+    });
+  </script>
+  <div class="border-t border-gray-100 pt-4">
+    <h3 class="text-sm font-semibold text-gray-700 mb-2">候选池</h3>
+    <p id="radar-candidates-loading"
+       class="htmx-indicator text-xs text-gray-400 py-1 flex items-center justify-center gap-2">
+      <svg class="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+      </svg>
+      更新候选列表…
+    </p>
+    <div id="radar-candidates-list" hx-get="/api/radar/symbols" hx-trigger="load" hx-swap="innerHTML"
+         hx-indicator="#radar-candidates-loading">
+      <p class="text-sm text-gray-400 py-4 text-center">加载候选…</p>
+    </div>
+  </div>
+</div>
+
+{% elif active == 'roadmap' %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+  <div class="flex items-center gap-2 mb-1">
+    <span class="text-lg">🗓️</span>
+    <h2 class="text-base font-semibold text-gray-900">滚动路线图</h2>
+  </div>
+  <p class="text-sm text-gray-500 mb-4">双层时间锚定 · 维度一时间线编排+合理性 · 维度二生命周期+长周期巡检</p>
+  <div class="mb-4 flex flex-wrap gap-2 text-sm">
+    <span class="px-2 py-1 rounded bg-gray-100 text-gray-600">单次</span>
+    <span class="px-2 py-1 rounded bg-blue-50 text-blue-700">短期</span>
+    <span class="px-2 py-1 rounded bg-amber-50 text-amber-800">中期</span>
+    <span class="px-2 py-1 rounded bg-purple-50 text-purple-800">长期多波</span>
+  </div>
+  <div id="roadmap-timeline"
+       hx-get="/api/campaigns/1/timeline" hx-trigger="load" hx-swap="innerHTML"
+       hx-headers='{"Accept": "text/html"}'>
+    <div class="text-gray-400 text-sm py-4">加载时间线…</div>
+  </div>
+  <div class="mt-4 pt-4 border-t border-gray-100">
+    <h3 class="text-sm font-semibold text-gray-700 mb-2">下一波待规划</h3>
+    <div hx-get="/api/roadmap/next-waves" hx-trigger="load" hx-swap="innerHTML"
+         hx-headers='{"Accept": "application/json"}'
+         class="text-sm text-gray-600">
+      加载中…
+    </div>
+  </div>
+</div>
+
+{% else %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+  <div class="flex items-center gap-2 mb-1">
+    <span class="text-lg">{% if active == 'planning' %}📝{% else %}🚀{% endif %}</span>
+    <h2 class="text-base font-semibold text-gray-900">
+      {% if active == 'planning' %}规划中{% else %}执行中{% endif %}
+    </h2>
+  </div>
+  <p class="text-sm text-gray-500 mb-4">
+    {% if active == 'planning' %}
+      处于「规划/路线图」区的标的 · 证伪监控就绪后人工确认晋级执行
+    {% else %}
+      已人工确认晋级执行的标的 · 持仓×实时价×仓位 advisory 指导（全程人工确认）
+    {% endif %}
+  </p>
+  {% if active == 'executing' %}
+  <div class="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 mb-3">
+    ⚠️ 全部为 advisory 建议，不含任何交易操作，请自行判断
+  </div>
+  <div hx-get="/api/executing/settings-html" hx-trigger="load" hx-swap="innerHTML" class="mb-2"></div>
+  {% endif %}
+  <div hx-get="/api/campaigns?view={{ active }}" hx-trigger="load" hx-swap="innerHTML"
+       hx-headers='{"Accept": "text/html"}'>
+    <div class="text-gray-400 text-sm py-4 flex items-center gap-2">
+      <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+      </svg>
+      加载中…
+    </div>
+  </div>
+</div>
+{% endif %}

@@ -302,6 +302,25 @@ def test_radar_concept_not_implemented(client):
     assert r.status_code == 501
 
 
+def test_resolve_opus_model_remaps_invalid_slug():
+    from apps.copilot.modules.radar.chat import resolve_opus_model
+
+    assert resolve_opus_model("claude-opus-4-9") == "claude-opus-4-6"
+    assert resolve_opus_model("claude-opus-4-5") == "claude-opus-4-5-20251101"
+    assert resolve_opus_model(None) == "claude-opus-4-6"
+
+
+def test_radar_scan_empty_query_rejected(client):
+    r = client.post(
+        "/api/radar/scans",
+        data={"input_type": "symbol"},
+        headers={"hx-request": "true"},
+    )
+    assert r.status_code == 200
+    assert "无法识别标的" in r.text
+    assert "请输入股票代码或简称" in r.text
+
+
 def test_planning_radar_tab_has_scan_form(client):
     r = client.get("/planning?view=radar")
     assert r.status_code == 200

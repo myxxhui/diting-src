@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.copilot.db.datetime_util import utc_naive_to_shanghai_display
 from apps.copilot.db.models import ExecutingT0ProbeState, ExecutingT0SyncWatermark
 from apps.copilot.modules.executing.profile import PROBE_KEYS
 from apps.copilot.modules.executing.universe import load_executing_collect_symbols
@@ -49,6 +50,7 @@ async def build_sync_status(session: AsyncSession) -> dict[str, Any]:
                 "job_id": w.job_id,
                 "symbol": w.symbol,
                 "last_success_at": w.last_success_at.isoformat() if w.last_success_at else None,
+                "last_success_at_cst": utc_naive_to_shanghai_display(w.last_success_at),
                 "last_error": w.last_error,
             }
             for w in wm

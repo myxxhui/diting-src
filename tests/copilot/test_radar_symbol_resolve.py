@@ -30,18 +30,31 @@ def test_display_name_for_code():
     assert nm == "601138" or not nm.isdigit() or len(nm) > 6
 
 
-def test_suggest_partial_name():
+def test_suggest_partial_name(monkeypatch):
+    import apps.copilot.modules.radar.symbol_resolve as sr
+
+    monkeypatch.setattr(sr, "market_name_index_ready", lambda: True)
+    monkeypatch.setattr(
+        sr,
+        "_CODE_MAP_CACHE",
+        {"002837": "英维克", "300502": "新易盛"},
+    )
+    monkeypatch.setattr(sr, "_CODE_MAP_PINNED", True)
     items = suggest_radar_symbols("英维", limit=5)
     assert items
     symbols = {x["symbol"] for x in items}
     assert "002837" in symbols or any("英维" in x["name"] for x in items)
 
 
-def test_fuzzy_typo_near_sot_name():
+def test_fuzzy_typo_near_sot_name(monkeypatch):
     """接近持仓简称的错字应能模糊命中。"""
+    import apps.copilot.modules.radar.symbol_resolve as sr
+
+    monkeypatch.setattr(sr, "market_name_index_ready", lambda: True)
+    monkeypatch.setattr(sr, "_CODE_MAP_CACHE", {"002837": "英维克"})
+    monkeypatch.setattr(sr, "_CODE_MAP_PINNED", True)
     items = suggest_radar_symbols("英维客", limit=3)
-    if not items:
-        pytest.skip("无 akshare/SoT 索引")
+    assert items
     top = items[0]
     assert top["score"] >= 0.5
 
@@ -81,6 +94,9 @@ def test_code_name_map_not_pinned_when_only_sot(monkeypatch):
 def test_suggest_exact_name_via_market(monkeypatch):
     import apps.copilot.modules.radar.symbol_resolve as sr
 
+    monkeypatch.setattr(sr, "market_name_index_ready", lambda: True)
+    monkeypatch.setattr(sr, "_CODE_MAP_CACHE", {"300502": "新易盛"})
+    monkeypatch.setattr(sr, "_CODE_MAP_PINNED", True)
     monkeypatch.setattr(sr, "_code_name_map", lambda **kw: {"300502": "新易盛"})
     monkeypatch.setattr(sr, "_resolve_from_sot", lambda raw: None)
     monkeypatch.setattr(

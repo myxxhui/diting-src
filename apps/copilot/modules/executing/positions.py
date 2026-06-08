@@ -24,26 +24,22 @@ async def get_position(session: AsyncSession, symbol: str) -> UserPosition | Non
     return await session.get(UserPosition, _sym(symbol))
 
 
+async def get_position_opened_at(session: AsyncSession, symbol: str):
+    """建仓日（#15 峰值窗）。"""
+    row = await get_position(session, symbol)
+    return row.opened_at if row else None
+
+
 async def list_positions(session: AsyncSession) -> list[UserPosition]:
     return list((await session.scalars(select(UserPosition).order_by(UserPosition.symbol))).all())
 
 
 async def upsert_position(session: AsyncSession, data: dict[str, Any]) -> UserPosition:
-    sym = _sym(str(data["symbol"]))
-    row = await session.get(UserPosition, sym)
-    if row is None:
-        row = UserPosition(symbol=sym, name=str(data.get("name", sym)))
-        session.add(row)
-    for field in ("name", "quantity", "cost_price", "position_pct", "notes", "source"):
-        if field in data and data[field] is not None:
-            setattr(row, field, data[field])
-    if data.get("opened_at"):
-        oa = data["opened_at"]
-        if isinstance(oa, str):
-            row.opened_at = date.fromisoformat(oa[:10])
-        elif isinstance(oa, date):
-            row.opened_at = oa
-    await session.flush()
+    from apps.copilot.modules.executing.symbol_base import save_symbol_base_data
+
+    data = dict(data)
+    data.setdefault("source", "ui")
+    row, _ = await save_symbol_base_data(session, data)
     return row
 
 
@@ -84,7 +80,26 @@ async def profit_context(
 ) -> dict[str, Any]:
     row = await get_position(session, symbol)
     if row is None:
-        return {"symbol": _sym(symbol), "has_position": False}
+        from apps.copilot.modules.executing.symbol_base import load_symbol_base
+
+        base = await load_symbol_base(session, symbol)
+        if not base.get("has_base"):
+            return {"symbol": _sym(symbol), "has_position": False}
+        price, stale = fetch_mark_price(symbol, redis_client)
+        cost = float(base.get("cost_price") or 0)
+        pnl = ((price - cost) / cost * 100) if price and cost > 0 else None
+        return {
+            "symbol": base["symbol"],
+            "has_position": True,
+            "name": base.get("name"),
+            "quantity": float(base.get("quantity") or 0),
+            "cost_price": cost,
+            "position_pct": base.get("position_pct"),
+            "mark_price": price,
+            "price_stale": stale,
+            "unrealized_pnl_pct": round(pnl, 2) if pnl is not None else None,
+            "opened_at": base.get("opened_at"),
+        }
     price, stale = fetch_mark_price(symbol, redis_client)
     cost = float(row.cost_price or 0)
     pnl = ((price - cost) / cost * 100) if price and cost > 0 else None

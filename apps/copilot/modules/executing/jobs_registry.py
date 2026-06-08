@@ -17,7 +17,15 @@ class ExecutingJobSpec:
 
 
 JOB_REGISTRY: tuple[ExecutingJobSpec, ...] = (
-    ExecutingJobSpec("quote-intraday", "*/5 9-15 * * 1-5", True, True, 600),
+    # 盘中 */5 · 9:00–14:55；15:00 收盘快照见 quote-intraday-close（禁止 15:05+ 空跑）
+    ExecutingJobSpec("quote-intraday", "*/5 9-14 * * 1-5", True, True, 600),
+    ExecutingJobSpec("quote-intraday-close", "0 15 * * 1-5", True, True, 600),
+    ExecutingJobSpec("executing-bars250-bootstrap", "", True, False, 3600),
+    # #16 15min K 线 · 与交易所 15m 收盘对齐（9:45 首根 + 10–11:30 + 13–15）
+    ExecutingJobSpec("l4-vol-div-15m", "0,15,30,45 10-11,13-14 * * 1-5", True, True, 900),
+    ExecutingJobSpec("l4-vol-div-15m-open", "45 9 * * 1-5", True, True, 900),
+    ExecutingJobSpec("l4-vol-div-15m-close", "0 15 * * 1-5", True, True, 900),
+    ExecutingJobSpec("l4-atr-bars-sync", "0 16 * * 1-5", True, True, 900),
     ExecutingJobSpec("l4-micro-eod", "10 16 * * 1-5", True, True, 1800),
     ExecutingJobSpec("l3-news-daily", "0 18 * * 1-5", True, True, 1800),
     ExecutingJobSpec("daily-pipeline", "45 18 * * 1-5", True, True, 3600),

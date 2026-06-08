@@ -148,8 +148,9 @@ async def set_stage(
 
         await upsert_executing_collect(
             session,
-            row.symbol,
+            row.symbol or "",
             funnel_stage="executing",
+            name=row.name or (row.symbol or ""),
         )
     return row
 

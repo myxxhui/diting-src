@@ -33,21 +33,32 @@ async def upsert_executing_collect(
     profile: str = "601138",
     funnel_stage: str | None = "executing",
     enabled: bool = True,
+    name: str | None = None,
+    quantity: float | None = None,
+    cost_price: float | None = None,
+    position_pct: float | None = None,
+    opened_at: str | None = None,
+    notes: str | None = None,
 ) -> ExecutingCollectSymbol:
+    from apps.copilot.modules.executing.symbol_base import save_symbol_base_data
+
     sym = symbol.zfill(6)[-6:]
-    row = await session.get(ExecutingCollectSymbol, sym)
-    if row is None:
-        row = ExecutingCollectSymbol(
-            symbol=sym,
-            profile=profile,
-            enabled=enabled,
-            funnel_stage=funnel_stage,
-        )
-        session.add(row)
-    else:
-        row.profile = profile
-        row.enabled = enabled
-        if funnel_stage:
-            row.funnel_stage = funnel_stage
-    await session.flush()
+    payload: dict = {"symbol": sym, "name": name or sym}
+    if quantity is not None:
+        payload["quantity"] = quantity
+    if cost_price is not None:
+        payload["cost_price"] = cost_price
+    if position_pct is not None:
+        payload["position_pct"] = position_pct
+    if opened_at:
+        payload["opened_at"] = opened_at
+    if notes is not None:
+        payload["notes"] = notes
+    _, row = await save_symbol_base_data(
+        session,
+        payload,
+        enabled=enabled,
+        profile=profile,
+        funnel_stage=funnel_stage,
+    )
     return row

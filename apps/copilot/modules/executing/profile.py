@@ -1,4 +1,4 @@
-"""601138 profile · 25 probe keys。
+"""执行区探针注册表 · 逐项启用（当前 #15+#16）。
 
 [Ref: 28_ §4.5]
 """
@@ -9,40 +9,22 @@ from typing import Any
 
 import yaml
 
+# 权威启用列表（T0/T1/前端覆盖率均以此为准）
 PROBE_KEYS: tuple[str, ...] = (
-    "nvda_gpu_leadtime",
-    "tsmc_cowos_capacity",
-    "parent_honhai_revenue",
-    "cloud_capex_consensus",
-    "smci_quanta_share",
-    "gb200_iteration_node",
-    "inventory_turnover",
-    "contract_liabilities",
-    "copper_cost_pressure",
-    "cpi_ppi_spread",
-    "exchange_rate_impact",
-    "mgmt_and_core_team",
-    "related_party_trans",
-    "gross_margin_trend",
     "qmt_atr_trailing",
     "volume_price_div",
-    "northbound_net_flow",
-    "level2_super_order",
-    "margin_short_skew",
-    "turnover_acceleration",
-    "block_trade_discount",
-    "retail_concentration",
-    "insider_sell_actual",
-    "etf_redemption_impact",
-    "tech_beta_correlation",
 )
 
-L3_KEYS = PROBE_KEYS[:14]
-L4_KEYS = PROBE_KEYS[14:]
+L3_KEYS: tuple[str, ...] = ()
+L4_KEYS: tuple[str, ...] = PROBE_KEYS
 
 
 def load_profile(profile: str = "601138") -> dict[str, Any]:
-    root = Path(__file__).resolve().parents[4] / "data" / "config" / "executing_profiles"
+    # 镜像内：apps/copilot/config/executing_profiles；本地开发仍可读 data/config
+    pkg_root = Path(__file__).resolve().parents[2]
+    root = pkg_root / "config" / "executing_profiles"
+    if not root.is_dir():
+        root = Path(__file__).resolve().parents[4] / "data" / "config" / "executing_profiles"
     path = root / f"{profile}.yaml"
     if not path.is_file():
         return {"symbol": "601138", "probes": {}}

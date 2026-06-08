@@ -12,23 +12,196 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.copilot.db.models import ExecutingPipelineRun
-from apps.copilot.modules.executing.positions import profit_context
+from apps.copilot.modules.executing.collectors.daily_bars import (
+    MIN_BARS_ACCEPT,
+    LOOKBACK_TRADING_DAYS,
+    SOURCE_TENCENT,
+    fetch_tencent_daily_bars,
+)
+from apps.copilot.modules.executing.t1_operators.qmt_atr_trailing import (
+    SOURCE_INTRADAY,
+    SOURCE_PG,
+    compute_atr_trailing_payload,
+)
+from apps.copilot.modules.executing.positions import get_position_opened_at
+from apps.copilot.modules.executing.collectors.intraday_draft import (
+    clear_intraday_draft,
+    compute_intraday_atr,
+    fetch_today_draft_bar,
+    load_draft_bar,
+    overwrite_atr_intraday,
+    overwrite_draft_bar,
+)
 from apps.copilot.modules.executing.storage import (
-    latest_raw_map,
+    load_daily_bars,
+    replace_daily_bars,
     save_daily_audit,
     save_t0_batch,
+    upsert_daily_bars,
     upsert_watermark,
 )
 from apps.copilot.modules.executing.t0_collectors import collect_all_t0
-from apps.copilot.modules.executing.t1_build import build_telemetry
+from apps.copilot.modules.executing.t1_assembler import assemble_batch_portfolio
+from apps.copilot.modules.executing.t1_build import telemetry_probe_stats
 from apps.copilot.modules.executing.t2_opus import run_t2_audit
+from apps.copilot.modules.executing.universe import load_executing_collect_symbols
 
 logger = logging.getLogger(__name__)
 
 
+async def run_daily_bars_sync_all(session: AsyncSession) -> dict[str, Any]:
+    """按 executing_collect_symbols 全量采集腾讯 250 日日线 → PG。"""
+    from apps.copilot.modules.executing.universe import load_executing_collect_symbols
+
+    symbols = await load_executing_collect_symbols(session)
+    if not symbols:
+        await upsert_watermark(
+            session,
+            "executing-bars250-bootstrap",
+            "*",
+            success=False,
+            error="executing_collect_empty",
+        )
+        return {"status": "skip", "reason": "executing_collect_empty", "symbols": []}
+
+    results: list[dict[str, Any]] = []
+    for sym in symbols:
+        results.append(await run_daily_bars_sync(session, sym))
+    failed = [r for r in results if r.get("status") == "error"]
+    await upsert_watermark(
+        session,
+        "executing-bars250-bootstrap",
+        "*",
+        success=not failed,
+        trade_date=date.today(),
+        row_count=sum(r.get("bars_count", 0) for r in results),
+        error=failed[0].get("error") if failed else None,
+    )
+    return {
+        "status": "error" if failed else "ok",
+        "symbols_total": len(symbols),
+        "ok_count": sum(1 for r in results if r.get("status") == "ok"),
+        "failed_count": len(failed),
+        "results": results,
+    }
+
+
+async def run_daily_bars_incremental_sync(
+    session: AsyncSession,
+    symbol: str,
+    *,
+    redis_client: Any = None,
+) -> dict[str, Any]:
+    """工作日 16:00：拉腾讯 250 日 · 增量 UPSERT PG（不删历史）· 清除 Redis 草稿。"""
+    sym = symbol.zfill(6)[-6:]
+    rows, source = fetch_tencent_daily_bars(sym, days=LOOKBACK_TRADING_DAYS)
+    if len(rows) < MIN_BARS_ACCEPT:
+        err = (
+            f"腾讯 fqkline 不足 {MIN_BARS_ACCEPT} 根（got {len(rows)}）"
+            f"·symbol={sym}"
+        )
+        await upsert_watermark(
+            session, "l4-atr-bars-sync", sym, success=False, error=err
+        )
+        return {"symbol": sym, "status": "error", "error": err, "bars_count": len(rows)}
+
+    n = await upsert_daily_bars(session, sym, rows, source=source)
+    if redis_client is not None:
+        clear_intraday_draft(redis_client, sym)
+
+    entry = await get_position_opened_at(session, sym)
+    atr_payload = compute_atr_trailing_payload(
+        rows, entry_date=entry, source=f"{SOURCE_PG} · eod_incremental"
+    )
+    td = rows[-1].trade_date
+    if atr_payload:
+        await save_t0_batch(
+            session,
+            sym,
+            [
+                {
+                    "probe_key": "qmt_atr_trailing",
+                    "ok": True,
+                    "payload": atr_payload,
+                    "source": atr_payload.get("source", SOURCE_PG),
+                }
+            ],
+            trade_date=td,
+        )
+    await upsert_watermark(
+        session,
+        "l4-atr-bars-sync",
+        sym,
+        success=True,
+        trade_date=td,
+        row_count=n,
+    )
+    return {
+        "symbol": sym,
+        "status": "ok",
+        "bars_count": n,
+        "mode": "incremental_upsert",
+        "source": SOURCE_TENCENT,
+        "as_of": td.isoformat(),
+        "atr_multiple": (atr_payload or {}).get("atr_multiple"),
+    }
+
+
+async def run_daily_bars_sync(session: AsyncSession, symbol: str) -> dict[str, Any]:
+    """采集腾讯 fqkline 250 交易日日线并全量写入 PG（#15 底库 · bootstrap）。"""
+    sym = symbol.zfill(6)[-6:]
+    rows, source = fetch_tencent_daily_bars(sym, days=LOOKBACK_TRADING_DAYS)
+    if len(rows) < MIN_BARS_ACCEPT:
+        err = (
+            f"腾讯 fqkline 不足 {MIN_BARS_ACCEPT} 根（got {len(rows)}）"
+            f"·symbol={sym}"
+        )
+        await upsert_watermark(
+            session, "l4-atr-bars-sync", sym, success=False, error=err
+        )
+        return {"symbol": sym, "status": "error", "error": err, "bars_count": len(rows)}
+
+    n = await replace_daily_bars(session, sym, rows, source=source)
+    entry = await get_position_opened_at(session, sym)
+    atr_payload = compute_atr_trailing_payload(rows, entry_date=entry, source=SOURCE_PG)
+    td = rows[-1].trade_date
+    if atr_payload:
+        await save_t0_batch(
+            session,
+            sym,
+            [
+                {
+                    "probe_key": "qmt_atr_trailing",
+                    "ok": True,
+                    "payload": atr_payload,
+                    "source": atr_payload.get("source", SOURCE_PG),
+                }
+            ],
+            trade_date=td,
+        )
+    await upsert_watermark(
+        session,
+        "l4-atr-bars-sync",
+        sym,
+        success=True,
+        trade_date=td,
+        row_count=n,
+    )
+    return {
+        "symbol": sym,
+        "status": "ok",
+        "bars_count": n,
+        "source": SOURCE_TENCENT,
+        "as_of": td.isoformat(),
+        "atr_multiple": (atr_payload or {}).get("atr_multiple"),
+    }
+
+
 async def run_t0_collect(session: AsyncSession, symbol: str) -> dict[str, Any]:
     sym = symbol.zfill(6)[-6:]
-    items = collect_all_t0(sym)
+    daily_rows = await load_daily_bars(session, sym, limit=LOOKBACK_TRADING_DAYS)
+    entry = await get_position_opened_at(session, sym)
+    items = collect_all_t0(sym, daily_bar_rows=daily_rows or None, entry_date=entry)
     n = await save_t0_batch(session, sym, items)
     await upsert_watermark(
         session,
@@ -42,6 +215,71 @@ async def run_t0_collect(session: AsyncSession, symbol: str) -> dict[str, Any]:
     return {"symbol": sym, "collected": n, "ok_count": len(ok_keys), "total": len(items)}
 
 
+async def run_batch_daily_pipeline(
+    session: AsyncSession,
+    symbols: list[str] | None = None,
+    *,
+    run_id: str | None = None,
+    redis_client: Any = None,
+) -> dict[str, Any]:
+    """批量巡检：T0 逐标的 → T1 Scatter-Gather 整包 → T2 Opus 一次决断。"""
+    syms = symbols or await load_executing_collect_symbols(session)
+    if not syms:
+        return {"status": "skip", "reason": "executing_collect_empty"}
+
+    rid = run_id or str(uuid.uuid4())
+    td = date.today()
+    batch_id = f"batch_task_{td.strftime('%Y%m%d')}_{rid[:8]}"
+
+    run_row = ExecutingPipelineRun(run_id=rid, symbol="*", status="running", stage="T0")
+    session.add(run_row)
+    await session.flush()
+
+    for sym in syms:
+        await run_t0_collect(session, sym)
+    run_row.stage = "T1"
+    await session.flush()
+
+    telemetry = await assemble_batch_portfolio(
+        session,
+        syms,
+        redis_client=redis_client,
+        execution_id=batch_id,
+    )
+    probe_stats = telemetry_probe_stats(telemetry)
+
+    run_row.stage = "T2"
+    await session.flush()
+    audit, t2_status = run_t2_audit(telemetry)
+    await save_daily_audit(session, "*", td, telemetry, audit, run_id=rid, t2_status=t2_status)
+    await upsert_watermark(
+        session,
+        "daily-pipeline",
+        "*",
+        success=t2_status != "error",
+        trade_date=td,
+        row_count=probe_stats["filled"],
+    )
+
+    run_row.status = "completed" if t2_status in ("ok", "pending") else "failed"
+    run_row.stage = "DONE"
+    run_row.progress_json = {
+        "missing": probe_stats["missing"],
+        "t2_status": t2_status,
+        "data_integrity": probe_stats.get("data_integrity"),
+        "total_stocks_checked": probe_stats.get("total_stocks_checked"),
+        "system_status": probe_stats.get("system_status"),
+    }
+    await session.flush()
+    return {
+        "run_id": rid,
+        "symbols": syms,
+        "telemetry": telemetry,
+        "audit": audit,
+        "t2_status": t2_status,
+    }
+
+
 async def run_daily_pipeline(
     session: AsyncSession,
     symbol: str,
@@ -49,9 +287,11 @@ async def run_daily_pipeline(
     run_id: str | None = None,
     redis_client: Any = None,
 ) -> dict[str, Any]:
+    """单标的触发：内部走批量 JSON（portfolio_signals 仅 1 键）+ Scatter-Gather。"""
     sym = symbol.zfill(6)[-6:]
     rid = run_id or str(uuid.uuid4())
     td = date.today()
+    batch_id = f"batch_task_{td.strftime('%Y%m%d')}_{rid[:8]}"
 
     run_row = ExecutingPipelineRun(run_id=rid, symbol=sym, status="running", stage="T0")
     session.add(run_row)
@@ -61,9 +301,13 @@ async def run_daily_pipeline(
     run_row.stage = "T1"
     await session.flush()
 
-    raw_map = await latest_raw_map(session, sym)
-    pc = await profit_context(session, sym, redis_client)
-    telemetry = build_telemetry(sym, as_of=td, raw_by_key=raw_map, profit_context=pc)
+    telemetry = await assemble_batch_portfolio(
+        session,
+        [sym],
+        redis_client=redis_client,
+        execution_id=batch_id,
+    )
+    probe_stats = telemetry_probe_stats(telemetry)
 
     run_row.stage = "T2"
     await session.flush()
@@ -75,14 +319,15 @@ async def run_daily_pipeline(
         sym,
         success=t2_status != "error",
         trade_date=td,
-        row_count=len(telemetry.get("unavailable_data", [])),
+        row_count=probe_stats["filled"],
     )
 
     run_row.status = "completed" if t2_status in ("ok", "pending") else "failed"
     run_row.stage = "DONE"
     run_row.progress_json = {
-        "missing": telemetry.get("unavailable_data", []),
+        "missing": probe_stats["missing"],
         "t2_status": t2_status,
+        "data_integrity": probe_stats.get("data_integrity"),
     }
     await session.flush()
     return {
@@ -94,14 +339,161 @@ async def run_daily_pipeline(
     }
 
 
-async def quote_intraday_job(session: AsyncSession, symbol: str, redis_client: Any) -> None:
-    from apps.copilot.modules.executing.positions import fetch_mark_price
+async def quote_intraday_job(session: AsyncSession, symbol: str, redis_client: Any) -> dict[str, Any]:
+    """盘中 */5：腾讯当日 fqkline 草稿 → Redis 覆盖写 · PG 历史 + 草稿算 ATR。"""
     import json
 
-    price, stale = fetch_mark_price(symbol, redis_client)
-    if price and redis_client is not None:
-        redis_client.setex(
-            f"executing:quote:{symbol.zfill(6)[-6:]}",
-            600,
-            json.dumps({"close": price, "is_stale": stale}),
+    from apps.copilot.db.datetime_util import shanghai_now_iso
+    from apps.copilot.modules.executing.collectors.intraday_draft import QUOTE_KEY
+
+    sym = symbol.zfill(6)[-6:]
+    executed_at = shanghai_now_iso()
+    draft = fetch_today_draft_bar(sym)
+    if draft is None:
+        logger.info(
+            "[热数据] symbol=%s 北京时间=%s status=skip reason=no_today_draft",
+            sym,
+            executed_at,
         )
+        return {
+            "symbol": sym,
+            "status": "skip",
+            "reason": "no_today_draft",
+            "executed_at": executed_at,
+        }
+
+    if redis_client is not None:
+        overwrite_draft_bar(redis_client, sym, draft)
+        redis_client.setex(
+            QUOTE_KEY.format(symbol=sym),
+            600,
+            json.dumps(
+                {
+                    "close": draft.close,
+                    "high": draft.high,
+                    "low": draft.low,
+                    "open": draft.open,
+                    "trade_date": draft.trade_date.isoformat(),
+                    "is_stale": False,
+                    "mode": "intraday_overwrite",
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+    pg_rows = await load_daily_bars(session, sym, limit=LOOKBACK_TRADING_DAYS)
+    entry = await get_position_opened_at(session, sym)
+    atr_payload = compute_intraday_atr(
+        pg_rows, draft, entry_date=entry, source=SOURCE_INTRADAY
+    )
+    if atr_payload and redis_client is not None:
+        overwrite_atr_intraday(redis_client, sym, atr_payload)
+
+    atr_mult = (atr_payload or {}).get("atr_multiple")
+    logger.info(
+        "[热数据] symbol=%s 北京时间=%s trade_date=%s high=%.4f low=%.4f close=%.4f "
+        "atr_multiple=%s pg_bars=%d → Redis 覆盖写完成",
+        sym,
+        executed_at,
+        draft.trade_date.isoformat(),
+        draft.high,
+        draft.low,
+        draft.close,
+        atr_mult,
+        len(pg_rows),
+    )
+    return {
+        "symbol": sym,
+        "status": "ok",
+        "executed_at": executed_at,
+        "draft": {
+            "trade_date": draft.trade_date.isoformat(),
+            "high": draft.high,
+            "low": draft.low,
+            "close": draft.close,
+        },
+        "atr_multiple": atr_mult,
+        "pg_bars": len(pg_rows),
+    }
+
+
+async def vol_div_15m_job(
+    session: AsyncSession,
+    symbol: str,
+    redis_client: Any,
+) -> dict[str, Any]:
+    """#16 盘中 */15：东财 15min K 线 → Redis + T0 落库。"""
+    from apps.copilot.db.datetime_util import shanghai_now_iso
+    from apps.copilot.modules.executing.collectors.bars_15m import (
+        bars_to_payload,
+        fetch_bars_15m_em,
+        save_bars_15m_redis,
+    )
+    from apps.copilot.modules.executing.t1_operators.volume_price_div import (
+        process_volume_price_div,
+    )
+
+    sym = symbol.zfill(6)[-6:]
+    executed_at = shanghai_now_iso()
+    bars, source = fetch_bars_15m_em(sym)
+    if not bars:
+        logger.warning(
+            "[15m] symbol=%s 北京时间=%s status=error reason=fetch_failed",
+            sym,
+            executed_at,
+        )
+        return {
+            "symbol": sym,
+            "status": "error",
+            "reason": "fetch_failed_or_insufficient_bars",
+            "executed_at": executed_at,
+        }
+
+    payload = bars_to_payload(sym, bars, source=source)
+    t1_payload: dict[str, Any] | None = None
+    try:
+        t1_payload = process_volume_price_div(bars, source=source)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[15m] T1 预计算失败 symbol=%s: %s", sym, exc)
+
+    if redis_client is not None:
+        save_bars_15m_redis(redis_client, sym, payload)
+
+    await save_t0_batch(
+        session,
+        sym,
+        [
+            {
+                "probe_key": "volume_price_div",
+                "ok": True,
+                "payload": {
+                    "bars_meta": {
+                        "bars_count": len(bars),
+                        "first_datetime": bars[0].datetime,
+                        "last_datetime": bars[-1].datetime,
+                        "source": source,
+                    },
+                    "t1_preview": t1_payload,
+                },
+                "source": source,
+            }
+        ],
+        trade_date=date.today(),
+    )
+
+    logger.info(
+        "[15m] symbol=%s 北京时间=%s bars=%d last=%s → Redis OK",
+        sym,
+        executed_at,
+        len(bars),
+        bars[-1].datetime,
+    )
+    return {
+        "symbol": sym,
+        "status": "ok",
+        "executed_at": executed_at,
+        "bars_count": len(bars),
+        "last_datetime": bars[-1].datetime,
+        "source": source,
+        "divergence_index": (t1_payload or {}).get("value"),
+    }

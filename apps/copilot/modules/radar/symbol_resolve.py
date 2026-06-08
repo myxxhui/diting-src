@@ -198,15 +198,35 @@ def warm_market_name_index() -> int:
         return 0
 
 
+def market_name_index_ready() -> bool:
+    return _CODE_MAP_PINNED and len(_CODE_MAP_CACHE) >= _MIN_PINNED_MAP
+
+
+def _sot_code_map() -> dict[str, str]:
+    out: dict[str, str] = {}
+    _merge_sot_into_map(out)
+    return out
+
+
+def _name_from_cache_or_sot(sym: str) -> str:
+    sym = sym.zfill(6)[-6:]
+    if sym in _CODE_MAP_CACHE:
+        return _CODE_MAP_CACHE[sym]
+    for s, nm in _sot_code_map().items():
+        if s == sym:
+            return nm
+    return sym
+
+
 def suggest_radar_symbols(query: str, *, limit: int = 8) -> list[dict[str, Any]]:
-    """模糊搜索 A 股：代码前缀 / 简称包含 / 编辑距离。"""
+    """模糊搜索 A 股：代码前缀 / 简称包含 / 编辑距离。
+
+    禁止在请求路径同步拉 akshare 全市场（会阻塞事件循环导致全站卡死）。
+    索引未预热时：6 位代码即时返回；简称模糊仅匹配 SoT + 已缓存表。
+    """
     raw = (query or "").strip()
     if not raw:
         return []
-
-    code_map = _code_name_map()
-    if len(code_map) < _MIN_PINNED_MAP:
-        code_map = _code_name_map(force_refresh=True)
 
     digits = re.sub(r"\D", "", raw)
     scored: dict[str, dict[str, Any]] = {}
@@ -222,50 +242,57 @@ def suggest_radar_symbols(query: str, *, limit: int = 8) -> list[dict[str, Any]]
     from_sot = _resolve_from_sot(raw)
     if from_sot:
         _put(from_sot[0], from_sot[1], 1.0)
-    from_market = _resolve_from_akshare_name(raw)
-    if from_market:
-        _put(from_market[0], from_market[1], 1.0)
 
+    # 数字输入：毫秒级，不触发 force_refresh
     if digits:
-        for sym, (s, nm) in _iter_symbol_entries():
-            if s.startswith(digits) or digits in s:
-                _put(s, nm, 0.98 if s == digits.zfill(6)[-6:] else 0.88)
+        if len(digits) >= 6:
+            sym = digits[-6:]
+            _put(sym, _name_from_cache_or_sot(sym), 1.0)
+            out = sorted(scored.values(), key=lambda x: (-x["score"], x["symbol"]))
+            return out[: max(1, limit)]
 
-    for sym, (s, nm) in _iter_symbol_entries():
-        if nm == raw:
-            _put(s, nm, 1.0)
-        elif nm.startswith(raw):
-            _put(s, nm, 0.94)
-        elif raw in nm or nm in raw:
-            _put(s, nm, 0.86)
-        else:
-            ratio = difflib.SequenceMatcher(None, raw, nm).ratio()
-            if ratio >= _SUGGEST_MIN_SCORE:
-                _put(s, nm, ratio)
+        cmap = _CODE_MAP_CACHE if _CODE_MAP_PINNED else _sot_code_map()
+        for sym, nm in cmap.items():
+            if sym.startswith(digits):
+                _put(sym, nm, 0.88)
+        out = sorted(scored.values(), key=lambda x: (-x["score"], x["symbol"]))
+        return out[: max(1, limit)]
+
+    # 简称模糊：仅索引已预热时扫全表；否则仅 SoT 精确/包含
+    if market_name_index_ready():
+        from_market = _resolve_from_akshare_name(raw)
+        if from_market:
+            _put(from_market[0], from_market[1], 1.0)
+
+        for sym, (s, nm) in _iter_symbol_entries():
+            if nm == raw:
+                _put(s, nm, 1.0)
+            elif nm.startswith(raw):
+                _put(s, nm, 0.94)
+            elif raw in nm or nm in raw:
+                _put(s, nm, 0.86)
+            else:
+                ratio = difflib.SequenceMatcher(None, raw, nm).ratio()
+                if ratio >= _SUGGEST_MIN_SCORE:
+                    _put(s, nm, ratio)
+    else:
+        for sym, nm in _sot_code_map().items():
+            if nm == raw or raw in nm or nm in raw:
+                _put(sym, nm, 0.9)
 
     out = sorted(scored.values(), key=lambda x: (-x["score"], x["symbol"]))
     return out[: max(1, limit)]
 
 
 def _iter_symbol_entries() -> list[tuple[str, tuple[str, str]]]:
-    """SoT + 内存 code 表 + 简称索引（模糊建议用）。"""
+    """SoT + 已预热内存 code 表（禁止请求路径 force_refresh）。"""
     entries: list[tuple[str, tuple[str, str]]] = []
     seen: set[str] = set()
-    cmap = _code_name_map()
-    if len(cmap) < _MIN_PINNED_MAP:
-        cmap = _code_name_map(force_refresh=True)
+    cmap = _CODE_MAP_CACHE if _CODE_MAP_PINNED else _sot_code_map()
     for sym, nm in cmap.items():
         if sym not in seen:
             entries.append((sym, (sym, nm)))
             seen.add(sym)
-    if len(seen) < _MIN_PINNED_MAP:
-        try:
-            for nm, (sym, name) in _a_share_name_index().items():
-                if sym not in seen and len(sym) == 6:
-                    entries.append((sym, (sym, name)))
-                    seen.add(sym)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("简称索引补充失败: %s", exc)
     return entries
 
 

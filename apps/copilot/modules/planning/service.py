@@ -71,9 +71,17 @@ async def list_workspace_symbols(
     stages = VIEW_STAGES.get(view)
     rows = await list_funnel_symbols(session, stages=stages)
     container = await get_or_create_container(session)
-    return [
-        {**funnel_symbol_to_dict(s), "container_id": container.id} for s in rows
-    ]
+    out = [{**funnel_symbol_to_dict(s), "container_id": container.id} for s in rows]
+    if view == "executing":
+        from apps.copilot.modules.executing.symbol_base import load_symbol_base
+
+        merged: list[dict[str, Any]] = []
+        for item in out:
+            sym = item.get("symbol") or ""
+            base = await load_symbol_base(session, sym)
+            merged.append({**item, **{k: v for k, v in base.items() if k != "symbol"}})
+        return merged
+    return out
 
 
 async def list_timeline_entries(

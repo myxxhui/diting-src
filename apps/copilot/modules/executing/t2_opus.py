@@ -22,6 +22,10 @@ def _t2_model() -> str:
 
 def run_t2_audit(telemetry: dict[str, Any]) -> tuple[dict[str, Any], str]:
     """返回 (audit_json, status) status=ok|pending|error"""
+    from apps.copilot.modules.executing.t1_build import telemetry_probe_stats
+
+    coverage = telemetry_probe_stats(telemetry)
+
     if os.environ.get("EXECUTING_T2_ENABLED", "").lower() not in ("1", "true", "yes"):
         return (
             {
@@ -36,9 +40,10 @@ def run_t2_audit(telemetry: dict[str, Any]) -> tuple[dict[str, Any], str]:
                     "one_sentence_summary": "仅 T1 遥测完成，Opus 决断未执行",
                 },
                 "probe_coverage": {
-                    "filled": 25 - len(telemetry.get("unavailable_data", [])),
-                    "missing": telemetry.get("unavailable_data", []),
-                    "blockers": telemetry.get("blockers", []),
+                    "filled": coverage["filled"],
+                    "missing": coverage["missing"],
+                    "degraded_probes": coverage["degraded_probes"],
+                    "data_integrity": coverage.get("data_integrity"),
                 },
             },
             "pending",
@@ -53,9 +58,11 @@ def run_t2_audit(telemetry: dict[str, Any]) -> tuple[dict[str, Any], str]:
 
     model = _t2_model()
     prompt = (
-        "你是首席风控官。仅基于下列 T1 遥测 JSON 输出一个 JSON 对象，"
-        "结构含 Executing_Daily_Audit, Reasoning_Engine, Execution_Command, probe_coverage。"
-        "禁止编造未给出的数字。action 仅 hold|trim_30_pct|dump_all|rotate。\n\n"
+        "你是首席风控官。输入为批量巡检 T1 JSON（batch_meta + portfolio_signals，"
+        "每只股票代码下含 position_context 与 indicators）。"
+        "仅基于下列遥测输出一个 JSON 对象，结构含 Executing_Daily_Audit, Reasoning_Engine, "
+        "Execution_Command, probe_coverage。禁止编造未给出的数字。"
+        "action 仅 hold|trim_30_pct|dump_all|rotate。\n\n"
         + json.dumps(telemetry, ensure_ascii=False)[:120000]
     )
 

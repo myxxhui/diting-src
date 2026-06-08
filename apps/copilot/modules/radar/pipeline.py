@@ -1,7 +1,7 @@
 """T0→T1→T2 三段流水线 + StageArtifact / WorkspaceArtifact 落库。
 
 [Ref: step_14 · 25_ §2/§3]
-工作台扫描（scan_origin=workbench）：索引框触发一律重新推演，不读 T0/T1/T2 推理缓存。
+工作台扫描：未勾选「刷新」时优先读 T0/T2 缓存；live 失败时回退历史 ok 研报。
 """
 from __future__ import annotations
 
@@ -64,14 +64,16 @@ async def run_radar_pipeline(
     layout: dict[str, Any] | None = None,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
-    """三种组合：仅 T2 / T0+T2 / T0+T1+T2。workbench 来源禁止用缓存做推理。"""
+    """三种组合：仅 T2 / T0+T2 / T0+T1+T2。
+
+    工作台未勾选「刷新」时允许 T0/T2 读缓存；live 失败时回退历史 ok 研报（非编造）。
+    """
     validate_radar_stage_combo(enable_t0, enable_t1, enable_t2)
 
-    workbench_fresh = scan_origin == "workbench"
     layout = _resolve_layout(layout)
     dim_keys = dimension_keys_from_layout(layout)
-    t0_refresh = force_refresh_t0 or workbench_fresh
-    t2_refresh = force_refresh_t2 or workbench_fresh
+    t0_refresh = force_refresh_t0
+    t2_refresh = force_refresh_t2
 
     t0_only = enable_t2 and not enable_t0 and not enable_t1
     t0_t2 = enable_t0 and enable_t2 and not enable_t1
@@ -106,14 +108,12 @@ async def run_radar_pipeline(
 
     if enable_t1:
         if progress_cb is not None:
-            hit = "" if workbench_fresh else (
-                "（缓存命中）" if t0_raw.get("cache_hit") else ""
-            )
+            hit = "（缓存命中）" if t0_raw.get("cache_hit") and not t0_refresh else ""
             progress_cb("t1", f"{t1_step_label(t1_mode=t1_mode)}{hit}", 45, "")
         t1_start = time.perf_counter()
         t1_profile = resolve_model("radar", "t1_distill", t1_mode=t1_mode)
         cached_t1 = None
-        if not workbench_fresh and t0_raw.get("cache_hit"):
+        if not t0_refresh and t0_raw.get("cache_hit"):
             cached_t1 = t0_raw.get("t1_distilled")
         if isinstance(cached_t1, dict) and cached_t1.get("matrix"):
             from apps.copilot.modules.radar.t1.fact_matrix_builder import enrich_t1_payload
@@ -172,7 +172,6 @@ async def run_radar_pipeline(
             t0_only=t0_only,
             t0_t2=t0_t2,
             full_chain=full_chain,
-            workbench_fresh=workbench_fresh,
             t2_refresh=t2_refresh,
             profile=t2_profile,
             model_override=t2_model,
@@ -186,6 +185,7 @@ async def run_radar_pipeline(
             t2_payload.get("cache_hit")
             or t2_payload.get("route") == "cache"
             or t2_payload.get("stale_fallback")
+            or (not t2_refresh and t2_payload.get("status") == "ok")
         )
     )
     if enable_t2:
@@ -252,6 +252,52 @@ async def run_radar_pipeline(
     }
 
 
+async def _load_t2_cached(
+    session: AsyncSession,
+    symbol: str,
+    t0_raw: dict[str, Any],
+) -> dict[str, Any] | None:
+    t2_cached = cached_t2_verdict(t0_raw)
+    if not t2_cached:
+        t2_cached = cached_t2_verdict(load_cached(symbol, require_fresh=True))
+    if not t2_cached:
+        t2_cached = cached_t2_verdict(load_cached(symbol, require_fresh=False))
+    if not t2_cached:
+        db_bundle = await load_latest_bundle_db(session, symbol)
+        t2_cached = cached_t2_verdict(db_bundle)
+    if not t2_cached:
+        fb = find_ok_t2_verdict(symbol)
+        if not fb:
+            fb = await find_ok_t2_verdict_db(session, symbol)
+        t2_cached = fb
+    return t2_cached
+
+
+async def _apply_t2_stale_fallback(
+    session: AsyncSession,
+    symbol: str,
+    t2_payload: dict[str, Any],
+) -> dict[str, Any]:
+    if t2_payload.get("status") == "ok":
+        return t2_payload
+    fb = find_ok_t2_verdict(symbol)
+    if not fb:
+        fb = await find_ok_t2_verdict_db(session, symbol)
+    if not fb:
+        return t2_payload
+    logger.info("T2 live 失败，回退历史 ok 缓存 symbol=%s", symbol)
+    detail = t2_payload.get("detail") or "live 失败"
+    if "invalid x-api-key" in str(detail).lower() or "authentication_error" in str(detail).lower():
+        detail = (
+            "Opus API 密钥无效或已过期（请更新 diting-src/.env 的 ANTHROPIC_API_KEY 后部署）"
+        )
+    return {
+        **fb,
+        "detail": f"{detail} · 已展示历史 Opus 缓存（非编造）",
+        "stale_fallback": True,
+    }
+
+
 async def _run_t2_for_combo(
     session: AsyncSession,
     *,
@@ -264,7 +310,6 @@ async def _run_t2_for_combo(
     t0_only: bool,
     t0_t2: bool,
     full_chain: bool,
-    workbench_fresh: bool,
     t2_refresh: bool,
     profile: dict[str, Any],
     model_override: str | None,
@@ -295,28 +340,13 @@ async def _run_t2_for_combo(
     else:
         raise ValueError("未识别的 T2 阶段组合")
 
-    if workbench_fresh or t2_refresh:
-        return await run_t2_live_messages(
-            messages,
-            t0_raw,
-            dim_keys=parse_keys,
-            profile=profile,
-            model_override=model_override,
-        )
-
-    t2_cached = cached_t2_verdict(t0_raw)
-    if not t2_cached:
-        t2_cached = cached_t2_verdict(load_cached(symbol, require_fresh=True))
-    if not t2_cached:
-        t2_cached = cached_t2_verdict(load_cached(symbol, require_fresh=False))
-    if not t2_cached:
-        db_bundle = await load_latest_bundle_db(session, symbol)
-        t2_cached = cached_t2_verdict(db_bundle)
-    if t2_cached:
-        logger.info("T2 cache hit symbol=%s", symbol)
-        if progress_cb is not None:
-            progress_cb("t2", "T2 使用历史 Opus 缓存", 72, "")
-        return t2_cached
+    if not t2_refresh:
+        t2_cached = await _load_t2_cached(session, symbol, t0_raw)
+        if t2_cached:
+            logger.info("T2 cache hit symbol=%s", symbol)
+            if progress_cb is not None:
+                progress_cb("t2", "T2 使用历史 Opus 缓存", 72, "")
+            return t2_cached
 
     if progress_cb is not None:
         progress_cb("t2", "T2 调用 Opus 深度推演", 65, "")
@@ -327,21 +357,7 @@ async def _run_t2_for_combo(
         profile=profile,
         model_override=model_override,
     )
-    if t2_payload.get("status") != "ok":
-        fb = find_ok_t2_verdict(symbol)
-        if not fb:
-            fb = await find_ok_t2_verdict_db(session, symbol)
-        if fb:
-            logger.info("T2 live 失败，回退历史 ok 缓存 symbol=%s", symbol)
-            t2_payload = {
-                **fb,
-                "detail": (
-                    f"{t2_payload.get('detail') or 'live 失败'} · "
-                    "已展示历史 Opus 缓存（非编造）"
-                ),
-                "stale_fallback": True,
-            }
-    return t2_payload
+    return await _apply_t2_stale_fallback(session, symbol, t2_payload)
 
 
 def _build_stage_status(
@@ -497,6 +513,10 @@ async def _run_t2_messages(
             detail="RADAR_T2_ENABLED=false：未开启 Opus 深度推理",
         )
 
+    from apps.copilot.modules.radar.chat import resolve_opus_model
+
+    resolved_model = resolve_opus_model(model_override)
+
     def _blocking_call() -> Any:
         from apps.common.ai_dispatcher import AIDispatcher, BudgetExceededError
 
@@ -507,7 +527,7 @@ async def _run_t2_messages(
                 messages=messages,
                 max_tokens=4096,
                 temperature=0.2,
-                model_override=(model_override or "").strip() or None,
+                model_override=resolved_model,
             )
         except BudgetExceededError as exc:
             raise RuntimeError(f"预算超限：{exc}") from exc
@@ -518,11 +538,24 @@ async def _run_t2_messages(
         resp = await asyncio.to_thread(_blocking_call)
     except Exception as exc:  # noqa: BLE001
         logger.warning("T2 Opus 调用失败: %s", exc)
+        err = str(exc)
+        if "invalid x-api-key" in err.lower() or "authentication_error" in err.lower():
+            detail = (
+                "Opus API 密钥无效或已过期；请更新 diting-src/.env 的 ANTHROPIC_API_KEY "
+                "后执行 diting-infra make copilot-deploy-fast"
+            )
+        elif "not_found_error" in err or "model:" in err.lower():
+            detail = (
+                f"Opus 型号不可用（{resolved_model}）；"
+                "请在 T2 下拉改选「Opus 4.6（推荐）」后重新点「分析」"
+            )
+        else:
+            detail = f"Opus 调用失败：{err[:200]}"
         return _t2_result(
             status="error",
             model_id="anthropic:opus",
             route="remote",
-            detail=f"Opus 调用失败：{str(exc)[:200]}",
+            detail=detail,
         )
 
     if resp.model == "mock" or (resp.raw or {}).get("_dispatcher_mock"):

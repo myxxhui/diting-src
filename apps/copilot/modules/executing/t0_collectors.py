@@ -601,12 +601,61 @@ def _collect_unimplemented_l3(key: str, spec: str) -> dict[str, Any]:
     return _block_typed(key, "A", spec)
 
 
-def collect_l4_micro(symbol: str) -> list[dict[str, Any]]:
+def _daily_rows_to_quote_bars(rows: list[Any]) -> list[Any]:
+    from apps.state_watch.probes.datasource.quote_adapter import Bar
+
+    return [
+        Bar(
+            date=r.trade_date.isoformat(),
+            open=r.open,
+            high=r.high,
+            low=r.low,
+            close=r.close,
+            volume=r.volume,
+        )
+        for r in rows
+    ]
+
+
+def collect_l4_micro(
+    symbol: str,
+    *,
+    daily_bar_rows: list[Any] | None = None,
+    entry_date: Any = None,
+) -> list[dict[str, Any]]:
     """#15-17,19-21,25 · K 线自算 + akshare 补充。"""
+    from apps.copilot.modules.executing.collectors.daily_bars import MIN_BARS_ACCEPT
+    from apps.copilot.modules.executing.t1_operators.qmt_atr_trailing import (
+        AtrTrailingError,
+        SOURCE_PG,
+        process_qmt_atr_trailing_from_rows,
+    )
     from apps.state_watch.probes.datasource.quote_adapter import fetch_bars_250d
 
     out: list[dict[str, Any]] = []
-    bars = fetch_bars_250d(symbol)
+    qmt_from_pg = False
+    if daily_bar_rows and len(daily_bar_rows) >= MIN_BARS_ACCEPT:
+        bars = _daily_rows_to_quote_bars(daily_bar_rows)
+        try:
+            atr_payload = process_qmt_atr_trailing_from_rows(
+                daily_bar_rows,
+                entry_date,
+                source=SOURCE_PG,
+            )
+            out.append(
+                _ok(
+                    "qmt_atr_trailing",
+                    atr_payload,
+                    atr_payload.get("source", SOURCE_PG),
+                )
+            )
+            qmt_from_pg = True
+        except AtrTrailingError as exc:
+            out.append(_block("qmt_atr_trailing", str(exc)[:200]))
+            qmt_from_pg = True
+    else:
+        bars = fetch_bars_250d(symbol)
+
     if not bars or len(bars) < 25:
         for k in (
             "qmt_atr_trailing",
@@ -614,33 +663,45 @@ def collect_l4_micro(symbol: str) -> list[dict[str, Any]]:
             "turnover_acceleration",
             "tech_beta_correlation",
         ):
+            if k == "qmt_atr_trailing" and qmt_from_pg:
+                continue
             out.append(_block(k, "K线不足250日·market_quote/akshare均失败"))
-        return out
+        if not qmt_from_pg:
+            return out
+
+    if not qmt_from_pg:
+        from apps.copilot.modules.executing.collectors.daily_bars import DailyBarRow
+
+        fallback_rows = [
+            DailyBarRow(
+                trade_date=__import__("datetime").date.fromisoformat(b.date[:10]),
+                open=float(b.open),
+                high=float(b.high),
+                low=float(b.low),
+                close=float(b.close),
+                volume=float(b.volume),
+            )
+            for b in bars
+        ]
+        try:
+            atr_payload = process_qmt_atr_trailing_from_rows(
+                fallback_rows,
+                entry_date,
+                source="HK Pod·250日K线 · market_quote",
+            )
+            out.append(
+                _ok(
+                    "qmt_atr_trailing",
+                    atr_payload,
+                    atr_payload.get("source", "HK Pod·250日K线"),
+                )
+            )
+        except AtrTrailingError as exc:
+            out.append(_block("qmt_atr_trailing", str(exc)[:200]))
 
     closes = [b.close for b in bars]
     highs = [b.high for b in bars]
     lows = [b.low for b in bars]
-    vols = [b.volume for b in bars]
-
-    trs: list[float] = []
-    for i in range(1, min(21, len(bars))):
-        tr = max(
-            highs[-i] - lows[-i],
-            abs(highs[-i] - closes[-i - 1]),
-            abs(lows[-i] - closes[-i - 1]),
-        )
-        trs.append(tr)
-    atr = sum(trs) / len(trs) if trs else 0.0
-    peak = max(highs[-60:]) if len(highs) >= 60 else max(highs)
-    cur = closes[-1]
-    atr_mult = (peak - cur) / atr if atr > 0 else None
-    out.append(
-        _ok(
-            "qmt_atr_trailing",
-            {"atr20": round(atr, 4), "peak_price": peak, "current": cur, "atr_multiple": atr_mult},
-            "HK Pod·250日K线自算ATR",
-        )
-    )
 
     recent = bars[-10:]
     up_vol = sum(b.volume for b in recent if b.close >= b.open)
@@ -692,8 +753,6 @@ def collect_l4_micro(symbol: str) -> list[dict[str, Any]]:
             )
         )
     else:
-        v3 = sum(vols[-3:]) / 3 if len(vols) >= 3 else 0
-        v60 = sum(vols[-60:]) / 60 if len(vols) >= 60 else 1e-9
         out.append(
             _block_typed(
                 "turnover_acceleration",
@@ -969,5 +1028,84 @@ def collect_l3_daily(symbol: str) -> list[dict[str, Any]]:
     return out
 
 
-def collect_all_t0(symbol: str) -> list[dict[str, Any]]:
-    return collect_l4_micro(symbol) + collect_l3_daily(symbol)
+def collect_qmt_atr_t0(
+    symbol: str,
+    *,
+    daily_bar_rows: list[Any] | None = None,
+    entry_date: Any = None,
+) -> list[dict[str, Any]]:
+    """T0 当前仅采集 #15 qmt_atr_trailing（不拉其余 24 探针外网）。"""
+    from apps.copilot.modules.executing.collectors.daily_bars import (
+        DailyBarRow,
+        MIN_BARS_ACCEPT,
+    )
+    from apps.copilot.modules.executing.t1_operators.qmt_atr_trailing import (
+        AtrTrailingError,
+        SOURCE_PG,
+        process_qmt_atr_trailing_from_rows,
+    )
+    from apps.state_watch.probes.datasource.quote_adapter import fetch_bars_250d
+
+    out: list[dict[str, Any]] = []
+    if daily_bar_rows and len(daily_bar_rows) >= MIN_BARS_ACCEPT:
+        try:
+            atr_payload = process_qmt_atr_trailing_from_rows(
+                daily_bar_rows,
+                entry_date,
+                source=SOURCE_PG,
+            )
+            out.append(
+                _ok(
+                    "qmt_atr_trailing",
+                    atr_payload,
+                    atr_payload.get("source", SOURCE_PG),
+                )
+            )
+            return out
+        except AtrTrailingError as exc:
+            out.append(_block("qmt_atr_trailing", str(exc)[:200]))
+            return out
+
+    bars = fetch_bars_250d(symbol)
+    if not bars or len(bars) < MIN_BARS_ACCEPT:
+        out.append(_block("qmt_atr_trailing", "K线不足250日·market_quote/akshare均失败"))
+        return out
+
+    fallback_rows = [
+        DailyBarRow(
+            trade_date=__import__("datetime").date.fromisoformat(b.date[:10]),
+            open=float(b.open),
+            high=float(b.high),
+            low=float(b.low),
+            close=float(b.close),
+            volume=float(b.volume),
+        )
+        for b in bars
+    ]
+    try:
+        atr_payload = process_qmt_atr_trailing_from_rows(
+            fallback_rows,
+            entry_date,
+            source="HK Pod·250日K线 · market_quote",
+        )
+        out.append(
+            _ok(
+                "qmt_atr_trailing",
+                atr_payload,
+                atr_payload.get("source", "HK Pod·250日K线"),
+            )
+        )
+    except AtrTrailingError as exc:
+        out.append(_block("qmt_atr_trailing", str(exc)[:200]))
+    return out
+
+
+def collect_all_t0(
+    symbol: str,
+    *,
+    daily_bar_rows: list[Any] | None = None,
+    entry_date: Any = None,
+) -> list[dict[str, Any]]:
+    return collect_qmt_atr_t0(
+        symbol, daily_bar_rows=daily_bar_rows, entry_date=entry_date
+    )

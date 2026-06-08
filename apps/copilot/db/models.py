@@ -716,9 +716,9 @@ class UserPosition(Base):
 
 
 class ExecutingCollectSymbol(Base):
-    """执行区 T0 采集宇宙 SoT。
+    """执行区 T0 采集宇宙 + 标的基础数据（与 user_positions 同步）。
 
-    [Ref: 28_ §4.2]
+    [Ref: 28_ §4.2 · §5.3]
     """
 
     __tablename__ = "executing_collect_symbols"
@@ -727,10 +727,30 @@ class ExecutingCollectSymbol(Base):
     profile: Mapped[str] = mapped_column(String(32), nullable=False, default="601138")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     funnel_stage: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    cost_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    position_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    opened_at: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     enrolled_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class ExecutingWorkspaceSettings(Base):
+    """执行区全局设置（账户可用资金等）。
+
+    [Ref: 28_ §5.3]
+    """
+
+    __tablename__ = "executing_workspace_settings"
+
+    id: Mapped[str] = mapped_column(String(16), primary_key=True, default="default")
+    available_cash: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
 
 class ExecutingT0SyncWatermark(Base):
@@ -766,6 +786,28 @@ class ExecutingT0ProbeState(Base):
     stale_after: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="missing")
     blocker: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class ExecutingDailyBar(Base):
+    """执行区日线底库 · 腾讯 fqkline 前复权 OHLCV（#15 等 JL4 硬算输入）。
+
+    [Ref: 28_ §2.2.2]
+    """
+
+    __tablename__ = "executing_daily_bars"
+
+    symbol: Mapped[str] = mapped_column(String(6), primary_key=True)
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    adjust: Mapped[str] = mapped_column(String(8), primary_key=True, default="qfq")
+    open: Mapped[float] = mapped_column(nullable=False)
+    high: Mapped[float] = mapped_column(nullable=False)
+    low: Mapped[float] = mapped_column(nullable=False)
+    close: Mapped[float] = mapped_column(nullable=False)
+    volume: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="tencent_fqkline")
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
 
 
 class ExecutingT0Raw(Base):

@@ -204,25 +204,41 @@ app.include_router(reports_router.router)
 app.include_router(admin_router.router)
 
 
-@app.get("/health")
-async def health():
-    upstream_status = {}
-    for stream in settings.upstream_streams:
+async def _health_upstream_snapshot() -> dict:
+    """Redis 流探测 · 带短超时，避免拖死 K8s liveness/readiness。"""
+    upstream_status: dict = {}
+    redis_client = getattr(app.state, "redis", None)
+    if redis_client is None:
+        return upstream_status
+
+    async def _one(stream: str) -> tuple[str, dict]:
         try:
-            info = await app.state.redis.xinfo_stream(stream)
-            upstream_status[stream] = {"ok": True, "length": info.get("length", 0)}
+            info = await asyncio.wait_for(redis_client.xinfo_stream(stream), timeout=0.35)
+            return stream, {"ok": True, "length": info.get("length", 0)}
+        except asyncio.TimeoutError:
+            return stream, {"ok": False, "reason": "redis timeout"}
         except Exception as e:  # noqa: BLE001
             err = str(e).lower()
             if "no such key" in err or "does not exist" in err:
-                upstream_status[stream] = {
-                    "ok": False,
-                    "reason": "stream not found (mock mode)",
-                }
-            else:
-                upstream_status[stream] = {"ok": False, "reason": str(e)}
+                return stream, {"ok": False, "reason": "stream not found (mock mode)"}
+            return stream, {"ok": False, "reason": str(e)[:120]}
 
+    pairs = await asyncio.gather(
+        *[_one(stream) for stream in settings.upstream_streams],
+        return_exceptions=True,
+    )
+    for item in pairs:
+        if isinstance(item, Exception):
+            continue
+        stream, payload = item
+        upstream_status[stream] = payload
+    return upstream_status
+
+
+@app.get("/health")
+async def health():
     return {
         "status": "ok",
         "service": settings.service_name,
-        "upstream": upstream_status,
+        "upstream": await _health_upstream_snapshot(),
     }

@@ -64,6 +64,8 @@ async def init_db() -> None:
     from apps.copilot.db.migrate_step20 import migrate_step20
     from apps.copilot.db.migrate_step27 import migrate_step27
     from apps.copilot.db.migrate_step28 import migrate_step28
+    from apps.copilot.db.migrate_step29 import migrate_step29
+    from apps.copilot.db.migrate_step30 import migrate_step30
 
     await migrate_step14(engine)
     await migrate_step15(engine)
@@ -73,3 +75,5 @@ async def init_db() -> None:
     await migrate_step20(engine)
     await migrate_step27(engine)
     await migrate_step28(engine)
+    await migrate_step29(engine)
+    await migrate_step30(engine)

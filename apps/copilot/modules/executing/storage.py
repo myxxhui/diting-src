@@ -13,10 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.copilot.db.datetime_util import utc_now_naive
 from apps.copilot.db.models import (
     ExecutingDailyAudit,
+    ExecutingDailyBar,
     ExecutingT0ProbeState,
     ExecutingT0Raw,
     ExecutingT0SyncWatermark,
 )
+from apps.copilot.modules.executing.collectors.daily_bars import DailyBarRow
 from apps.copilot.modules.executing.profile import PROBE_KEYS, load_profile
 
 
@@ -33,6 +35,131 @@ def _sanitize_json_value(obj: Any) -> Any:
     return obj
 
 
+async def replace_daily_bars(
+    session: AsyncSession,
+    symbol: str,
+    rows: list[DailyBarRow],
+    *,
+    source: str,
+) -> int:
+    """全量刷新标的日线底库（幂等 · 采集一次/日更均用）。"""
+    sym = symbol.zfill(6)[-6:]
+    if not rows:
+        return 0
+    adjust = rows[0].adjust
+    existing = (
+        await session.scalars(
+            select(ExecutingDailyBar).where(
+                ExecutingDailyBar.symbol == sym,
+                ExecutingDailyBar.adjust == adjust,
+            )
+        )
+    ).all()
+    for old in existing:
+        await session.delete(old)
+    now = utc_now_naive()
+    for r in rows:
+        session.add(
+            ExecutingDailyBar(
+                symbol=sym,
+                trade_date=r.trade_date,
+                adjust=r.adjust,
+                open=r.open,
+                high=r.high,
+                low=r.low,
+                close=r.close,
+                volume=r.volume,
+                source=source,
+                collected_at=now,
+            )
+        )
+    await session.flush()
+    return len(rows)
+
+
+async def upsert_daily_bars(
+    session: AsyncSession,
+    symbol: str,
+    rows: list[DailyBarRow],
+    *,
+    source: str,
+) -> int:
+    """增量写入日线底库（按 symbol+trade_date+adjust 覆盖/插入，不删历史）。"""
+    sym = symbol.zfill(6)[-6:]
+    if not rows:
+        return 0
+    now = utc_now_naive()
+    n = 0
+    for r in rows:
+        adjust = r.adjust
+        existing = await session.get(
+            ExecutingDailyBar,
+            {"symbol": sym, "trade_date": r.trade_date, "adjust": adjust},
+        )
+        if existing is None:
+            session.add(
+                ExecutingDailyBar(
+                    symbol=sym,
+                    trade_date=r.trade_date,
+                    adjust=adjust,
+                    open=r.open,
+                    high=r.high,
+                    low=r.low,
+                    close=r.close,
+                    volume=r.volume,
+                    source=source,
+                    collected_at=now,
+                )
+            )
+        else:
+            existing.open = r.open
+            existing.high = r.high
+            existing.low = r.low
+            existing.close = r.close
+            existing.volume = r.volume
+            existing.source = source
+            existing.collected_at = now
+        n += 1
+    await session.flush()
+    return n
+
+
+async def load_daily_bars(
+    session: AsyncSession,
+    symbol: str,
+    *,
+    adjust: str = "qfq",
+    limit: int = 250,
+) -> list[DailyBarRow]:
+    sym = symbol.zfill(6)[-6:]
+    db_rows = (
+        await session.scalars(
+            select(ExecutingDailyBar)
+            .where(
+                ExecutingDailyBar.symbol == sym,
+                ExecutingDailyBar.adjust == adjust,
+            )
+            .order_by(ExecutingDailyBar.trade_date.desc())
+            .limit(limit)
+        )
+    ).all()
+    if not db_rows:
+        return []
+    ordered = sorted(db_rows, key=lambda r: r.trade_date)
+    return [
+        DailyBarRow(
+            trade_date=r.trade_date,
+            open=float(r.open),
+            high=float(r.high),
+            low=float(r.low),
+            close=float(r.close),
+            volume=float(r.volume),
+            adjust=r.adjust,
+        )
+        for r in ordered
+    ]
+
+
 async def save_t0_batch(
     session: AsyncSession,
     symbol: str,
@@ -42,7 +169,7 @@ async def save_t0_batch(
 ) -> int:
     td = trade_date or date.today()
     n = 0
-    prof = load_profile()
+    prof = load_profile(symbol)
     probes_cfg = prof.get("probes") or {}
     now = utc_now_naive()
 
