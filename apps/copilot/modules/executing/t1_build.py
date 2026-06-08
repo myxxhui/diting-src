@@ -99,11 +99,22 @@ def _probe_node_from_raw(key: str, raw: dict[str, Any] | None) -> dict[str, Any]
             return build_volume_price_div_node(merged)
         except ValueError:
             return None
-    if key == "northbound_net_flow":
-        val = payload.get("net_3d_shares_change")
-        if val is None:
-            return None
-        return _node(val, source, "前五大外资席位连续3日持股变动比", f"北向3日持股变化 {val}")
+    if key == "smart_money_flow":
+        try:
+            from apps.copilot.modules.executing.smart_money_flow import compute_smart_money_metrics
+
+            metrics = compute_smart_money_metrics(payload)
+            node = _node(
+                metrics["value_pct"],
+                source,
+                metrics["calculation_logic"],
+                metrics["fact_statement"],
+            )
+            node["indicator_name"] = metrics["indicator_name"]
+            node["raw_metrics"] = metrics["raw_metrics"]
+            return node
+        except Exception as exc:
+            return _node(None, source, "Smart Money Delta 计算失败", str(exc))
     if key == "exchange_rate_impact":
         val = payload.get("usd_cny")
         if val is None:

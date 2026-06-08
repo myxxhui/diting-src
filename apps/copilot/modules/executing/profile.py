@@ -1,4 +1,4 @@
-"""执行区探针注册表 · 逐项启用（当前 #15+#16）。
+"""执行区探针注册表 · 逐项启用（当前 #15+#16+#17）。
 
 [Ref: 28_ §4.5]
 """
@@ -13,6 +13,7 @@ import yaml
 PROBE_KEYS: tuple[str, ...] = (
     "qmt_atr_trailing",
     "volume_price_div",
+    "smart_money_flow",
 )
 
 L3_KEYS: tuple[str, ...] = ()

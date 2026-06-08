@@ -22,7 +22,7 @@ PROBE_LABELS: dict[str, str] = {
     "gross_margin_trend": "毛利率",
     "qmt_atr_trailing": "ATR止盈",
     "volume_price_div": "量价背离",
-    "northbound_net_flow": "北向资金",
+    "smart_money_flow": "L2主力大单",
     "level2_super_order": "超大单",
     "margin_short_skew": "融资融券",
     "turnover_acceleration": "换手加速",
@@ -37,6 +37,7 @@ PROBE_LABELS: dict[str, str] = {
 PROBE_INDICATOR_NAMES: dict[str, str] = {
     "qmt_atr_trailing": "动态ATR追踪止盈",
     "volume_price_div": "15分钟级高位量价背离",
+    "smart_money_flow": "L2主力大单资金流向",
 }
 
 

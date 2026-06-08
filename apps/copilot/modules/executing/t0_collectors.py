@@ -70,6 +70,44 @@ def _ak_call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
             return None
 
 
+def _collect_smart_money_flow(symbol: str) -> dict[str, Any]:
+    """#17 L2 主力大单 · Tushare moneyflow（废弃 northbound_net_flow）。"""
+    from apps.copilot.modules.executing.smart_money_flow import (
+        fetch_moneyflow_raw,
+        tushare_token,
+    )
+
+    if not tushare_token():
+        return _block_typed(
+            "smart_money_flow",
+            "A",
+            "未配置 TUSHARE_TOKEN · 待用户提供后启用采集",
+        )
+    try:
+        payload = fetch_moneyflow_raw(symbol)
+        if len(payload.get("moneyflow_rows") or []) < 3:
+            return _block_typed(
+                "smart_money_flow",
+                "C",
+                f"moneyflow 行数不足 3（实际 {len(payload.get('moneyflow_rows') or [])}）",
+            )
+        if not payload.get("free_float_shares"):
+            return _block_typed(
+                "smart_money_flow",
+                "C",
+                "daily_basic 缺 free_share/float_share",
+            )
+        return _ok(
+            "smart_money_flow",
+            payload,
+            "Tushare API (moneyflow+daily_basic)",
+        )
+    except ImportError:
+        return _block_typed("smart_money_flow", "A", "未安装 tushare 包")
+    except Exception as exc:
+        return _block("smart_money_flow", f"Tushare moneyflow 失败:{exc}"[:200])
+
+
 def _is_shanghai(symbol: str) -> bool:
     sym = symbol.zfill(6)[-6:]
     return sym.startswith(("5", "6", "9"))
@@ -812,54 +850,7 @@ def collect_l4_micro(
     else:
         out.append(_block_typed("tech_beta_correlation", "B", "标的或中证1000 K线不足"))
 
-    try:
-        import akshare as ak  # type: ignore
-
-        nb = None
-        for _ in range(2):
-            nb = _ak_call(ak.stock_hsgt_individual_em, symbol=symbol)
-            if nb is not None and not nb.empty:
-                break
-        if nb is not None and not nb.empty:
-            tail = nb.tail(3)
-            share_col = next(
-                (c for c in ("今日增持股数", "持股数量变化", "增持数量") if c in tail.columns),
-                None,
-            )
-            fund_col = "今日增持资金" if "今日增持资金" in tail.columns else None
-            if share_col:
-                net_shares = float(tail[share_col].astype(float).sum())
-                payload: dict[str, Any] = {
-                    "net_3d_shares_change": net_shares,
-                    "rows": len(tail),
-                }
-                if fund_col:
-                    payload["net_3d_fund_yi"] = round(
-                        float(tail[fund_col].astype(float).sum()) / 1e8,
-                        4,
-                    )
-                out.append(
-                    _ok(
-                        "northbound_net_flow",
-                        payload,
-                        "akshare stock_hsgt_individual_em",
-                    )
-                )
-            elif fund_col:
-                net_yi = round(float(tail[fund_col].astype(float).sum()) / 1e8, 4)
-                out.append(
-                    _ok(
-                        "northbound_net_flow",
-                        {"net_3d_fund_yi": net_yi, "rows": len(tail)},
-                        "akshare stock_hsgt_individual_em",
-                    )
-                )
-            else:
-                out.append(_block_typed("northbound_net_flow", "C", "表结构缺增持股数/资金列"))
-        else:
-            out.append(_block_typed("northbound_net_flow", "B", "北向个股表为空或超时"))
-    except Exception as exc:
-        out.append(_block("northbound_net_flow", f"akshare失败:{exc}"[:200]))
+    out.append(_collect_smart_money_flow(symbol))
 
     out.append(_collect_margin_skew(symbol))
     out.append(_collect_block_trade(symbol))

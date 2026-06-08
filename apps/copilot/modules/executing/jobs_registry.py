@@ -25,6 +25,8 @@ JOB_REGISTRY: tuple[ExecutingJobSpec, ...] = (
     ExecutingJobSpec("l4-vol-div-15m", "0,15,30,45 10-11,13-14 * * 1-5", True, True, 900),
     ExecutingJobSpec("l4-vol-div-15m-open", "45 9 * * 1-5", True, True, 900),
     ExecutingJobSpec("l4-vol-div-15m-close", "0 15 * * 1-5", True, True, 900),
+    # #17 smart_money_flow · Tushare moneyflow（收盘后 15:30）
+    ExecutingJobSpec("l4-smart-money-eod", "30 15 * * 1-5", True, True, 900),
     ExecutingJobSpec("l4-atr-bars-sync", "0 16 * * 1-5", True, True, 900),
     ExecutingJobSpec("l4-micro-eod", "10 16 * * 1-5", True, True, 1800),
     ExecutingJobSpec("l3-news-daily", "0 18 * * 1-5", True, True, 1800),

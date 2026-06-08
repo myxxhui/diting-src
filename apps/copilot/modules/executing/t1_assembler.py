@@ -117,6 +117,14 @@ async def _gather_stock_indicators(
             )
         if probe_key == "volume_price_div":
             return await _calc_volume_price_div_live(symbol, redis_client=redis_client)
+        if probe_key == "smart_money_flow":
+            from apps.copilot.modules.executing.t1_build import _probe_node_from_raw
+
+            raw = raw_by_key.get(probe_key)
+            node = _probe_node_from_raw(probe_key, raw)
+            if node is None:
+                raise ValueError(raw.get("blocker") if raw else "smart_money_flow 未采集")
+            return probe_key, node
         raise ValueError(f"未实现的 live 算子: {probe_key}")
 
     for probe_key in PROBE_KEYS:

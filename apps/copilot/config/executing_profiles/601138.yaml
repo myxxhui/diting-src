@@ -1,4 +1,4 @@
-# 执行中工作区 · 601138 工业富联（逐项启用 · 当前 #15+#16）
+# 执行中工作区 · 601138 工业富联（逐项启用 · 当前 #15+#16+#17）
 # [Ref: 28_ §4.5]
 
 symbol: "601138"
@@ -11,4 +11,7 @@ probes:
     stale_days: 1
   volume_price_div:
     cadence: intraday_15m
+    stale_days: 1
+  smart_money_flow:
+    cadence: daily
     stale_days: 1

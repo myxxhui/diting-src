@@ -173,6 +173,34 @@ async def run_job(
             "results": out,
         }
 
+    if job_id == "l4-smart-money-eod":
+        from apps.copilot.modules.executing.storage import save_t0_batch
+        from apps.copilot.modules.executing.t0_collectors import _collect_smart_money_flow
+
+        out = []
+        for sym in symbols:
+            item = _collect_smart_money_flow(sym)
+            n = await save_t0_batch(session, sym, [item])
+            out.append(
+                {
+                    "symbol": sym,
+                    "collected": n,
+                    "ok": bool(item.get("ok")),
+                    "probe_key": item.get("probe_key"),
+                }
+            )
+        ok = [r for r in out if r.get("ok")]
+        await upsert_watermark(
+            session,
+            job_id,
+            "*",
+            success=bool(ok),
+            trade_date=date.today(),
+            row_count=len(ok),
+            error=None if ok else "smart_money_flow_failed",
+        )
+        return {"job_id": job_id, "status": "ok" if ok else "error", "results": out}
+
     if job_id in ("l4-micro-eod", "l3-news-daily", "collect-once"):
         out = []
         for sym in symbols:
