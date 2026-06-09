@@ -399,6 +399,86 @@ def render_degraded_probes(hints: list[str]) -> str:
 """
 
 
+def render_margin_short_skew_card(node: dict[str, Any]) -> str:
+    """#19 两融杠杆倾斜度 · 250 日历史分位。"""
+    val = node.get("value")
+    st = _indicator_status(node)
+    dot = "🟢" if st == "ok" else "🔴"
+    name = node.get("indicator_name") or probe_indicator_name("margin_short_skew")
+    short = probe_label("margin_short_skew")
+    rm = raw_metrics_for_display(node)
+    pct_disp = f"{float(val):.1f}%" if val is not None else "—"
+    ratio = rm.get("margin_to_float_ratio")
+    ratio_pct = f"{float(ratio) * 100:.2f}%" if ratio is not None else "—"
+
+    metric_labels = (
+        ("数据交易日", "inferred_trade_date"),
+        ("融资余额(元)", "margin_balance"),
+        ("融券余额(元)", "short_balance"),
+        ("融资买入额(元)", "margin_purchase_today"),
+        ("杠杆占流通盘", "margin_to_float_ratio"),
+        ("250日均占盘比", "250d_mean_ratio"),
+        ("披露滞后(日)", "settlement_lag_days"),
+    )
+    audit_rows = []
+    for lbl, fld in metric_labels:
+        v = rm.get(fld)
+        if v is None or v == "":
+            continue
+        if fld == "margin_to_float_ratio" or fld == "250d_mean_ratio":
+            try:
+                disp = f"{float(v) * 100:.2f}%"
+            except (TypeError, ValueError):
+                disp = str(v)
+        else:
+            disp = str(v)
+        audit_rows.append(
+            f"<span class='inline-flex gap-1 px-2 py-0.5 rounded bg-rose-50 border "
+            f"border-rose-100'><span class='text-gray-500'>{lbl}</span>"
+            f"<strong class='text-gray-800'>{_esc(disp)}</strong></span>"
+        )
+    audit_html = (
+        f"<div class='flex flex-wrap gap-1.5 mt-2'>{''.join(audit_rows)}</div>"
+        if audit_rows
+        else ""
+    )
+    t1_json = {
+        "margin_short_skew": {
+            "indicator_name": name,
+            "value": val,
+            "fact_statement": node.get("fact_statement"),
+            "calculation_logic": node.get("calculation_logic"),
+            "source": node.get("source"),
+            "raw_metrics": rm,
+        }
+    }
+    json_block = _esc(json.dumps(t1_json, ensure_ascii=False, indent=2))
+    warn = ""
+    if val is not None and float(val) >= 95:
+        warn = "<p class='text-xs text-rose-700 font-medium mt-1'>⚠ 杠杆分位 &gt;95% · 高危堰塞湖区间</p>"
+
+    return f"""
+<div class="rounded-lg border-2 border-rose-100 bg-rose-50/40 p-3 mb-2 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2 mb-1">
+    <span class="text-sm font-semibold text-gray-900">{_esc(name)}</span>
+    <span class="text-[10px] text-gray-500">({short})</span>
+    <span class="text-[10px] font-mono text-gray-400">margin_short_skew · #19</span>
+    <span class="text-sm ml-auto">{dot} <strong>{_esc(pct_disp)}</strong></span>
+  </div>
+  <p class="text-xs text-gray-600 mb-1">T+1 两融 · 融资余额/流通市值 · 250交易日历史分位 · 占盘 {ratio_pct}</p>
+  <p class="text-xs text-gray-800 leading-relaxed">{_esc(node.get('fact_statement', ''))}</p>
+  <p class="text-[11px] text-gray-500 mt-1 font-mono">{_esc(node.get('calculation_logic', ''))}</p>
+  <p class="text-[10px] text-gray-400 mt-1">来源：{_esc(node.get('source', '—'))}</p>
+  {warn}
+  {audit_html}
+  <details class="mt-2">
+    <summary class="text-[11px] text-rose-800 cursor-pointer font-medium">T1 白盒 JSON（喂 T2）</summary>
+    <pre class="text-[10px] bg-gray-900 text-green-100 p-2 rounded mt-1 overflow-x-auto font-mono">{json_block}</pre>
+  </details>
+</div>
+"""
+
+
 def _quote_intraday_watermark(sync: dict[str, Any] | None, symbol: str) -> str | None:
     if not sync:
         return None
@@ -420,8 +500,8 @@ def render_probe_domain(
 ) -> str:
     if not domain:
         return f"""
-<div class="border-l-4 border-{accent}-500 pl-3 mb-4">
-  <h4 class="font-semibold mb-2 text-sm text-gray-800">{_esc(title)}</h4>
+<div class="rounded-xl border-2 border-{accent}-200 bg-{accent}-50/30 p-4 mb-4 shadow-sm">
+  <h4 class="font-bold mb-2 text-sm text-gray-900 border-b border-{accent}-100 pb-2">{_esc(title)}</h4>
   <p class="text-xs text-gray-500">{_esc(empty_hint)}</p>
 </div>
 """
@@ -439,12 +519,14 @@ def render_probe_domain(
             cards.append(render_smart_money_flow_card(node))
         elif k == "level2_super_order":
             cards.append(render_level2_super_order_card(node))
+        elif k == "margin_short_skew":
+            cards.append(render_margin_short_skew_card(node))
         else:
             cards.append(render_generic_probe_card(k, node))
     body = "".join(cards) or "<p class='text-xs text-gray-500'>尚无 T1 数据</p>"
     return f"""
-<div class="border-l-4 border-{accent}-500 pl-3 mb-4">
-  <h4 class="font-semibold mb-2 text-sm text-gray-800">{_esc(title)}</h4>
-  {body}
+<div class="rounded-xl border-2 border-{accent}-200 bg-{accent}-50/30 p-4 mb-4 shadow-sm">
+  <h4 class="font-bold mb-3 text-sm text-gray-900 border-b border-{accent}-100 pb-2">{_esc(title)}</h4>
+  <div class="space-y-2">{body}</div>
 </div>
 """

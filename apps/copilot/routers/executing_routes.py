@@ -257,7 +257,7 @@ async def api_executing_detail_html(symbol: str, session: AsyncSession = Depends
     mark_disp = format_price_display(ctx.get("mark_price"))
     cost_disp = format_price_display(ctx.get("cost_price"))
     pos_form = f"""
-<div class="executing-position-card border rounded-lg p-4 mb-4 bg-white shadow-sm">
+<div class="executing-position-card border-2 border-blue-100 rounded-xl p-4 mb-4 bg-white shadow-sm">
   <h3 class="font-bold text-lg mb-2">层 A · 标的基础数据 · {_esc(sym)}</h3>
   <p class="text-xs text-gray-500 mb-1">保存后同步写入 <code>user_positions</code> 与 <code>executing_collect_symbols</code></p>
   <p class="text-xs text-emerald-800 mb-3">{money_hint} · 价格字段均为此单位</p>
@@ -371,13 +371,13 @@ async def api_executing_detail_html(symbol: str, session: AsyncSession = Depends
         f"{layer_b_banner}"
         f"{render_degraded_probes(degraded_hints)}"
         f"{hot_timeline}"
-        f'{render_probe_domain(l4, title="层 B · T1 指标（#15 ATR · #16 量价背离 · #17 主力大单）", accent="orange", empty_hint="暂无可用指标 · 点「立即跑今日体检」或等待 Cron 采集", symbol=sym, sync=sync)}'
+        f'{render_probe_domain(l4, title="层 B · T1 指标（#15~#19）", accent="orange", empty_hint="暂无可用指标 · 点「立即跑今日体检」或等待 Cron 采集", symbol=sym, sync=sync)}'
     )
 
     return HTMLResponse(
         f'<div id="executing-detail-{sym}" class="executing-workspace">'
         f"{toolbar}{pos_form}"
-        f'<div class="border rounded-lg p-4 mb-4">{layer_b_html}</div>'
+        f'<div class="border-2 border-orange-100 rounded-xl p-4 mb-4 bg-orange-50/20 shadow-sm">{layer_b_html}</div>'
         f"{audit_html}"
         f'<p class="text-xs text-gray-400 mt-2">advisory only · no-auto-execute · [Ref: 28_]</p></div>'
     )

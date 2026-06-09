@@ -200,55 +200,12 @@ def _headline_probe(
 
 
 def _collect_margin_skew(symbol: str) -> dict[str, Any]:
-    try:
-        import akshare as ak  # type: ignore
-    except ImportError:
-        return _block("margin_short_skew", "akshare 不可用")
-
-    sym = symbol.zfill(6)[-6:]
-    today = date.today()
-    attempts = 0
-    for offset in range(0, 14):
-        if attempts >= 6:
-            break
-        attempts += 1
-        d = today - timedelta(days=offset)
-        if d.weekday() >= 5:
-            continue
-        ds = d.strftime("%Y%m%d")
-        try:
-            if _is_shanghai(sym):
-                df = _ak_call(ak.stock_margin_detail_sse, date=ds)
-                code_col, buy_col, short_col = "标的证券代码", "融资买入额", "融券余量"
-                src = f"akshare stock_margin_detail_sse:{ds}"
-            else:
-                df = _ak_call(ak.stock_margin_detail_szse, date=ds)
-                code_col, buy_col, short_col = "证券代码", "融资买入额", "融券余量"
-                src = f"akshare stock_margin_detail_szse:{ds}"
-        except Exception as exc:
-            continue
-        if df is None or df.empty or code_col not in df.columns:
-            continue
-        sub = df[df[code_col].astype(str).str.zfill(6) == sym]
-        if sub.empty:
-            continue
-        r0 = sub.iloc[0]
-        fin = float(r0.get(buy_col, 0) or 0)
-        short = float(r0.get(short_col, 0) or 0)
-        bal = float(r0.get("融资余额", 0) or 0) if "融资余额" in r0.index else None
-        skew = short / fin if fin > 0 else None
-        return _ok(
-            "margin_short_skew",
-            {
-                "trade_date": ds,
-                "margin_buy": fin,
-                "short_balance": short,
-                "margin_balance": bal,
-                "skew": round(skew, 6) if skew is not None else None,
-            },
-            src,
-        )
-    return _block("margin_short_skew", "近12交易日两融日表均无该标的")
+    """#19 · Tushare margin_detail · 由 l4-margin-skew-morning Cron 落 PG（T+1）。"""
+    return _block_typed(
+        "margin_short_skew",
+        "A",
+        "需 Tushare 两融 PG 底库 · 请运行 l4-margin-skew-morning（周二至周六 08:30）",
+    )
 
 
 def _collect_block_trade(symbol: str) -> dict[str, Any]:

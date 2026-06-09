@@ -64,6 +64,7 @@ async def run_job(
             "l4-smart-money-eod",
             "l2-super-order-backfill",
             "l2-super-order-eod",
+            "l4-margin-skew-morning",
             "daily-pipeline",
         }
     )
@@ -195,6 +196,12 @@ async def run_job(
 
     if job_id == "l2-super-order-eod":
         result = await run_level2_super_order_eod(session, symbols, redis)
+        return result
+
+    if job_id == "l4-margin-skew-morning":
+        from apps.copilot.modules.executing.orchestrator import run_margin_skew_morning
+
+        result = await run_margin_skew_morning(session, symbols, redis)
         return result
 
     if job_id in ("l4-micro-eod", "l3-news-daily", "collect-once"):

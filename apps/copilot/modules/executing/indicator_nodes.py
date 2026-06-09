@@ -151,6 +151,24 @@ def build_level2_super_order_node(metrics: dict[str, Any], *, source: str = "") 
     }
 
 
+def build_margin_short_skew_node(metrics: dict[str, Any], *, source: str = "") -> dict[str, Any]:
+    """#19 两融杠杆倾斜度 · 250 日历史分位白盒节点。"""
+    value = metrics.get("value")
+    if value is None:
+        raise ValueError("margin_short_skew value 缺失")
+    value_f = round(float(value), 2)
+    raw_metrics = dict(metrics.get("raw_metrics") or {})
+    src = source or str(metrics.get("source") or "Tushare Margin Detail (T+1 Lag)")
+    return {
+        "indicator_name": probe_indicator_name("margin_short_skew"),
+        "value": value_f,
+        "fact_statement": str(metrics.get("fact_statement") or ""),
+        "calculation_logic": str(metrics.get("calculation_logic") or ""),
+        "source": src,
+        "raw_metrics": raw_metrics,
+    }
+
+
 def build_indicator_node(key: str, payload: dict[str, Any]) -> dict[str, Any]:
     if key == "qmt_atr_trailing":
         return build_qmt_atr_trailing_node(payload)
@@ -160,6 +178,8 @@ def build_indicator_node(key: str, payload: dict[str, Any]) -> dict[str, Any]:
         return build_smart_money_flow_node(payload, source=str(payload.get("source") or ""))
     if key == "level2_super_order":
         return build_level2_super_order_node(payload, source=str(payload.get("source") or ""))
+    if key == "margin_short_skew":
+        return build_margin_short_skew_node(payload, source=str(payload.get("source") or ""))
     val = payload.get("value")
     if val is None:
         raise ValueError(f"{key} value 缺失")

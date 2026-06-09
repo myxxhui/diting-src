@@ -188,6 +188,35 @@ async def _calc_level2_super_order(
     return "level2_super_order", node
 
 
+async def _calc_margin_short_skew(
+    session: AsyncSession,
+    symbol: str,
+    *,
+    redis_client: Any,
+    raw_by_key: dict[str, dict[str, Any]],
+) -> OperatorResult:
+    """#19：PG margin_detail 250 日底库 → 杠杆占盘比分位 T1。"""
+    from apps.copilot.modules.executing.indicator_nodes import build_margin_short_skew_node
+    from apps.copilot.modules.executing.margin_short_skew import (
+        SOURCE_MARGIN,
+        compute_margin_short_skew_metrics,
+        load_margin_skew_payload,
+    )
+
+    sym = symbol.zfill(6)[-6:]
+    payload = await load_margin_skew_payload(session, sym, redis_client=redis_client)
+    if payload is None:
+        snap = await load_t1_snapshot(session, sym, "margin_short_skew")
+        if snap:
+            return "margin_short_skew", snap
+        raw = raw_by_key.get("margin_short_skew")
+        raise ValueError(raw.get("blocker") if raw else "margin_short_skew 未采集")
+
+    metrics = compute_margin_short_skew_metrics(payload)
+    node = build_margin_short_skew_node(metrics, source=SOURCE_MARGIN)
+    return "margin_short_skew", node
+
+
 async def _gather_stock_indicators(
     session: AsyncSession,
     symbol: str,
@@ -217,6 +246,10 @@ async def _gather_stock_indicators(
             )
         if probe_key == "level2_super_order":
             return await _calc_level2_super_order(
+                session, symbol, redis_client=redis_client, raw_by_key=raw_by_key
+            )
+        if probe_key == "margin_short_skew":
+            return await _calc_margin_short_skew(
                 session, symbol, redis_client=redis_client, raw_by_key=raw_by_key
             )
         raise ValueError(f"未实现的 live 算子: {probe_key}")

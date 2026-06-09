@@ -838,6 +838,30 @@ class ExecutingMoneyflowDaily(Base):
     )
 
 
+class ExecutingMarginDaily(Base):
+    """#19 margin_short_skew · Tushare margin_detail 日终底库（目标 250 交易日）。
+
+    [Ref: 28_ §3.2.3]
+    """
+
+    __tablename__ = "executing_margin_daily"
+
+    symbol: Mapped[str] = mapped_column(String(6), primary_key=True)
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    rzye: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    rqye: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    rzmre: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    margin_short_ratio: Mapped[Optional[float]] = mapped_column(nullable=True)
+    free_float_mkt_cap: Mapped[Optional[float]] = mapped_column(nullable=True)
+    margin_to_float_ratio: Mapped[Optional[float]] = mapped_column(nullable=True)
+    source: Mapped[str] = mapped_column(
+        String(96), nullable=False, default="Tushare Margin Detail (T+1 Lag)"
+    )
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
 class ExecutingT0Raw(Base):
     """T0 原始采集落库（按 probe_key 追加）。"""
 

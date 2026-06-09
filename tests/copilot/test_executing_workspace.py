@@ -28,6 +28,7 @@ async def test_probe_keys_count():
         "volume_price_div",
         "smart_money_flow",
         "level2_super_order",
+        "margin_short_skew",
     )
 
 

@@ -794,3 +794,99 @@ async def run_level2_super_order_eod(
         error=None if ok else "level2_super_order_eod_failed",
     )
     return {"job_id": "l2-super-order-eod", "status": "ok" if ok else "error", "results": results}
+
+
+async def run_margin_skew_sync_symbol(
+    session: AsyncSession,
+    symbol: str,
+    redis_client: Any,
+    *,
+    mode: str = "incremental",
+) -> dict[str, Any]:
+    """#19 单标的：Tushare margin_detail → PG + T0 摘要 + T1 分位快照。"""
+    from apps.copilot.modules.executing.indicator_nodes import build_margin_short_skew_node
+    from apps.copilot.modules.executing.margin_short_skew import (
+        SOURCE_MARGIN,
+        compute_margin_short_skew_metrics,
+        sync_margin_skew_symbol,
+    )
+    from apps.copilot.modules.executing.margin_storage import MARGIN_MIN_TRADING_DAYS
+    from apps.copilot.modules.executing.smart_money_flow import tushare_token
+    from apps.copilot.modules.executing.storage import save_t0_batch, upsert_t1_snapshot
+
+    sym = symbol.zfill(6)[-6:]
+    if not tushare_token():
+        return {"symbol": sym, "status": "error", "error": "TUSHARE_TOKEN 未配置"}
+
+    try:
+        result = await sync_margin_skew_symbol(
+            session, sym, redis_client=redis_client, mode=mode
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[margin-skew] sync 失败 symbol=%s: %s", sym, exc)
+        return {"symbol": sym, "status": "error", "error": str(exc)[:200]}
+
+    payload = result.get("payload")
+    pg_count = int(result.get("pg_count") or 0)
+    valid_rows = [
+        r for r in (payload or {}).get("margin_rows") or []
+        if r.get("margin_to_float_ratio") is not None
+    ]
+    ok = len(valid_rows) >= MARGIN_MIN_TRADING_DAYS
+    t0_item = {
+        "probe_key": "margin_short_skew",
+        "ok": ok,
+        "payload": result.get("t0_summary") or {},
+        "source": SOURCE_MARGIN,
+    }
+    if not ok:
+        t0_item["blocker"] = (
+            f"两融 PG 行数={pg_count} 或 margin_to_float_ratio 有效行={len(valid_rows)}"
+        )[:200]
+    await save_t0_batch(session, sym, [t0_item], trade_date=date.today())
+
+    t1_value = None
+    if ok and payload:
+        metrics = compute_margin_short_skew_metrics(payload)
+        node = build_margin_short_skew_node(metrics, source=SOURCE_MARGIN)
+        await upsert_t1_snapshot(
+            session, sym, "margin_short_skew", node, trade_date=date.today(), source=SOURCE_MARGIN
+        )
+        t1_value = node.get("value")
+
+    return {
+        **result,
+        "symbol": sym,
+        "status": "ok" if ok else "error",
+        "t1_value": t1_value,
+        "target_trading_days": MARGIN_MIN_TRADING_DAYS,
+    }
+
+
+async def run_margin_skew_morning(
+    session: AsyncSession,
+    symbols: list[str],
+    redis_client: Any,
+) -> dict[str, Any]:
+    """08:30 周二至周六 · T+1 两融增量/250日回填 + T1 快照。"""
+    from apps.copilot.modules.executing.margin_storage import MARGIN_TARGET_TRADING_DAYS, count_margin_rows
+
+    results: list[dict[str, Any]] = []
+    for sym in symbols:
+        code = sym.zfill(6)[-6:]
+        n = await count_margin_rows(session, code)
+        mode = "full" if n < MARGIN_TARGET_TRADING_DAYS else "incremental"
+        results.append(
+            await run_margin_skew_sync_symbol(session, sym, redis_client, mode=mode)
+        )
+    ok = [r for r in results if r.get("status") == "ok"]
+    await upsert_watermark(
+        session,
+        "l4-margin-skew-morning",
+        "*",
+        success=bool(ok),
+        trade_date=date.today(),
+        row_count=len(ok),
+        error=None if ok else "margin_skew_morning_failed",
+    )
+    return {"job_id": "l4-margin-skew-morning", "status": "ok" if ok else "error", "results": results}

@@ -31,6 +31,8 @@ JOB_REGISTRY: tuple[ExecutingJobSpec, ...] = (
     # #18 level2_super_order · elg_amount 120日分位（14:00 回填 · 17:00 日更）
     ExecutingJobSpec("l2-super-order-backfill", "0 14 * * 1-5", True, True, 3600),
     ExecutingJobSpec("l2-super-order-eod", "0 17 * * 1-5", True, True, 900),
+    # #19 margin_short_skew · T+1 两融 250日分位（周二至周六 08:30）
+    ExecutingJobSpec("l4-margin-skew-morning", "30 8 * * 2-6", True, True, 3600),
     ExecutingJobSpec("l4-atr-bars-sync", "0 16 * * 1-5", True, True, 900),
     ExecutingJobSpec("l4-micro-eod", "10 16 * * 1-5", True, True, 1800),
     ExecutingJobSpec("l3-news-daily", "0 18 * * 1-5", True, True, 1800),
