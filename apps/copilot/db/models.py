@@ -862,6 +862,26 @@ class ExecutingMarginDaily(Base):
     )
 
 
+class ExecutingTurnoverDaily(Base):
+    """#20 turnover_acceleration · Tushare daily_basic 自由换手率底库（目标 140 交易日）。
+
+    [Ref: 28_ §3.2.4]
+    """
+
+    __tablename__ = "executing_turnover_daily"
+
+    symbol: Mapped[str] = mapped_column(String(6), primary_key=True)
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    turnover_rate_f: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    volume_ratio: Mapped[Optional[float]] = mapped_column(nullable=True)
+    source: Mapped[str] = mapped_column(
+        String(96), nullable=False, default="Tushare Daily Basic (turnover_rate_f)"
+    )
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
 class ExecutingT0Raw(Base):
     """T0 原始采集落库（按 probe_key 追加）。"""
 

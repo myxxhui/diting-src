@@ -890,3 +890,112 @@ async def run_margin_skew_morning(
         error=None if ok else "margin_skew_morning_failed",
     )
     return {"job_id": "l4-margin-skew-morning", "status": "ok" if ok else "error", "results": results}
+
+
+async def run_turnover_acceleration_sync_symbol(
+    session: AsyncSession,
+    symbol: str,
+    redis_client: Any,
+    *,
+    mode: str = "incremental",
+) -> dict[str, Any]:
+    """#20 单标的：Tushare daily_basic → PG + T0 摘要 + T1 异动倍数快照。"""
+    from apps.copilot.modules.executing.indicator_nodes import build_turnover_acceleration_node
+    from apps.copilot.modules.executing.smart_money_flow import tushare_token
+    from apps.copilot.modules.executing.storage import save_t0_batch, upsert_t1_snapshot
+    from apps.copilot.modules.executing.turnover_acceleration import (
+        SOURCE_TURNOVER,
+        compute_turnover_acceleration_metrics,
+        sync_turnover_acceleration_symbol,
+    )
+    from apps.copilot.modules.executing.turnover_storage import (
+        TURNOVER_BASELINE_DAYS,
+        TURNOVER_MIN_TRADING_DAYS,
+    )
+
+    sym = symbol.zfill(6)[-6:]
+    if not tushare_token():
+        return {"symbol": sym, "status": "error", "error": "TUSHARE_TOKEN 未配置"}
+
+    try:
+        result = await sync_turnover_acceleration_symbol(
+            session, sym, redis_client=redis_client, mode=mode
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[turnover-accel] sync 失败 symbol=%s: %s", sym, exc)
+        return {"symbol": sym, "status": "error", "error": str(exc)[:200]}
+
+    payload = result.get("payload")
+    pg_count = int(result.get("pg_count") or 0)
+    min_rows = TURNOVER_MIN_TRADING_DAYS + TURNOVER_BASELINE_DAYS
+    ok = payload is not None and pg_count >= min_rows
+    t0_item = {
+        "probe_key": "turnover_acceleration",
+        "ok": ok,
+        "payload": result.get("t0_summary") or {},
+        "source": SOURCE_TURNOVER,
+    }
+    if not ok:
+        t0_item["blocker"] = f"turnover PG 行数={pg_count} 需>={min_rows}"[:200]
+    await save_t0_batch(session, sym, [t0_item], trade_date=date.today())
+
+    t1_value = None
+    if ok and payload:
+        try:
+            metrics = compute_turnover_acceleration_metrics(payload)
+            node = build_turnover_acceleration_node(metrics, source=SOURCE_TURNOVER)
+            await upsert_t1_snapshot(
+                session,
+                sym,
+                "turnover_acceleration",
+                node,
+                trade_date=date.today(),
+                source=SOURCE_TURNOVER,
+            )
+            t1_value = node.get("value")
+        except ValueError as exc:
+            t0_item["ok"] = False
+            t0_item["blocker"] = str(exc)[:200]
+            ok = False
+
+    return {
+        **result,
+        "symbol": sym,
+        "status": "ok" if ok else "error",
+        "t1_value": t1_value,
+        "target_trading_days": min_rows,
+    }
+
+
+async def run_turnover_acceleration_eod(
+    session: AsyncSession,
+    symbols: list[str],
+    redis_client: Any,
+) -> dict[str, Any]:
+    """15:30 · 全执行区标的 turnover_rate_f 增量/回填 + T1 快照。"""
+    from apps.copilot.modules.executing.turnover_storage import (
+        TURNOVER_BASELINE_DAYS,
+        TURNOVER_MIN_TRADING_DAYS,
+        count_turnover_rows,
+    )
+
+    min_rows = TURNOVER_MIN_TRADING_DAYS + TURNOVER_BASELINE_DAYS
+    results: list[dict[str, Any]] = []
+    for sym in symbols:
+        code = sym.zfill(6)[-6:]
+        n = await count_turnover_rows(session, code)
+        mode = "full" if n < min_rows else "incremental"
+        results.append(
+            await run_turnover_acceleration_sync_symbol(session, sym, redis_client, mode=mode)
+        )
+    ok = [r for r in results if r.get("status") == "ok"]
+    await upsert_watermark(
+        session,
+        "l4-turnover-accel-eod",
+        "*",
+        success=bool(ok),
+        trade_date=date.today(),
+        row_count=len(ok),
+        error=None if ok else "turnover_acceleration_eod_failed",
+    )
+    return {"job_id": "l4-turnover-accel-eod", "status": "ok" if ok else "error", "results": results}

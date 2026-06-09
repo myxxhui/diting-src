@@ -1588,21 +1588,20 @@ def _render_workspace_symbols_html(
             )
             open_attr = " open" if i == 0 else ""
             cards.append(
-                f"<details class='executing-symbol-card group border-2 border-slate-200 rounded-xl mb-4 "
-                f"shadow-sm hover:shadow-md transition-shadow bg-white overflow-hidden "
-                f"ring-1 ring-slate-100/80'{open_attr} data-symbol='{sym}'>"
-                f"<summary class='cursor-pointer list-none px-4 py-3.5 hover:bg-slate-50/90 flex flex-wrap "
-                f"items-center gap-2 border-b border-transparent group-open:border-slate-200 "
-                f"group-open:bg-slate-50/80 [&::-webkit-details-marker]:hidden'>"
+                f"<details class='executing-symbol-card group bg-white border border-gray-200 rounded-xl mb-4 "
+                f"shadow-sm hover:shadow-md transition-shadow overflow-hidden'{open_attr} data-symbol='{sym}'>"
+                f"<summary class='cursor-pointer list-none px-5 py-4 hover:bg-gray-50 flex flex-wrap "
+                f"items-center gap-2 border-b border-transparent group-open:border-gray-200 "
+                f"[&::-webkit-details-marker]:hidden'>"
                 f"<span class='text-gray-400 text-[10px] group-open:rotate-90 transition-transform "
                 f"shrink-0'>▸</span>"
                 f"<span class='font-semibold text-gray-900'>{name}</span>"
                 f"<span class='text-gray-400 text-sm font-mono'>{sym}</span>"
                 f"{phase}"
-                f"<span class='text-xs px-2 py-0.5 rounded bg-green-50 text-green-700'>执行中</span>"
+                f"<span class='text-xs px-2 py-0.5 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 font-medium'>执行中</span>"
                 f"{summary_tail}"
                 f"</summary>"
-                f"<div class='px-4 pb-4 pt-3 bg-gradient-to-b from-slate-50/70 to-white border-t-2 border-slate-200'>"
+                f"<div class='px-5 pb-5 pt-4 bg-gray-50 border-t border-gray-200'>"
                 f"<div class='flex flex-wrap gap-2 items-center mb-3'>"
                 f"<form hx-post='/api/campaigns/{container_id}/execution/advise' "
                 f"hx-target='#exec-{sym}' hx-swap='innerHTML' class='inline'>"
@@ -1636,6 +1635,10 @@ def _render_workspace_symbols_html(
                 f"加载探针与持仓监控…</p></div>"
                 f"</div></details>"
             )
+    if view == "executing":
+        return HTMLResponse(
+            f'<div class="executing-workspace-list rounded-xl">{"".join(cards)}</div>'
+        )
     return HTMLResponse("".join(cards))
 
 

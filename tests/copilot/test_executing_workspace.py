@@ -29,6 +29,7 @@ async def test_probe_keys_count():
         "smart_money_flow",
         "level2_super_order",
         "margin_short_skew",
+        "turnover_acceleration",
     )
 
 

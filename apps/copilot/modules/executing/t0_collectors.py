@@ -208,6 +208,15 @@ def _collect_margin_skew(symbol: str) -> dict[str, Any]:
     )
 
 
+def _collect_turnover_acceleration(symbol: str) -> dict[str, Any]:
+    """#20 · Tushare daily_basic turnover_rate_f · 由 l4-turnover-accel-eod Cron 落 PG。"""
+    return _block_typed(
+        "turnover_acceleration",
+        "A",
+        "需 Tushare turnover PG 底库 · 请运行 l4-turnover-accel-eod（15:30 盘后）",
+    )
+
+
 def _collect_block_trade(symbol: str) -> dict[str, Any]:
     try:
         import akshare as ak  # type: ignore
@@ -621,7 +630,6 @@ def collect_l4_micro(
         for k in (
             "qmt_atr_trailing",
             "volume_price_div",
-            "turnover_acceleration",
             "tech_beta_correlation",
         ):
             if k == "qmt_atr_trailing" and qmt_from_pg:
@@ -677,51 +685,6 @@ def collect_l4_micro(
     )
 
     from apps.copilot.modules.radar.t0.collectors._em_fetch import fetch_daily_kline_closes
-
-    kline = fetch_daily_kline_closes(symbol, days=65)
-    turnovers = [t for _d, _c, t in kline if t is not None]
-    if len(turnovers) < 60:
-        try:
-            import akshare as ak  # type: ignore
-
-            sym6 = symbol.zfill(6)[-6:]
-            hist = _ak_call(
-                ak.stock_zh_a_hist,
-                symbol=sym6,
-                period="daily",
-                adjust="qfq",
-            )
-            if hist is not None and not hist.empty and "换手率" in hist.columns:
-                turnovers = [
-                    float(x)
-                    for x in hist["换手率"].tail(65).tolist()
-                    if x is not None and str(x) not in ("", "nan")
-                ]
-        except Exception:
-            pass
-    if len(turnovers) >= 60:
-        t3 = sum(turnovers[-3:]) / 3
-        t60 = sum(turnovers[-60:]) / 60
-        out.append(
-            _ok(
-                "turnover_acceleration",
-                {
-                    "turnover_avg_3d": round(t3, 4),
-                    "turnover_avg_60d": round(t60, 4),
-                    "accel": round(t3 / t60, 4) if t60 else None,
-                },
-                "eastmoney:push2delay/kline_turnover",
-            )
-        )
-    else:
-        out.append(
-            _block_typed(
-                "turnover_acceleration",
-                "C",
-                f"换手率序列不足({len(turnovers)})·禁止仅用成交量比 ok",
-            )
-        )
-
     from apps.state_watch.probes.datasource.quote_adapter import fetch_bars
 
     idx_kline = fetch_daily_kline_closes("000852", days=15)
@@ -776,6 +739,7 @@ def collect_l4_micro(
     out.append(_collect_smart_money_flow(symbol))
 
     out.append(_collect_margin_skew(symbol))
+    out.append(_collect_turnover_acceleration(symbol))
     out.append(_collect_block_trade(symbol))
     out.append(_collect_level2_super_order(symbol))
     return out

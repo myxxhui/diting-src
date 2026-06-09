@@ -40,6 +40,7 @@ PROBE_INDICATOR_NAMES: dict[str, str] = {
     "smart_money_flow": "L2主力大单资金流向",
     "level2_super_order": "L2特大单净动能历史分位",
     "margin_short_skew": "两融杠杆倾斜度历史分位",
+    "turnover_acceleration": "自由换手率异动倍数",
 }
 
 

@@ -217,6 +217,35 @@ async def _calc_margin_short_skew(
     return "margin_short_skew", node
 
 
+async def _calc_turnover_acceleration(
+    session: AsyncSession,
+    symbol: str,
+    *,
+    redis_client: Any,
+    raw_by_key: dict[str, dict[str, Any]],
+) -> OperatorResult:
+    """#20：PG daily_basic turnover_rate_f → 异动倍数 T1。"""
+    from apps.copilot.modules.executing.indicator_nodes import build_turnover_acceleration_node
+    from apps.copilot.modules.executing.turnover_acceleration import (
+        SOURCE_TURNOVER,
+        compute_turnover_acceleration_metrics,
+        load_turnover_acceleration_payload,
+    )
+
+    sym = symbol.zfill(6)[-6:]
+    payload = await load_turnover_acceleration_payload(session, sym, redis_client=redis_client)
+    if payload is None:
+        snap = await load_t1_snapshot(session, sym, "turnover_acceleration")
+        if snap:
+            return "turnover_acceleration", snap
+        raw = raw_by_key.get("turnover_acceleration")
+        raise ValueError(raw.get("blocker") if raw else "turnover_acceleration 未采集")
+
+    metrics = compute_turnover_acceleration_metrics(payload)
+    node = build_turnover_acceleration_node(metrics, source=SOURCE_TURNOVER)
+    return "turnover_acceleration", node
+
+
 async def _gather_stock_indicators(
     session: AsyncSession,
     symbol: str,
@@ -250,6 +279,10 @@ async def _gather_stock_indicators(
             )
         if probe_key == "margin_short_skew":
             return await _calc_margin_short_skew(
+                session, symbol, redis_client=redis_client, raw_by_key=raw_by_key
+            )
+        if probe_key == "turnover_acceleration":
+            return await _calc_turnover_acceleration(
                 session, symbol, redis_client=redis_client, raw_by_key=raw_by_key
             )
         raise ValueError(f"未实现的 live 算子: {probe_key}")

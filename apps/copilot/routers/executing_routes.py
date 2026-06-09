@@ -257,43 +257,43 @@ async def api_executing_detail_html(symbol: str, session: AsyncSession = Depends
     mark_disp = format_price_display(ctx.get("mark_price"))
     cost_disp = format_price_display(ctx.get("cost_price"))
     pos_form = f"""
-<div class="executing-position-card border-2 border-blue-100 rounded-xl p-4 mb-4 bg-white shadow-sm">
-  <h3 class="font-bold text-lg mb-2">层 A · 标的基础数据 · {_esc(sym)}</h3>
-  <p class="text-xs text-gray-500 mb-1">保存后同步写入 <code>user_positions</code> 与 <code>executing_collect_symbols</code></p>
-  <p class="text-xs text-emerald-800 mb-3">{money_hint} · 价格字段均为此单位</p>
+<div class="executing-position-card bg-white border border-gray-200 rounded-xl shadow-sm p-6 mb-4">
+  <h3 class="text-base font-semibold text-gray-900 mb-1">层 A · 标的基础数据 · {_esc(sym)}</h3>
+  <p class="text-xs text-gray-400 mb-1">保存后同步写入 <code class="text-[11px] bg-gray-100 px-1 rounded">user_positions</code> 与 <code class="text-[11px] bg-gray-100 px-1 rounded">executing_collect_symbols</code></p>
+  <p class="text-xs text-gray-500 mb-4">{money_hint} · 价格字段均为此单位</p>
   <form hx-post="/api/executing/positions/{sym}/save" hx-target="#executing-detail-{sym}" hx-swap="outerHTML"
         class="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
-    <label class="flex flex-col gap-1">名称
-      <input name="name" class="border rounded px-2 py-1 w-full" value="{_esc(ctx.get('name',''))}">
+    <label class="flex flex-col gap-1 text-gray-700">名称
+      <input name="name" class="border border-gray-200 rounded-lg px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400" value="{_esc(ctx.get('name',''))}">
     </label>
-    <label class="flex flex-col gap-1">持股数量
-      <input name="quantity" type="number" step="any" class="border rounded px-2 py-1 w-full"
+    <label class="flex flex-col gap-1 text-gray-700">持股数量
+      <input name="quantity" type="number" step="any" class="border border-gray-200 rounded-lg px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
         value="{_esc(ctx.get('quantity',''))}">
     </label>
-    <label class="flex flex-col gap-1">成本价（{EXECUTING_MONEY_UNIT}）
-      <input name="cost_price" type="number" step="0.0001" class="border rounded px-2 py-1 w-full"
+    <label class="flex flex-col gap-1 text-gray-700">成本价（{EXECUTING_MONEY_UNIT}）
+      <input name="cost_price" type="number" step="0.0001" class="border border-gray-200 rounded-lg px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
         value="{_esc(ctx.get('cost_price',''))}">
     </label>
-    <label class="flex flex-col gap-1">占仓位（%）
+    <label class="flex flex-col gap-1 text-gray-700">占仓位（%）
       <input name="position_pct" type="number" step="0.0001" min="0" max="100"
-        class="border rounded px-2 py-1 w-full" value="{_esc(ctx.get('position_pct',''))}"
+        class="border border-gray-200 rounded-lg px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400" value="{_esc(ctx.get('position_pct',''))}"
         placeholder="如 29.37">
     </label>
-    <label class="flex flex-col gap-1">建仓时间
-      <input name="opened_at" type="date" class="border rounded px-2 py-1 w-full"
+    <label class="flex flex-col gap-1 text-gray-700">建仓时间
+      <input name="opened_at" type="date" class="border border-gray-200 rounded-lg px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
         value="{_esc(opened_val)}" required>
     </label>
-    <label class="flex flex-col gap-1 md:col-span-1">备注
-      <input name="notes" class="border rounded px-2 py-1 w-full" value="{_esc(notes_val)}">
+    <label class="flex flex-col gap-1 md:col-span-1 text-gray-700">备注
+      <input name="notes" class="border border-gray-200 rounded-lg px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400" value="{_esc(notes_val)}">
     </label>
-    <div class="col-span-2 md:col-span-3 text-gray-600 bg-gray-50 rounded px-2 py-2">
-      现价 <strong>{_esc(mark_disp)}</strong>
-      · 成本 <strong>{_esc(cost_disp)}</strong>
-      · 浮盈 <strong>{_esc(ctx.get('unrealized_pnl_pct','—'))}%</strong>
-      · 仓位 <strong>{_esc(ctx.get('position_pct','—'))}%</strong>
+    <div class="col-span-2 md:col-span-3 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5">
+      现价 <strong class="text-gray-900">{_esc(mark_disp)}</strong>
+      · 成本 <strong class="text-gray-900">{_esc(cost_disp)}</strong>
+      · 浮盈 <strong class="text-emerald-500">{_esc(ctx.get('unrealized_pnl_pct','—'))}%</strong>
+      · 仓位 <strong class="text-gray-900">{_esc(ctx.get('position_pct','—'))}%</strong>
       {'· <span class="text-amber-600">行情 stale</span>' if ctx.get('price_stale') else ''}
     </div>
-    <button type="submit" class="col-span-2 md:col-span-3 bg-blue-600 text-white rounded py-2 hover:bg-blue-700">
+    <button type="submit" class="col-span-2 md:col-span-3 bg-blue-600 text-white rounded-lg py-2.5 hover:bg-blue-700 font-medium transition-colors">
       保存标的基础数据
     </button>
   </form>
@@ -335,29 +335,29 @@ async def api_executing_detail_html(symbol: str, session: AsyncSession = Depends
         cmd = cmd_root if isinstance(cmd_root, dict) else {}
 
     toolbar = f"""
-<div class="flex gap-2 mb-3 flex-wrap text-sm">
-  <button class="px-3 py-1 bg-indigo-600 text-white rounded"
+<div class="flex gap-2 mb-4 flex-wrap text-sm">
+  <button class="px-3 py-1.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 font-medium transition-colors"
     hx-post="/api/executing/{sym}/daily-run-html" hx-target="#executing-detail-{sym}" hx-swap="outerHTML">
     立即跑今日体检
   </button>
-  <button class="px-3 py-1 border rounded"
+  <button class="px-3 py-1.5 border border-gray-200 bg-white text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
     hx-get="/api/executing/sync-status" hx-target="#executing-sync-badge" hx-swap="innerHTML">
     检查数据同步
   </button>
-  <span id="executing-sync-badge" class="text-amber-700">
+  <span id="executing-sync-badge" class="text-xs text-gray-500 self-center">
     同步：stale {sync.get('stale_count',0)} · missing {sync.get('missing_count',0)}
   </span>
 </div>
 """
 
     audit_html = f"""
-<div class="border rounded-lg p-4 bg-slate-50">
-  <h3 class="font-bold mb-2">层 C · T2 风控日报</h3>
-  <p><strong>action</strong> {_esc(cmd.get('action','pending'))}</p>
-  <p class="text-sm">{_esc(cmd.get('one_sentence_summary',''))}</p>
-  <p class="text-sm text-red-700">硬防线 {_esc(cmd.get('stop_loss_line',''))}</p>
-  <p class="text-xs text-gray-500">t2_status={_esc(audit_row.t2_status if audit_row else 'none')}</p>
-</div>
+<article class="bg-white border border-gray-200 rounded-xl shadow-sm p-6 mb-4">
+  <h3 class="text-base font-semibold text-gray-900 mb-3 pb-2 border-b border-gray-200">层 C · T2 风控日报</h3>
+  <p class="text-sm text-gray-600"><span class="text-gray-400">action</span> <strong class="text-gray-900">{_esc(cmd.get('action','pending'))}</strong></p>
+  <p class="text-sm text-gray-600 mt-2 leading-relaxed">{_esc(cmd.get('one_sentence_summary',''))}</p>
+  <p class="text-sm text-rose-600 mt-2">硬防线 {_esc(cmd.get('stop_loss_line',''))}</p>
+  <p class="text-[11px] text-gray-400 mt-3 pt-2 border-t border-gray-100">t2_status={_esc(audit_row.t2_status if audit_row else 'none')}</p>
+</article>
 """
 
     qmt_node = l4.get("qmt_atr_trailing") if isinstance(l4, dict) else None
@@ -371,13 +371,13 @@ async def api_executing_detail_html(symbol: str, session: AsyncSession = Depends
         f"{layer_b_banner}"
         f"{render_degraded_probes(degraded_hints)}"
         f"{hot_timeline}"
-        f'{render_probe_domain(l4, title="层 B · T1 指标（#15~#19）", accent="orange", empty_hint="暂无可用指标 · 点「立即跑今日体检」或等待 Cron 采集", symbol=sym, sync=sync)}'
+        f'{render_probe_domain(l4, title="层 B · T1 指标（#15~#20）", accent="orange", empty_hint="暂无可用指标 · 点「立即跑今日体检」或等待 Cron 采集", symbol=sym, sync=sync)}'
     )
 
     return HTMLResponse(
-        f'<div id="executing-detail-{sym}" class="executing-workspace">'
+        f'<div id="executing-detail-{sym}" class="executing-workspace bg-gray-50 rounded-xl p-4 -mx-1">'
         f"{toolbar}{pos_form}"
-        f'<div class="border-2 border-orange-100 rounded-xl p-4 mb-4 bg-orange-50/20 shadow-sm">{layer_b_html}</div>'
+        f"{layer_b_html}"
         f"{audit_html}"
-        f'<p class="text-xs text-gray-400 mt-2">advisory only · no-auto-execute · [Ref: 28_]</p></div>'
+        f'<p class="text-[11px] text-gray-400 text-center mt-2">advisory only · no-auto-execute · [Ref: 28_]</p></div>'
     )
