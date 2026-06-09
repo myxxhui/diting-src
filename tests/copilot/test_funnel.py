@@ -120,6 +120,25 @@ async def test_touch_last_analyzed_naive_utc():
 
 
 @pytest.mark.asyncio
+async def test_executing_workspace_renders_all_symbol_loaders():
+    """执行区列表须为每只标的注册 hx-load 详情拉取（非失效的 revealed）。"""
+    from apps.copilot.routers.planning_routes import _render_workspace_symbols_html
+
+    items = [
+        {"symbol": "601138", "name": "工业富联", "position_pct": 10.0, "quantity": 100, "cost_price": 50},
+        {"symbol": "002837", "name": "英维克", "position_pct": 20.0, "quantity": 200, "cost_price": 60},
+    ]
+    resp = _render_workspace_symbols_html(items, view="executing", container_id=1)
+    body = resp.body.decode()
+    assert body.count("executing-symbol-card") == 2
+    assert "hx-trigger='load once'" in body
+    assert "revealed once" not in body
+    assert "/api/executing/601138/detail" in body
+    assert "/api/executing/002837/detail" in body
+    assert " open" in body.split("executing-symbol-card")[1]
+
+
+@pytest.mark.asyncio
 async def test_no_auto_execute_funnel():
     """漏斗中枢不含任何自动下单/交易指令。"""
     import re

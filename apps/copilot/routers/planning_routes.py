@@ -1532,7 +1532,7 @@ def _render_workspace_symbols_html(
         return HTMLResponse(f"<p class='text-sm text-gray-500 py-4 text-center'>{hint}</p>")
 
     cards: list[str] = []
-    for s in items:
+    for i, s in enumerate(items):
         sym = s.get("symbol", "")
         name = s.get("name", sym)
         phase = _phase_chip(s.get("market_phase"))
@@ -1586,9 +1586,10 @@ def _render_workspace_symbols_html(
                 f" · 成本 {cost_txt}"
                 f" · 建仓 {opened}</span>"
             )
+            open_attr = " open" if i == 0 else ""
             cards.append(
                 f"<details class='executing-symbol-card group border border-gray-100 rounded-lg mb-3 "
-                f"bg-white overflow-hidden'>"
+                f"bg-white overflow-hidden'{open_attr} data-symbol='{sym}'>"
                 f"<summary class='cursor-pointer list-none px-4 py-3 hover:bg-gray-50 flex flex-wrap "
                 f"items-center gap-2 [&::-webkit-details-marker]:hidden'>"
                 f"<span class='text-gray-400 text-[10px] group-open:rotate-90 transition-transform "
@@ -1621,8 +1622,16 @@ def _render_workspace_symbols_html(
                 f"text-gray-600'>移除</button></form>"
                 f"</div>"
                 f"<div id='exec-{sym}' class='mb-2'></div>"
-                f"<div hx-get='/api/executing/{sym}/detail' hx-trigger='revealed once' "
-                f"hx-swap='outerHTML' class='executing-detail-slot'></div>"
+                f"<div hx-get='/api/executing/{sym}/detail' hx-trigger='load once' "
+                f"hx-swap='outerHTML' class='executing-detail-slot' "
+                f"data-symbol='{sym}'>"
+                f"<p class='text-xs text-gray-400 py-3 flex items-center gap-2'>"
+                f"<svg class='animate-spin h-3.5 w-3.5' fill='none' viewBox='0 0 24 24'>"
+                f"<circle class='opacity-25' cx='12' cy='12' r='10' stroke='currentColor' "
+                f"stroke-width='4'></circle>"
+                f"<path class='opacity-75' fill='currentColor' "
+                f"d='M4 12a8 8 0 018-8v8H4z'></path></svg>"
+                f"加载探针与持仓监控…</p></div>"
                 f"</div></details>"
             )
     return HTMLResponse("".join(cards))

@@ -78,10 +78,29 @@
       if (view === 'radar' && typeof window.radarBootRadarPanel === 'function') {
         window.radarBootRadarPanel();
       }
+      if (view === 'executing' && typeof window.executingBootPanel === 'function') {
+        window.executingBootPanel();
+      }
       if (typeof htmx !== 'undefined') {
         var panel = document.getElementById('workbench-panel');
         if (panel) htmx.process(panel);
       }
+    };
+
+    /** 执行区：展开折叠卡时若详情未加载则补拉（兜底） */
+    window.executingBootPanel = function () {
+      document.querySelectorAll('.executing-symbol-card').forEach(function (details) {
+        if (details._executingBound) return;
+        details._executingBound = true;
+        details.addEventListener('toggle', function () {
+          if (!details.open) return;
+          var slot = details.querySelector('.executing-detail-slot');
+          if (!slot || slot.id && slot.id.indexOf('executing-detail-') === 0) return;
+          if (typeof htmx !== 'undefined') {
+            htmx.trigger(slot, 'load');
+          }
+        });
+      });
     };
 
     document.body.addEventListener('htmx:beforeRequest', function (ev) {
@@ -98,6 +117,18 @@
       var view = t.getAttribute('data-view') || '';
       window.workbenchSyncTabs(view);
       window.workbenchInitPanel(view);
+    });
+
+    document.body.addEventListener('htmx:afterSwap', function (ev) {
+      var t = ev.detail && ev.detail.target;
+      if (!t || !t.getAttribute || !t.getAttribute('hx-get')) return;
+      var hxGet = t.getAttribute('hx-get') || '';
+      if (hxGet.indexOf('view=executing') === -1 && hxGet.indexOf('view=planning') === -1) return;
+      var panel = document.getElementById('workbench-panel');
+      var view = panel && panel.getAttribute('data-view');
+      if (view === 'executing' && typeof window.executingBootPanel === 'function') {
+        window.executingBootPanel();
+      }
     });
 
     window.radarAnalyzeBtnBusy = function (on) {
