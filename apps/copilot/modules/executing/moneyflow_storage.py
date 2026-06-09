@@ -39,6 +39,9 @@ def row_to_dict(row: ExecutingMoneyflowDaily) -> dict[str, Any]:
         "trade_date": row.trade_date.strftime("%Y%m%d"),
         "buy_elg_vol": float(row.buy_elg_vol),
         "sell_elg_vol": float(row.sell_elg_vol),
+        "buy_elg_amount": float(row.buy_elg_amount),
+        "sell_elg_amount": float(row.sell_elg_amount),
+        "net_elg_amount": float(row.net_elg_amount),
         "buy_lg_vol": float(row.buy_lg_vol),
         "sell_lg_vol": float(row.sell_lg_vol),
         "buy_md_vol": float(row.buy_md_vol),
@@ -103,6 +106,14 @@ async def upsert_moneyflow_rows(
                     trade_date=td,
                     buy_elg_vol=float(r.get("buy_elg_vol") or 0),
                     sell_elg_vol=float(r.get("sell_elg_vol") or 0),
+                    buy_elg_amount=float(r.get("buy_elg_amount") or 0),
+                    sell_elg_amount=float(r.get("sell_elg_amount") or 0),
+                    net_elg_amount=float(
+                        r.get("net_elg_amount")
+                        if r.get("net_elg_amount") is not None
+                        else float(r.get("buy_elg_amount") or 0)
+                        - float(r.get("sell_elg_amount") or 0)
+                    ),
                     buy_lg_vol=float(r.get("buy_lg_vol") or 0),
                     sell_lg_vol=float(r.get("sell_lg_vol") or 0),
                     buy_md_vol=float(r.get("buy_md_vol") or 0),
@@ -117,6 +128,13 @@ async def upsert_moneyflow_rows(
         else:
             existing.buy_elg_vol = float(r.get("buy_elg_vol") or 0)
             existing.sell_elg_vol = float(r.get("sell_elg_vol") or 0)
+            existing.buy_elg_amount = float(r.get("buy_elg_amount") or 0)
+            existing.sell_elg_amount = float(r.get("sell_elg_amount") or 0)
+            existing.net_elg_amount = float(
+                r.get("net_elg_amount")
+                if r.get("net_elg_amount") is not None
+                else float(r.get("buy_elg_amount") or 0) - float(r.get("sell_elg_amount") or 0)
+            )
             existing.buy_lg_vol = float(r.get("buy_lg_vol") or 0)
             existing.sell_lg_vol = float(r.get("sell_lg_vol") or 0)
             existing.buy_md_vol = float(r.get("buy_md_vol") or 0)

@@ -666,3 +666,131 @@ async def run_smart_money_eod(
         error=None if ok else "smart_money_eod_failed",
     )
     return {"job_id": "l4-smart-money-eod", "status": "ok" if ok else "error", "results": results}
+
+
+async def run_level2_super_order_sync_symbol(
+    session: AsyncSession,
+    symbol: str,
+    redis_client: Any,
+    *,
+    mode: str = "incremental",
+) -> dict[str, Any]:
+    """#18 单标的：Tushare elg_amount → PG + T0 摘要 + T1 分位快照。"""
+    from apps.copilot.modules.executing.indicator_nodes import build_level2_super_order_node
+    from apps.copilot.modules.executing.level2_super_order import (
+        SOURCE_ELG,
+        SUPER_ORDER_MIN_TRADING_DAYS,
+        compute_level2_super_order_metrics,
+        sync_level2_super_order_symbol,
+    )
+    from apps.copilot.modules.executing.smart_money_flow import tushare_token
+    from apps.copilot.modules.executing.storage import save_t0_batch, upsert_t1_snapshot
+
+    sym = symbol.zfill(6)[-6:]
+    if not tushare_token():
+        return {"symbol": sym, "status": "error", "error": "TUSHARE_TOKEN 未配置"}
+
+    try:
+        result = await sync_level2_super_order_symbol(
+            session, sym, redis_client=redis_client, mode=mode
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[level2-super-order] sync 失败 symbol=%s: %s", sym, exc)
+        return {"symbol": sym, "status": "error", "error": str(exc)[:200]}
+
+    payload = result.get("payload")
+    pg_count = int(result.get("pg_count") or 0)
+    ok = payload is not None and pg_count >= SUPER_ORDER_MIN_TRADING_DAYS
+    t0_item = {
+        "probe_key": "level2_super_order",
+        "ok": ok,
+        "payload": result.get("t0_summary") or {},
+        "source": SOURCE_ELG,
+    }
+    if not ok:
+        t0_item["blocker"] = (
+            f"elg PG 行数={pg_count} 或 elg_amount 未回填"
+        )[:200]
+    await save_t0_batch(session, sym, [t0_item], trade_date=date.today())
+
+    t1_value = None
+    if ok and payload:
+        metrics = compute_level2_super_order_metrics(payload)
+        node = build_level2_super_order_node(metrics, source=SOURCE_ELG)
+        await upsert_t1_snapshot(
+            session, sym, "level2_super_order", node, trade_date=date.today(), source=SOURCE_ELG
+        )
+        t1_value = node.get("value")
+
+    return {
+        **result,
+        "symbol": sym,
+        "status": "ok" if ok else "error",
+        "t1_value": t1_value,
+        "target_trading_days": SUPER_ORDER_MIN_TRADING_DAYS,
+    }
+
+
+async def run_level2_super_order_backfill_check(
+    session: AsyncSession,
+    symbols: list[str],
+    redis_client: Any,
+) -> dict[str, Any]:
+    """14:00 · 检查全标的 PG 是否满 120 交易日且 elg 金额已回填。"""
+    from apps.copilot.modules.executing.level2_super_order import (
+        SUPER_ORDER_MIN_TRADING_DAYS,
+        load_level2_super_order_payload,
+    )
+    from apps.copilot.modules.executing.moneyflow_storage import count_moneyflow_rows
+
+    results: list[dict[str, Any]] = []
+    for sym in symbols:
+        code = sym.zfill(6)[-6:]
+        n = await count_moneyflow_rows(session, code)
+        payload = await load_level2_super_order_payload(session, code)
+        if n < SUPER_ORDER_MIN_TRADING_DAYS or payload is None:
+            results.append(
+                await run_level2_super_order_sync_symbol(
+                    session, sym, redis_client, mode="full"
+                )
+            )
+        else:
+            results.append(
+                {"symbol": code, "status": "skip", "pg_count": n, "reason": "already_full"}
+            )
+    ok = [r for r in results if r.get("status") == "ok"]
+    await upsert_watermark(
+        session,
+        "l2-super-order-backfill",
+        "*",
+        success=bool(ok) or all(r.get("status") == "skip" for r in results),
+        trade_date=date.today(),
+        row_count=sum(r.get("pg_count", 0) or r.get("upserted", 0) for r in results),
+    )
+    return {"job_id": "l2-super-order-backfill", "status": "ok", "results": results}
+
+
+async def run_level2_super_order_eod(
+    session: AsyncSession,
+    symbols: list[str],
+    redis_client: Any,
+) -> dict[str, Any]:
+    """17:00 · 全执行区标的 elg 增量日更 + T1 分位快照。"""
+    results = []
+    for sym in symbols:
+        results.append(
+            await run_level2_super_order_sync_symbol(
+                session, sym, redis_client, mode="incremental"
+            )
+        )
+    ok = [r for r in results if r.get("status") == "ok"]
+    await upsert_watermark(
+        session,
+        "l2-super-order-eod",
+        "*",
+        success=bool(ok),
+        trade_date=date.today(),
+        row_count=len(ok),
+        error=None if ok else "level2_super_order_eod_failed",
+    )
+    return {"job_id": "l2-super-order-eod", "status": "ok" if ok else "error", "results": results}

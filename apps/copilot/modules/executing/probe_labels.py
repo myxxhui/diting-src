@@ -38,6 +38,7 @@ PROBE_INDICATOR_NAMES: dict[str, str] = {
     "qmt_atr_trailing": "动态ATR追踪止盈",
     "volume_price_div": "15分钟级高位量价背离",
     "smart_money_flow": "L2主力大单资金流向",
+    "level2_super_order": "L2特大单净动能历史分位",
 }
 
 

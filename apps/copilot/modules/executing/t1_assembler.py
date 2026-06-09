@@ -159,6 +159,35 @@ async def _calc_smart_money_flow(
     return "smart_money_flow", node
 
 
+async def _calc_level2_super_order(
+    session: AsyncSession,
+    symbol: str,
+    *,
+    redis_client: Any,
+    raw_by_key: dict[str, dict[str, Any]],
+) -> OperatorResult:
+    """#18：PG elg_amount 120 日底库 → 历史分位 T1。"""
+    from apps.copilot.modules.executing.indicator_nodes import build_level2_super_order_node
+    from apps.copilot.modules.executing.level2_super_order import (
+        SOURCE_ELG,
+        compute_level2_super_order_metrics,
+        load_level2_super_order_payload,
+    )
+
+    sym = symbol.zfill(6)[-6:]
+    payload = await load_level2_super_order_payload(session, sym)
+    if payload is None:
+        snap = await load_t1_snapshot(session, sym, "level2_super_order")
+        if snap:
+            return "level2_super_order", snap
+        raw = raw_by_key.get("level2_super_order")
+        raise ValueError(raw.get("blocker") if raw else "level2_super_order 未采集")
+
+    metrics = compute_level2_super_order_metrics(payload)
+    node = build_level2_super_order_node(metrics, source=SOURCE_ELG)
+    return "level2_super_order", node
+
+
 async def _gather_stock_indicators(
     session: AsyncSession,
     symbol: str,
@@ -184,6 +213,10 @@ async def _gather_stock_indicators(
             )
         if probe_key == "smart_money_flow":
             return await _calc_smart_money_flow(
+                session, symbol, redis_client=redis_client, raw_by_key=raw_by_key
+            )
+        if probe_key == "level2_super_order":
+            return await _calc_level2_super_order(
                 session, symbol, redis_client=redis_client, raw_by_key=raw_by_key
             )
         raise ValueError(f"未实现的 live 算子: {probe_key}")

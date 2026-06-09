@@ -57,10 +57,15 @@ def _pro_api():
 
 
 def _row_from_df(r: Any) -> dict[str, Any]:
+    buy_elg_amt = float(r.get("buy_elg_amount") or 0)
+    sell_elg_amt = float(r.get("sell_elg_amount") or 0)
     return {
         "trade_date": str(r.get("trade_date", "")),
         "buy_elg_vol": float(r.get("buy_elg_vol") or 0),
         "sell_elg_vol": float(r.get("sell_elg_vol") or 0),
+        "buy_elg_amount": buy_elg_amt,
+        "sell_elg_amount": sell_elg_amt,
+        "net_elg_amount": buy_elg_amt - sell_elg_amt,
         "buy_lg_vol": float(r.get("buy_lg_vol") or 0),
         "sell_lg_vol": float(r.get("sell_lg_vol") or 0),
         "buy_md_vol": float(r.get("buy_md_vol") or 0),

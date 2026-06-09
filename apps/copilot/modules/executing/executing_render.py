@@ -291,6 +291,72 @@ def render_smart_money_flow_card(node: dict[str, Any]) -> str:
 """
 
 
+def render_level2_super_order_card(node: dict[str, Any]) -> str:
+    """#18 L2 特大单 · 120 日历史分位。"""
+    val = node.get("value")
+    st = _indicator_status(node)
+    dot = "🟢" if st == "ok" else "🔴"
+    name = node.get("indicator_name") or probe_indicator_name("level2_super_order")
+    short = probe_label("level2_super_order")
+    rm = raw_metrics_for_display(node)
+    pct_disp = f"{float(val):.1f}%" if val is not None else "—"
+
+    metric_labels = (
+        ("今日特大单净额(元)", "current_net_elg_amount"),
+        ("今日特大单买入(元)", "current_buy_elg_amount"),
+        ("今日特大单卖出(元)", "current_sell_elg_amount"),
+        ("120日均值(元)", "120d_mean_net_amount"),
+        ("120日P95(元)", "120d_p95_threshold"),
+        ("120日P05(元)", "120d_p05_threshold"),
+        ("回看窗口(日)", "lookback_window_days"),
+    )
+    audit_rows = []
+    for lbl, fld in metric_labels:
+        v = rm.get(fld)
+        if v is not None and v != "":
+            audit_rows.append(
+                f"<span class='inline-flex gap-1 px-2 py-0.5 rounded bg-amber-50 border "
+                f"border-amber-100'><span class='text-gray-500'>{lbl}</span>"
+                f"<strong class='text-gray-800'>{_esc(v)}</strong></span>"
+            )
+    audit_html = (
+        f"<div class='flex flex-wrap gap-1.5 mt-2'>{''.join(audit_rows)}</div>"
+        if audit_rows
+        else ""
+    )
+    t1_json = {
+        "level2_super_order": {
+            "indicator_name": name,
+            "value": val,
+            "fact_statement": node.get("fact_statement"),
+            "calculation_logic": node.get("calculation_logic"),
+            "source": node.get("source"),
+            "raw_metrics": rm,
+        }
+    }
+    json_block = _esc(json.dumps(t1_json, ensure_ascii=False, indent=2))
+
+    return f"""
+<div class="rounded-lg border border-amber-100 bg-amber-50/30 p-3 mb-2">
+  <div class="flex flex-wrap items-center gap-2 mb-1">
+    <span class="text-sm font-semibold text-gray-900">{_esc(name)}</span>
+    <span class="text-[10px] text-gray-500">({short})</span>
+    <span class="text-[10px] font-mono text-gray-400">level2_super_order · #18</span>
+    <span class="text-sm ml-auto">{dot} <strong>{_esc(pct_disp)}</strong></span>
+  </div>
+  <p class="text-xs text-gray-600 mb-1">仅特大单(elg) · 120交易日历史分位 · 不含大单及以下</p>
+  <p class="text-xs text-gray-800 leading-relaxed">{_esc(node.get('fact_statement', ''))}</p>
+  <p class="text-[11px] text-gray-500 mt-1 font-mono">{_esc(node.get('calculation_logic', ''))}</p>
+  <p class="text-[10px] text-gray-400 mt-1">来源：{_esc(node.get('source', '—'))}</p>
+  {audit_html}
+  <details class="mt-2">
+    <summary class="text-[11px] text-amber-800 cursor-pointer font-medium">T1 白盒 JSON（喂 T2）</summary>
+    <pre class="text-[10px] bg-gray-900 text-green-100 p-2 rounded mt-1 overflow-x-auto font-mono">{json_block}</pre>
+  </details>
+</div>
+"""
+
+
 def render_generic_probe_card(key: str, node: dict[str, Any]) -> str:
     val = node.get("value")
     st = _indicator_status(node)
@@ -371,6 +437,8 @@ def render_probe_domain(
             cards.append(render_volume_price_div_card(node))
         elif k == "smart_money_flow":
             cards.append(render_smart_money_flow_card(node))
+        elif k == "level2_super_order":
+            cards.append(render_level2_super_order_card(node))
         else:
             cards.append(render_generic_probe_card(k, node))
     body = "".join(cards) or "<p class='text-xs text-gray-500'>尚无 T1 数据</p>"

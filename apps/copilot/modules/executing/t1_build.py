@@ -140,10 +140,19 @@ def _probe_node_from_raw(key: str, raw: dict[str, Any] | None) -> dict[str, Any]
             f"匹配 {len(headlines)} 条相关标题" if headlines else str(payload.get("fact_statement", "")),
         )
     if key == "level2_super_order":
-        val = payload.get("net_super_order_5d")
-        if val is None:
-            return None
-        return _node(val, source, "东财超大单5日净额", f"超大单5日合计 {val}")
+        try:
+            from apps.copilot.modules.executing.indicator_nodes import build_level2_super_order_node
+            from apps.copilot.modules.executing.level2_super_order import compute_level2_super_order_metrics
+
+            if payload.get("moneyflow_rows"):
+                metrics = compute_level2_super_order_metrics(payload)
+                return build_level2_super_order_node(metrics, source=source)
+            val = payload.get("value")
+            if val is not None:
+                return build_level2_super_order_node(payload, source=source)
+        except Exception as exc:
+            return _node(None, source, "特大单历史分位计算失败", str(exc))
+        return None
     if key == "cloud_capex_consensus":
         val = payload.get("total_capex_usd")
         if val is None:

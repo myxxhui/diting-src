@@ -1,4 +1,4 @@
-"""执行区探针注册表 · 逐项启用（当前 #15+#16+#17）。
+"""执行区探针注册表 · 逐项启用（当前 #15+#16+#17+#18）。
 
 [Ref: 28_ §4.5]
 """
@@ -14,6 +14,7 @@ PROBE_KEYS: tuple[str, ...] = (
     "qmt_atr_trailing",
     "volume_price_div",
     "smart_money_flow",
+    "level2_super_order",
 )
 
 L3_KEYS: tuple[str, ...] = ()

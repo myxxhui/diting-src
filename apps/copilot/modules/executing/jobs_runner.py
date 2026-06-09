@@ -20,6 +20,8 @@ from apps.copilot.modules.executing.orchestrator import (
     run_daily_pipeline,
     run_smart_money_backfill_check,
     run_smart_money_eod,
+    run_level2_super_order_backfill_check,
+    run_level2_super_order_eod,
     run_t0_collect,
     vol_div_15m_job,
 )
@@ -60,6 +62,8 @@ async def run_job(
             "l4-atr-bars-sync",
             "l4-smart-money-backfill",
             "l4-smart-money-eod",
+            "l2-super-order-backfill",
+            "l2-super-order-eod",
             "daily-pipeline",
         }
     )
@@ -183,6 +187,14 @@ async def run_job(
 
     if job_id == "l4-smart-money-eod":
         result = await run_smart_money_eod(session, symbols, redis)
+        return result
+
+    if job_id == "l2-super-order-backfill":
+        result = await run_level2_super_order_backfill_check(session, symbols, redis)
+        return result
+
+    if job_id == "l2-super-order-eod":
+        result = await run_level2_super_order_eod(session, symbols, redis)
         return result
 
     if job_id in ("l4-micro-eod", "l3-news-daily", "collect-once"):

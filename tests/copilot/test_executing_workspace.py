@@ -23,7 +23,12 @@ async def db_ready():
 
 @pytest.mark.asyncio
 async def test_probe_keys_count():
-    assert PROBE_KEYS == ("qmt_atr_trailing", "volume_price_div", "smart_money_flow")
+    assert PROBE_KEYS == (
+        "qmt_atr_trailing",
+        "volume_price_div",
+        "smart_money_flow",
+        "level2_super_order",
+    )
 
 
 def test_render_volume_price_div_card():

@@ -400,45 +400,11 @@ def _collect_financial_kpi_probe(symbol: str, key: str, field: str, label: str) 
 
 
 def _collect_level2_super_order(symbol: str) -> dict[str, Any]:
-    """东财个股资金流「超大单」5日净额（28_ §3.2 #18 · 非采购 L2）。"""
-    from apps.copilot.modules.radar.t0.collectors._em_fetch import (
-        fetch_individual_super_order_net,
-    )
-
-    sym = symbol.zfill(6)[-6:]
-    for attempt in range(1, _LEVEL2_RETRIES + 1):
-        em = fetch_individual_super_order_net(sym, days=5)
-        if em and em.get("net_super_order_5d") is not None:
-            return _ok("level2_super_order", em, "eastmoney:push2his/fflow/daykline")
-        if attempt < _LEVEL2_RETRIES:
-            time.sleep(_LEVEL2_RETRY_SLEEP)
-
-    try:
-        import akshare as ak  # type: ignore
-    except ImportError:
-        return _block_typed("level2_super_order", "B", "akshare 不可用")
-
-    market = "sh" if _is_shanghai(sym) else "sz"
-    for attempt in range(1, _LEVEL2_RETRIES + 1):
-        df = _ak_call(ak.stock_individual_fund_flow, stock=sym, market=market)
-        if df is not None and not df.empty:
-            col = "超大单净流入-净额"
-            if col not in df.columns:
-                break
-            tail = df.tail(5)
-            payload = {
-                "net_super_order_5d": float(tail[col].sum()),
-                "days": len(tail),
-                "last_date": str(tail.iloc[-1].get("日期", "")),
-            }
-            return _ok("level2_super_order", payload, "akshare stock_individual_fund_flow")
-        if attempt < _LEVEL2_RETRIES:
-            time.sleep(_LEVEL2_RETRY_SLEEP)
-
+    """#18 · Tushare moneyflow elg_amount · 由 l2-super-order-eod Cron 落 PG。"""
     return _block_typed(
         "level2_super_order",
-        "B",
-        f"东财超大单 {_LEVEL2_RETRIES} 轮均失败（禁止快照顶替 ok）",
+        "A",
+        "需 Tushare PG 底库 · 请运行 l2-super-order-eod 或 l2-super-order-backfill",
     )
 
 
