@@ -1,14 +1,130 @@
-# 执行中工作区 · 300502 新易盛（逐项启用 · 当前 #15+#16）
-# [Ref: 28_ §4.5]
+# 执行中工作区 · 300502 新易盛
+# JL3 可变长 + JL4 固定 11 · 当前 14+11=25
+# [Ref: 28_ §2.3 · §2.1.1]
 
 symbol: "300502"
 name: "新易盛"
 profile: "300502"
 
+peer_inno_code: "300308.SZ"
+peer_inno_name: "中际旭创"
+sector_index_code: "931235.CSI"
+sector_index_name: "中证全指通信设备"
+
+l3_probes:
+  eop_16t_qual:
+    label: "1.6T送样"
+    reading_class: "研发抢位"
+    cadence: dynamic
+    stale_days: 14
+  eop_dsp_lead:
+    label: "DSP交期"
+    reading_class: "供应链"
+    cadence: weekly
+    stale_days: 7
+  eop_eml_laser:
+    label: "激光器供给"
+    reading_class: "上游芯片"
+    cadence: quarterly
+    stale_days: 120
+  eop_client_top2:
+    label: "前二客户集中度"
+    reading_class: "客户结构"
+    cadence: quarterly
+    stale_days: 120
+  eop_800g_yield:
+    label: "800G良率折损"
+    reading_class: "制造良率"
+    cadence: quarterly
+    stale_days: 120
+  eop_inno_delta:
+    label: "中际增速差"
+    reading_class: "同业抢单"
+    cadence: quarterly
+    stale_days: 120
+  eop_800g_margin:
+    label: "800G净利率"
+    reading_class: "盈利质量"
+    cadence: quarterly
+    stale_days: 120
+  eop_siph_ratio:
+    label: "硅光出货占比"
+    reading_class: "技术路径"
+    cadence: dynamic
+    stale_days: 14
+  eop_finished_gd:
+    label: "产成品库存"
+    reading_class: "财务运营"
+    cadence: quarterly
+    stale_days: 120
+  eop_usd_cny:
+    label: "汇兑损益"
+    reading_class: "成本因子"
+    cadence: daily
+    stale_days: 1
+  eop_domestic_bid:
+    label: "国内集采份额"
+    reading_class: "订单簿"
+    cadence: monthly
+    stale_days: 35
+  eop_32t_rd:
+    label: "3.2T研发强度"
+    reading_class: "研发抢位"
+    cadence: quarterly
+    stale_days: 120
+  eop_intangible:
+    label: "商誉占比"
+    reading_class: "财务风险"
+    cadence: quarterly
+    stale_days: 120
+  eop_thai_util:
+    label: "泰国工厂达产"
+    reading_class: "交付力"
+    cadence: dynamic
+    stale_days: 30
+
 probes:
   qmt_atr_trailing:
+    enabled: true
     cadence: daily
     stale_days: 1
   volume_price_div:
+    enabled: true
     cadence: intraday_15m
+    stale_days: 1
+  smart_money_flow:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  level2_super_order:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  margin_short_skew:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  turnover_acceleration:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  block_trade_discount:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  retail_concentration:
+    enabled: true
+    cadence: dynamic
+    stale_days: 35
+  insider_sell_actual:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  etf_redemption_impact:
+    enabled: true
+    cadence: weekly
+    stale_days: 7
+  tech_beta_correlation:
+    enabled: true
+    cadence: daily
     stale_days: 1

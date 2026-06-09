@@ -1,14 +1,131 @@
-# 执行中工作区 · 002837 英维克（逐项启用 · 当前 #15+#16）
-# [Ref: 28_ §4.5]
+# 执行中工作区 · 002837 英维克
+# JL3 可变长 + JL4 固定 11 · 当前 14+11=25
+# [Ref: 28_ §2.4 · §2.1.1]
 
 symbol: "002837"
 name: "英维克"
 profile: "002837"
 
+metal_weights:
+  cu: 0.4
+  al: 0.6
+sector_index_code: "931071.CSI"
+sector_index_name: "中证人工智能"
+
+l3_probes:
+  env_liquid_win_rate:
+    label: "液冷中标率"
+    reading_class: "订单簿"
+    cadence: monthly
+    stale_days: 35
+  env_oem_certs:
+    label: "原厂认证数"
+    reading_class: "生态护城河"
+    cadence: dynamic
+    stale_days: 14
+  env_al_cu_idx:
+    label: "铝铜成本指数"
+    reading_class: "成本因子"
+    cadence: daily
+    stale_days: 1
+  env_coolant_ratio:
+    label: "冷却液耗材"
+    reading_class: "商业模式"
+    cadence: quarterly
+    stale_days: 120
+  env_margin_pass:
+    label: "成本转嫁能力"
+    reading_class: "盈利质量"
+    cadence: quarterly
+    stale_days: 120
+  env_cdu_share:
+    label: "CDU市占率"
+    reading_class: "竞争格局"
+    cadence: yearly
+    stale_days: 400
+  env_ess_growth:
+    label: "储能温控"
+    reading_class: "业务结构"
+    cadence: quarterly
+    stale_days: 120
+  env_b2b_aging:
+    label: "长账龄应收"
+    reading_class: "财务风险"
+    cadence: quarterly
+    stale_days: 120
+  env_cfo_to_net:
+    label: "经营现金流"
+    reading_class: "财务运营"
+    cadence: quarterly
+    stale_days: 120
+  env_warranty:
+    label: "售后准备金"
+    reading_class: "产品质量"
+    cadence: quarterly
+    stale_days: 120
+  env_inv_structure:
+    label: "存货结构"
+    reading_class: "财务运营"
+    cadence: quarterly
+    stale_days: 120
+  env_immersion_rd:
+    label: "浸没式液冷"
+    reading_class: "研发抢位"
+    cadence: dynamic
+    stale_days: 14
+  env_client_top5:
+    label: "前五大客户"
+    reading_class: "客户结构"
+    cadence: quarterly
+    stale_days: 120
+  env_goodwill_imp:
+    label: "商誉占比"
+    reading_class: "财务风险"
+    cadence: quarterly
+    stale_days: 120
+
 probes:
   qmt_atr_trailing:
+    enabled: true
     cadence: daily
     stale_days: 1
   volume_price_div:
+    enabled: true
     cadence: intraday_15m
+    stale_days: 1
+  smart_money_flow:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  level2_super_order:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  margin_short_skew:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  turnover_acceleration:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  block_trade_discount:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  retail_concentration:
+    enabled: true
+    cadence: dynamic
+    stale_days: 35
+  insider_sell_actual:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  etf_redemption_impact:
+    enabled: true
+    cadence: weekly
+    stale_days: 7
+  tech_beta_correlation:
+    enabled: true
+    cadence: daily
     stale_days: 1

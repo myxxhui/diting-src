@@ -241,6 +241,24 @@ def build_insider_sell_actual_node(metrics: dict[str, Any], *, source: str = "")
     }
 
 
+def build_tech_beta_correlation_node(metrics: dict[str, Any], *, source: str = "") -> dict[str, Any]:
+    """#25 板块 Beta 共振度与解释系数白盒节点。"""
+    value = metrics.get("value")
+    if value is None:
+        raise ValueError("tech_beta_correlation value 缺失")
+    value_f = round(float(value), 2)
+    raw_metrics = dict(metrics.get("raw_metrics") or {})
+    src = source or str(metrics.get("source") or "Tushare Pro Index/Daily")
+    return {
+        "indicator_name": probe_indicator_name("tech_beta_correlation"),
+        "value": value_f,
+        "fact_statement": str(metrics.get("fact_statement") or ""),
+        "calculation_logic": str(metrics.get("calculation_logic") or ""),
+        "source": src,
+        "raw_metrics": raw_metrics,
+    }
+
+
 def build_etf_redemption_impact_node(metrics: dict[str, Any], *, source: str = "") -> dict[str, Any]:
     """#24 ETF 被动资金冲击当量白盒节点。"""
     value = metrics.get("value")
@@ -280,6 +298,8 @@ def build_indicator_node(key: str, payload: dict[str, Any]) -> dict[str, Any]:
         return build_insider_sell_actual_node(payload, source=str(payload.get("source") or ""))
     if key == "etf_redemption_impact":
         return build_etf_redemption_impact_node(payload, source=str(payload.get("source") or ""))
+    if key == "tech_beta_correlation":
+        return build_tech_beta_correlation_node(payload, source=str(payload.get("source") or ""))
     val = payload.get("value")
     if val is None:
         raise ValueError(f"{key} value 缺失")

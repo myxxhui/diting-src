@@ -990,6 +990,27 @@ class ExecutingEtfShareDaily(Base):
     )
 
 
+class ExecutingBetaCorrelationDaily(Base):
+    """#25 tech_beta_correlation · 个股与板块指数对齐 pct_chg 底库（目标 150 交易日）。
+
+    [Ref: 28_ §2.2.8]
+    """
+
+    __tablename__ = "executing_beta_correlation_daily"
+
+    symbol: Mapped[str] = mapped_column(String(6), primary_key=True)
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    sector_index_code: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    stock_pct_chg: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    index_pct_chg: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    source: Mapped[str] = mapped_column(
+        String(96), nullable=False, default="Tushare Pro Index/Daily"
+    )
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
 class ExecutingTurnoverDaily(Base):
     """#20 turnover_acceleration · Tushare daily_basic 自由换手率底库（目标 140 交易日）。
 
@@ -1041,6 +1062,45 @@ class ExecutingT1ProbeSnapshot(Base):
     source: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     collected_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class ExecutingT2AnalystSession(Base):
+    """T2 持仓分析多轮对话会话（PG 底库 · Redis 热缓存回填源）。
+
+    [Ref: 28_ §5]
+    """
+
+    __tablename__ = "executing_t2_analyst_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True, index=True)
+    messages_json: Mapped[list] = mapped_column(JSON_TYPE, nullable=False, default=list)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False, index=True
+    )
+
+
+class ExecutingT2AnalystRequest(Base):
+    """T2 预分析工作台每次推理请求的完整数据集（dry-run / Opus 共用）。
+
+    [Ref: 28_ §5 · t2_preexec_envelope]
+    """
+
+    __tablename__ = "executing_t2_analyst_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True, index=True)
+    session_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    user_question: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    model_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    include_t1_jl4: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    symbols_json: Mapped[list] = mapped_column(JSON_TYPE, nullable=False, default=list)
+    dry_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    api_connected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    payload_json: Mapped[dict] = mapped_column(JSON_TYPE, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False, index=True
     )
 
 

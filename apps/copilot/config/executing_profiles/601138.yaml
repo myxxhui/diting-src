@@ -1,9 +1,138 @@
-# 执行中工作区 · 601138 工业富联（逐项启用 · 当前 #15~#24）
-# [Ref: 28_ §4.5]
+# 执行中工作区 · 601138 工业富联
+# JL3 融合定稿 20 项（旧泛化14 × 新靶向14 · §2.1.1）+ JL4 11 = 31
+# [Ref: 28_ §2.2]
 
 symbol: "601138"
 name: "工业富联"
 profile: "601138"
+
+honhai_twse_code: "2317.TW"
+peer_quanta_code: "2382.TW"
+sector_index_code: "931071.CSI"
+sector_index_name: "中证人工智能"
+
+# 601138 JL3 · 融合定稿 20 项（非 14+14=28）
+l3_probes:
+  fii_twse_cloud:
+    label: "母公司云端营收"
+    fusion: "旧parent_honhai_revenue+新fii_twse_cloud"
+    reading_class: "生态传导"
+    cadence: monthly
+    stale_days: 35
+  fii_odm_direct_ratio:
+    label: "ODM直供占比"
+    fusion: "新纯增"
+    reading_class: "客户结构"
+    cadence: quarterly
+    stale_days: 120
+  fii_gb200_milestone:
+    label: "GB200量产节点"
+    fusion: "旧gb200_iteration_node"
+    reading_class: "制造节点"
+    cadence: dynamic
+    stale_days: 14
+  fii_gb200_yield:
+    label: "GB200良率"
+    fusion: "新纯增"
+    reading_class: "制造良率"
+    cadence: dynamic
+    stale_days: 14
+  fii_copper_shfe:
+    label: "沪铜成本"
+    fusion: "旧copper_cost_pressure+新fii_copper_shfe"
+    reading_class: "成本因子"
+    cadence: daily
+    stale_days: 1
+  fii_quanta_share:
+    label: "广达增速差"
+    fusion: "旧smci_quanta_share+新fii_quanta_share"
+    reading_class: "同业抢单"
+    cadence: monthly
+    stale_days: 35
+  fii_raw_inventory:
+    label: "原材料备料"
+    fusion: "新纯增"
+    reading_class: "财务运营"
+    cadence: quarterly
+    stale_days: 120
+  fii_inventory_turnover:
+    label: "存货周转"
+    fusion: "旧inventory_turnover"
+    reading_class: "财务运营"
+    cadence: quarterly
+    stale_days: 120
+  fii_contract_liab:
+    label: "合同负债"
+    fusion: "旧contract_liabilities"
+    reading_class: "订单前瞻"
+    cadence: quarterly
+    stale_days: 120
+  fii_gross_margin:
+    label: "整体毛利率"
+    fusion: "旧gross_margin_trend"
+    reading_class: "盈利质量"
+    cadence: quarterly
+    stale_days: 120
+  fii_ai_margin:
+    label: "AI服务器毛利"
+    fusion: "新纯增"
+    reading_class: "盈利质量"
+    cadence: quarterly
+    stale_days: 120
+  fii_ar_turnover:
+    label: "应收周转"
+    fusion: "新纯增"
+    reading_class: "财务运营"
+    cadence: quarterly
+    stale_days: 120
+  fii_cfo_health:
+    label: "经营现金流"
+    fusion: "新纯增"
+    reading_class: "财务运营"
+    cadence: quarterly
+    stale_days: 120
+  fii_labor_auto_capex:
+    label: "自动化降本"
+    fusion: "新纯增"
+    reading_class: "成本因子"
+    cadence: quarterly
+    stale_days: 120
+  fii_related_pty:
+    label: "鸿海关联交易"
+    fusion: "旧related_party_trans+新fii_related_pty"
+    reading_class: "治理"
+    cadence: quarterly
+    stale_days: 120
+  fii_overseas_fdi:
+    label: "海外建厂投资"
+    fusion: "新纯增"
+    reading_class: "交付力"
+    cadence: dynamic
+    stale_days: 30
+  fii_apple_base:
+    label: "消费电子拖累"
+    fusion: "新纯增"
+    reading_class: "业务结构"
+    cadence: quarterly
+    stale_days: 120
+  fii_network_switch:
+    label: "800G交换机"
+    fusion: "新纯增"
+    reading_class: "产品渗透"
+    cadence: dynamic
+    stale_days: 14
+  fii_exchange_rate:
+    label: "汇率影响"
+    fusion: "旧exchange_rate_impact"
+    reading_class: "成本因子"
+    cadence: daily
+    stale_days: 1
+  fii_mgmt_stability:
+    label: "董监高稳定"
+    fusion: "旧mgmt_and_core_team"
+    reading_class: "治理"
+    cadence: daily
+    stale_days: 7
 
 probes:
   qmt_atr_trailing:
@@ -46,3 +175,7 @@ probes:
     enabled: true
     cadence: weekly
     stale_days: 7
+  tech_beta_correlation:
+    enabled: true
+    cadence: daily
+    stale_days: 1

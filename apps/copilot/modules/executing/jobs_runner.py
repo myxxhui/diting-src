@@ -38,6 +38,38 @@ _JOB_ALIASES = {
     "l4-vol-div-15m-close": "l4-vol-div-15m",
 }
 
+# bootstrap / 日中补采：JL4 日频 EOD（不含盘中 */5 · 15m）
+JL4_EOD_CATCHUP_JOB_IDS: tuple[str, ...] = (
+    "l4-etf-redemption-morning",
+    "l4-margin-skew-morning",
+    "l4-smart-money-eod",
+    "l2-super-order-eod",
+    "l4-turnover-accel-eod",
+    "l4-beta-correlation-eod",
+    "l4-block-trade-eod",
+    "l4-retail-concentration-eod",
+    "l4-insider-sell-eod",
+    "l4-atr-bars-sync",
+)
+
+
+async def run_jl4_eod_catchup(
+    session: AsyncSession,
+    symbols: list[str],
+    redis: Any,
+) -> list[dict[str, Any]]:
+    """部署后或错过 Cron 窗口时，补跑 JL4 日频采集并刷新 probe_state / 水位。"""
+    results: list[dict[str, Any]] = []
+    for jid in JL4_EOD_CATCHUP_JOB_IDS:
+        try:
+            part = await run_job(session, jid, force=True)
+            results.append(part)
+            logger.info("[jl4-catchup] %s → %s", jid, part.get("status"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[jl4-catchup] %s 失败: %s", jid, exc)
+            results.append({"job_id": jid, "status": "error", "error": str(exc)[:200]})
+    return results
+
 
 async def run_job(
     session: AsyncSession,
@@ -66,6 +98,7 @@ async def run_job(
             "l2-super-order-eod",
             "l4-margin-skew-morning",
             "l4-turnover-accel-eod",
+            "l4-beta-correlation-eod",
             "daily-pipeline",
         }
     )
@@ -79,9 +112,16 @@ async def run_job(
         results = []
         for sym in syms:
             results.append(await run_t0_collect(session, sym))
+        catchup = await run_jl4_eod_catchup(session, syms, redis)
         batch = await run_batch_daily_pipeline(session, syms, redis_client=redis)
         await upsert_watermark(session, "bootstrap-sync", "*", success=True, trade_date=date.today())
-        return {"job_id": job_id, "status": "ok", "symbols": results, "batch": batch}
+        return {
+            "job_id": job_id,
+            "status": "ok",
+            "symbols": results,
+            "jl4_catchup": catchup,
+            "batch": batch,
+        }
 
     if canonical == "quote-intraday":
         from apps.copilot.db.datetime_util import shanghai_now_iso
@@ -209,6 +249,12 @@ async def run_job(
         from apps.copilot.modules.executing.orchestrator import run_turnover_acceleration_eod
 
         result = await run_turnover_acceleration_eod(session, symbols, redis)
+        return result
+
+    if job_id == "l4-beta-correlation-eod":
+        from apps.copilot.modules.executing.orchestrator import run_tech_beta_correlation_eod
+
+        result = await run_tech_beta_correlation_eod(session, symbols, redis)
         return result
 
     if job_id == "l4-block-trade-eod":

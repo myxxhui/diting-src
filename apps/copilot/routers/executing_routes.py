@@ -8,8 +8,11 @@ import html
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, Form, HTTPException
-from fastapi.responses import HTMLResponse
+from pathlib import Path
+
+from fastapi import APIRouter, Body, Depends, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,10 +37,80 @@ from apps.copilot.services.redis_wait import wait_for_sync_redis
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["executing"])
+_templates = Jinja2Templates(
+    directory=str(Path(__file__).resolve().parents[1] / "templates"),
+)
 
 
 def _esc(s: Any) -> str:
     return html.escape(str(s) if s is not None else "")
+
+
+def _redis_for_panel() -> Any:
+    """面板加载用 Redis：短超时，失败则 None（避免 HTMX 卡 120s 空白）。"""
+    try:
+        return wait_for_sync_redis(timeout_sec=3.0)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("执行区面板 Redis 未就绪，降级无 Redis: %s", exc)
+        return None
+
+
+async def _load_analyst_symbol_rows(
+    session: AsyncSession,
+    redis: Any,
+) -> list[dict[str, Any]]:
+    """与执行区标的卡对齐：funnel executing ∪ executing_collect ∪ user_positions。"""
+    from apps.copilot.modules.planning.service import list_workspace_symbols
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+
+    for item in await list_workspace_symbols(session, view="executing"):
+        sym = str(item.get("symbol") or "").zfill(6)[-6:]
+        if sym and sym not in seen:
+            seen.add(sym)
+            ordered.append(sym)
+
+    for sym in await load_executing_collect_symbols(session):
+        s = str(sym).zfill(6)[-6:]
+        if s and s not in seen:
+            seen.add(s)
+            ordered.append(s)
+
+    for row in await list_positions(session):
+        s = str(row.symbol).zfill(6)[-6:]
+        if s and s not in seen:
+            seen.add(s)
+            ordered.append(s)
+
+    symbol_rows: list[dict[str, Any]] = []
+    for sym in ordered:
+        ctx = await profit_context(session, sym, redis)
+        if not ctx.get("has_position"):
+            base = await load_symbol_base(session, sym)
+            ctx = {
+                "symbol": sym,
+                "has_position": bool(base.get("has_base")),
+                "name": base.get("name"),
+                "quantity": base.get("quantity"),
+                "mark_price": None,
+                "position_pct": base.get("position_pct"),
+                "unrealized_pnl_pct": None,
+                "cost_price": base.get("cost_price"),
+            }
+        symbol_rows.append(
+            {
+                "symbol": sym,
+                "name": ctx.get("name"),
+                "quantity": ctx.get("quantity"),
+                "mark_price": ctx.get("mark_price"),
+                "position_pct": ctx.get("position_pct"),
+                "unrealized_pnl_pct": ctx.get("unrealized_pnl_pct"),
+                "cost_price": ctx.get("cost_price"),
+                "price_stale": ctx.get("price_stale"),
+            }
+        )
+    return symbol_rows
 
 
 @router.get("/api/executing/settings")
@@ -158,7 +231,7 @@ async def api_save_position_form(
     }
     await upsert_position(session, body)
     await session.commit()
-    return await api_executing_detail_html(symbol, session)
+    return await api_executing_detail_html(symbol, session=session)
 
 
 @router.put("/api/executing/positions/{symbol}")
@@ -212,10 +285,10 @@ async def api_daily_run(symbol: str, session: AsyncSession = Depends(get_db)):
 
 @router.post("/api/executing/{symbol}/daily-run-html", response_class=HTMLResponse)
 async def api_daily_run_html(symbol: str, session: AsyncSession = Depends(get_db)):
-    redis = wait_for_sync_redis()
+    redis = _redis_for_panel()
     await run_daily_pipeline(session, symbol, redis_client=redis)
     await session.commit()
-    return await api_executing_detail_html(symbol, session)
+    return await api_executing_detail_html(symbol, session, live=True)
 
 
 @router.post("/api/executing/{symbol}/collect")
@@ -226,10 +299,40 @@ async def api_collect(symbol: str, session: AsyncSession = Depends(get_db)):
 
 
 @router.get("/api/executing/{symbol}/detail", response_class=HTMLResponse)
-async def api_executing_detail_html(symbol: str, session: AsyncSession = Depends(get_db)):
+async def api_executing_detail_html(
+    symbol: str,
+    live: bool = False,
+    session: AsyncSession = Depends(get_db),
+):
+    """执行区单标的详情 · 默认读 PG 快照（秒开）；live=1 时触发 T1 live 装配。"""
     sym = symbol.zfill(6)[-6:]
-    redis = wait_for_sync_redis()
-    ctx = await profit_context(session, sym, redis)
+    redis = _redis_for_panel()
+    try:
+        return await _render_executing_detail_html(
+            sym,
+            session,
+            redis_client=redis,
+            live=live,
+        )
+    except Exception as exc:
+        logger.exception("执行区详情渲染失败 symbol=%s", sym)
+        await session.rollback()
+        return HTMLResponse(
+            f'<div id="executing-detail-{sym}" class="executing-workspace bg-rose-50 rounded-xl p-4 border border-rose-200">'
+            f'<p class="text-sm text-rose-800">加载 JL1–4 指标失败：{_esc(str(exc)[:300])}</p>'
+            f'<p class="text-xs text-rose-600 mt-2">可点「立即跑今日体检」重试，或刷新页面。</p></div>',
+            status_code=200,
+        )
+
+
+async def _render_executing_detail_html(
+    sym: str,
+    session: AsyncSession,
+    *,
+    redis_client: Any,
+    live: bool = False,
+) -> HTMLResponse:
+    ctx = await profit_context(session, sym, redis_client)
     sync = await build_sync_status(session)
 
     audit_row = (
@@ -307,7 +410,11 @@ async def api_executing_detail_html(symbol: str, session: AsyncSession = Depends
         render_layer_b_prerequisite_banner,
         render_probe_domain,
     )
-    from apps.copilot.modules.executing.t1_assembler import assemble_stock_signal
+    from apps.copilot.modules.executing.probe_card_timing import build_probe_card_timing_map
+    from apps.copilot.modules.executing.t1_assembler import (
+        assemble_stock_signal,
+        load_cached_stock_signal,
+    )
 
     has_entry = bool(str(opened_val or "").strip())
     degraded_hints: list[str] = []
@@ -315,10 +422,23 @@ async def api_executing_detail_html(symbol: str, session: AsyncSession = Depends
     l4: dict = {}
     event_probe_states: dict[str, dict] = {}
     layer_b_banner = ""
+    cache_note = ""
     if not has_entry:
         layer_b_banner = render_layer_b_prerequisite_banner()
     else:
-        signal = await assemble_stock_signal(session, sym, redis_client=redis)
+        if live:
+            signal = await assemble_stock_signal(session, sym, redis_client=redis_client)
+            cache_note = (
+                "<p class='text-[11px] text-blue-700 bg-blue-50 border border-blue-100 "
+                "rounded px-2 py-1 mb-3'>已触发 T1 live 装配（较慢 · 结果已写 PG 快照）</p>"
+            )
+        else:
+            signal = await load_cached_stock_signal(session, sym, redis_client=redis_client)
+            cache_note = (
+                "<p class='text-[11px] text-gray-500 bg-white border border-gray-100 "
+                "rounded px-2 py-1 mb-3'>指标来自 PG 快照缓存 · "
+                "点「立即跑今日体检」可触发 live 刷新</p>"
+            )
         indicators = signal.get("indicators") or {}
         l3 = {k: v for k, v in indicators.items() if k in L3_KEYS}
         l4 = {k: v for k, v in indicators.items() if k in L4_KEYS}
@@ -329,7 +449,9 @@ async def api_executing_detail_html(symbol: str, session: AsyncSession = Depends
                 load_block_trade_payload,
             )
 
-            bt_payload = await load_block_trade_payload(session, sym, redis_client=redis)
+            bt_payload = await load_block_trade_payload(
+                session, sym, redis_client=redis_client
+            )
             event_probe_states["block_trade_discount"] = describe_block_trade_ui_state(bt_payload)
         if "etf_redemption_impact" not in l4:
             from apps.copilot.modules.executing.etf_redemption_impact import (
@@ -337,7 +459,9 @@ async def api_executing_detail_html(symbol: str, session: AsyncSession = Depends
                 load_etf_redemption_payload,
             )
 
-            etf_payload = await load_etf_redemption_payload(session, sym, redis_client=redis)
+            etf_payload = await load_etf_redemption_payload(
+                session, sym, redis_client=redis_client
+            )
             event_probe_states["etf_redemption_impact"] = describe_etf_redemption_ui_state(
                 etf_payload
             )
@@ -381,6 +505,17 @@ async def api_executing_detail_html(symbol: str, session: AsyncSession = Depends
 
     qmt_node = l4.get("qmt_atr_trailing") if isinstance(l4, dict) else None
     quote_wm = _quote_intraday_watermark(sync, sym)
+    timing_map = (
+        await build_probe_card_timing_map(
+            session,
+            sym,
+            l4_nodes=l4,
+            sync=sync,
+            quote_job_at=quote_wm,
+        )
+        if has_entry
+        else {}
+    )
     hot_timeline = (
         render_hot_data_timeline(qmt_node, quote_job_at=quote_wm)
         if has_entry
@@ -390,13 +525,516 @@ async def api_executing_detail_html(symbol: str, session: AsyncSession = Depends
         f"{layer_b_banner}"
         f"{render_degraded_probes(degraded_hints)}"
         f"{hot_timeline}"
-        f'{render_probe_domain(l4, title="层 B · T1 指标（#15~#23）", accent="orange", empty_hint="暂无可用指标 · 点「立即跑今日体检」或等待 Cron 采集", symbol=sym, sync=sync, event_probe_states=event_probe_states)}'
+        f'{render_probe_domain(l4, title="层 B · T1 指标（#15~#25）", accent="orange", empty_hint="暂无可用指标 · 点「立即跑今日体检」或等待 Cron 采集", symbol=sym, sync=sync, event_probe_states=event_probe_states, timing_map=timing_map)}'
     )
 
     return HTMLResponse(
         f'<div id="executing-detail-{sym}" class="executing-workspace bg-gray-50 rounded-xl p-4 -mx-1">'
-        f"{toolbar}{pos_form}"
+        f"{toolbar}{cache_note}{pos_form}"
         f"{layer_b_html}"
         f"{audit_html}"
         f'<p class="text-[11px] text-gray-400 text-center mt-2">advisory only · no-auto-execute · [Ref: 28_]</p></div>'
     )
+
+
+@router.get("/api/executing/analyst-panel-html", response_class=HTMLResponse)
+async def api_analyst_panel_html(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """T2 持仓分析工作台。"""
+    from apps.copilot.modules.executing.t2_analyst import (
+        DEFAULT_JL13_DATA_TEMPLATE,
+        DEFAULT_PROMPT_TEMPLATE,
+    )
+    from apps.copilot.modules.executing.t2_token_limits import token_limits_summary
+    from apps.copilot.modules.radar.chat import DEFAULT_CHAT_MODEL, RADAR_CHAT_MODELS
+
+    redis = _redis_for_panel()
+    symbol_rows = await _load_analyst_symbol_rows(session, redis)
+    return _templates.TemplateResponse(
+        request,
+        "planning/_t2_analyst_panel.html",
+        {
+            "symbols": symbol_rows,
+            "chat_models": RADAR_CHAT_MODELS,
+            "default_model": DEFAULT_CHAT_MODEL,
+            "default_prompt_template": DEFAULT_PROMPT_TEMPLATE,
+            "default_jl13_data_template": DEFAULT_JL13_DATA_TEMPLATE,
+            "token_limits": token_limits_summary(),
+        },
+    )
+
+
+def _render_analyst_payload_details(data: dict[str, Any]) -> str:
+    import json
+
+    payload_json = json.dumps(data, ensure_ascii=False, indent=2)
+    if len(payload_json) > 120_000:
+        payload_json = payload_json[:120_000] + "\n…(截断)"
+    opus_json = json.dumps(data.get("opus_messages"), ensure_ascii=False, indent=2)[:80000]
+    audit_json = json.dumps(data.get("opus_audit"), ensure_ascii=False, indent=2)[:80000]
+    audit_block = ""
+    if data.get("opus_audit"):
+        audit_block = (
+            "<details class='mt-1' open>"
+            "<summary class='cursor-pointer text-[11px] font-medium text-emerald-700'>"
+            "opus_audit（模型输出 JSON）</summary>"
+            f"<pre class='mt-1 text-[10px] bg-emerald-950 text-emerald-100 p-2 rounded-lg "
+            f"overflow-x-auto max-h-48'>{_esc(audit_json)}</pre></details>"
+        )
+    return (
+        "<details class='mt-2'>"
+        "<summary class='cursor-pointer text-[11px] font-medium text-violet-700'>"
+        "opus_messages（system + user）</summary>"
+        f"<pre class='mt-1 text-[10px] bg-gray-900 text-green-100 p-2 rounded-lg "
+        f"overflow-x-auto max-h-48'>{_esc(opus_json)}</pre></details>"
+        f"{audit_block}"
+        "<details class='mt-1'>"
+        "<summary class='cursor-pointer text-[11px] font-medium text-violet-700'>"
+        "完整 payload JSON</summary>"
+        f"<pre class='mt-1 text-[10px] bg-slate-900 text-slate-100 p-2 rounded-lg "
+        f"overflow-x-auto max-h-64'>{_esc(payload_json)}</pre></details>"
+    )
+
+
+def _render_analyst_chat_panel(payload: dict[str, Any]) -> str:
+    """T2 持仓分析对话区 HTML。"""
+    from apps.copilot.modules.executing.t2_analyst import new_analyst_session_id
+
+    sid = _esc(payload.get("session_id") or new_analyst_session_id())
+    messages = payload.get("messages") or []
+    err = payload.get("error")
+
+    bubbles: list[str] = []
+    if not messages:
+        bubbles.append(
+            "<div class='text-center text-sm text-gray-400 py-8'>"
+            "<p class='mb-1'>🔬 T2 持仓分析</p>"
+            "<p class='text-xs'>选择标的 → 输入关键词 → 回车调用 Opus 审计</p>"
+            "<p class='text-xs mt-1'>JL1–3 checklist · JL4 本地 T1 indicators</p>"
+            "</div>"
+        )
+    for m in messages:
+        role = m.get("role")
+        content = _esc(m.get("content") or "")
+        if role == "user":
+            meta = m.get("meta") or {}
+            syms = ", ".join(meta.get("symbols") or [])
+            tag = (
+                f"<p class='text-[10px] text-blue-100/80 mt-1'>{_esc(syms)} · "
+                f"JL4 {'开' if meta.get('include_t1_jl4') else '关'}</p>"
+                if syms
+                else ""
+            )
+            bubbles.append(
+                f"<div class='flex justify-end'><div class='max-w-[88%] rounded-2xl rounded-tr-sm "
+                f"bg-violet-600 text-white px-4 py-2.5 text-sm leading-relaxed shadow-sm'>"
+                f"<p class='whitespace-pre-wrap'>{content}</p>{tag}</div></div>"
+            )
+        elif role == "assistant":
+            meta = m.get("meta") or {}
+            data = meta.get("payload") or meta.get("preview") or {}
+            from apps.copilot.modules.executing.t2_analyst_render import (
+                render_t2_assistant_card,
+            )
+
+            card = (data.get("assistant_render_html") or "") if data else ""
+            if not card and data:
+                card = render_t2_assistant_card(data, meta)
+            if not card and content:
+                card = f"<p class='whitespace-pre-wrap text-sm'>{content}</p>"
+            details = _render_analyst_payload_details(data) if data else ""
+            bubbles.append(
+                f"<div class='flex justify-start w-full'><div class='w-full max-w-full rounded-2xl rounded-tl-sm "
+                f"bg-white border border-violet-100 px-4 py-3 text-sm text-gray-800 "
+                f"leading-relaxed shadow-sm'>{card}{details}</div></div>"
+            )
+
+    err_html = ""
+    if err:
+        err_html = (
+            f"<div class='mx-2 mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 "
+            f"text-sm text-amber-800'>⚠️ {_esc(err)}</div>"
+        )
+
+    return (
+        f"<div id='executing-analyst-chat-inner' data-session-id='{sid}'>"
+        f"{err_html}"
+        f"<div class='space-y-3 px-1 py-2 min-h-[120px] max-h-[36rem] overflow-y-auto'>"
+        f"{''.join(bubbles)}</div></div>"
+    )
+
+
+def _render_analyst_assembly_html(data: dict[str, Any]) -> str:
+    from apps.copilot.modules.executing.t2_analyst import (
+        format_assembly_summary,
+        new_analyst_session_id,
+    )
+
+    return _render_analyst_chat_panel(
+        {
+            "session_id": new_analyst_session_id(),
+            "messages": [
+                {
+                    "role": "user",
+                    "content": data.get("user_question") or "",
+                    "meta": {
+                        "symbols": data.get("symbols"),
+                        "include_t1_jl4": data.get("include_t1_jl4"),
+                    },
+                },
+                {
+                    "role": "assistant",
+                    "content": format_assembly_summary(data),
+                    "meta": {"payload": data, "preview_only": True},
+                },
+            ],
+        }
+    )
+
+
+@router.get("/api/executing/analyst/chat/{session_id}", response_class=HTMLResponse)
+async def api_analyst_chat_history(
+    session_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """拉取 T2 持仓分析对话历史（Redis → PG 会话表 → 审计行重建）。"""
+    from apps.copilot.modules.executing.t2_analyst import load_analyst_messages
+
+    redis = _redis_for_panel()
+    messages = await load_analyst_messages(
+        session_id, redis_client=redis, db_session=session
+    )
+    await session.commit()
+    payload = {"session_id": session_id, "messages": messages, "status": "ok"}
+    if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
+        return HTMLResponse(_render_analyst_chat_panel(payload))
+    return JSONResponse(payload)
+
+
+@router.post("/api/executing/analyst/chat/new", response_class=HTMLResponse)
+async def api_analyst_chat_new(
+    request: Request,
+    session_id: str = Form(""),
+    session: AsyncSession = Depends(get_db),
+):
+    """清空当前分析会话。"""
+    from apps.copilot.modules.executing.t2_analyst import (
+        clear_analyst_session,
+        new_analyst_session_id,
+    )
+
+    redis = _redis_for_panel()
+    await clear_analyst_session(session_id, redis_client=redis, db_session=session)
+    await session.commit()
+    payload = {"session_id": new_analyst_session_id(), "messages": [], "status": "new"}
+    if request.headers.get("hx-request"):
+        return HTMLResponse(_render_analyst_chat_panel(payload))
+    return JSONResponse(payload)
+
+
+@router.post("/api/executing/analyst/chat", response_class=HTMLResponse)
+async def api_analyst_chat(
+    request: Request,
+    message: str = Form(""),
+    session_id: str = Form(""),
+    model_id: str = Form(""),
+    include_t1_jl4: str = Form(""),
+    include_jl13_data: str = Form(""),
+    jl13_data_prompt: str = Form(""),
+    symbols: list[str] = Form(default=[]),
+    session: AsyncSession = Depends(get_db),
+):
+    """T2 持仓分析多轮对话（组装 envelope + Opus 推理）。"""
+    from apps.copilot.modules.executing.t2_analyst import analyst_chat_turn
+
+    if not symbols:
+        payload = {
+            "session_id": session_id,
+            "messages": [],
+            "error": "请至少选择一个标的",
+        }
+        return HTMLResponse(_render_analyst_chat_panel(payload), status_code=400)
+    redis = _redis_for_panel()
+    try:
+        result = await analyst_chat_turn(
+            session,
+            session_id=session_id,
+            symbols=symbols,
+            user_question=message,
+            model_id=model_id or None,
+            include_t1_jl4=include_t1_jl4 == "1",
+            jl13_data_prompt=jl13_data_prompt,
+            include_jl13_data=include_jl13_data == "1",
+            redis_client=redis,
+        )
+    except ValueError as exc:
+        payload = {
+            "session_id": session_id,
+            "messages": [],
+            "error": str(exc),
+        }
+        return HTMLResponse(_render_analyst_chat_panel(payload), status_code=400)
+    except Exception as exc:
+        logger.exception("T2 analyst chat failed")
+        payload = {
+            "session_id": session_id,
+            "messages": [],
+            "error": f"分析失败：{str(exc)[:300]}",
+        }
+        return HTMLResponse(_render_analyst_chat_panel(payload), status_code=500)
+
+    if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
+        return HTMLResponse(_render_analyst_chat_panel(result))
+    return JSONResponse(result)
+
+
+@router.post("/api/executing/analyst/preview-html", response_class=HTMLResponse)
+async def api_analyst_preview_html(
+    request: Request,
+    message: str = Form(""),
+    model_id: str = Form(""),
+    include_t1_jl4: str = Form(""),
+    symbols: list[str] = Form(default=[]),
+    session: AsyncSession = Depends(get_db),
+):
+    """仅组装 T2 envelope（不调用 Opus）。"""
+    from apps.copilot.modules.executing.t2_analyst import assemble_t2_analyst_payload
+
+    if not symbols:
+        return HTMLResponse(
+            '<p class="text-amber-700 text-sm">请至少选择一个标的。</p>',
+            status_code=400,
+        )
+    redis = _redis_for_panel()
+    try:
+        data = await assemble_t2_analyst_payload(
+            session,
+            symbols,
+            user_question=message,
+            model_id=model_id or None,
+            include_t1_jl4=include_t1_jl4 == "1",
+            redis_client=redis,
+        )
+        data["preview_only"] = True
+        data["api_connected"] = False
+        data["opus_skip_reason"] = "preview-html 端点仅组装"
+    except ValueError as exc:
+        return HTMLResponse(f'<p class="text-amber-700 text-sm">{_esc(exc)}</p>', status_code=400)
+    except Exception as exc:
+        logger.exception("T2 analyst assembly failed")
+        return HTMLResponse(
+            f'<p class="text-rose-700 text-sm">组装失败：{_esc(str(exc)[:300])}</p>',
+            status_code=500,
+        )
+    return HTMLResponse(_render_analyst_assembly_html(data))
+
+
+@router.post("/api/executing/analyst/preview")
+async def api_analyst_preview_json(
+    body: dict[str, Any] = Body(...),
+    session: AsyncSession = Depends(get_db),
+):
+    """JSON 版 envelope 组装（供脚本/检查）。"""
+    from apps.copilot.modules.executing.t2_analyst import assemble_t2_analyst_payload
+
+    symbols = body.get("symbols") or []
+    if isinstance(symbols, str):
+        symbols = [s.strip() for s in symbols.split(",") if s.strip()]
+    redis = _redis_for_panel()
+    data = await assemble_t2_analyst_payload(
+        session,
+        list(symbols),
+        user_question=str(body.get("message") or body.get("user_question") or ""),
+        model_id=body.get("model_id"),
+        include_t1_jl4=bool(body.get("include_t1_jl4", True)),
+        redis_client=redis,
+    )
+    return JSONResponse(data)
+
+
+def _render_t2_analyst_audit_list(rows: list[Any]) -> str:
+    if not rows:
+        return (
+            "<p class='text-sm text-gray-500 py-4 text-center'>"
+            "暂无 T2 预分析记录 · 在执行中工作台提交问题后自动生成</p>"
+        )
+    items: list[str] = []
+    for r in rows:
+        syms = ", ".join(r.symbols_json or [])
+        q = (r.user_question or "")[:80]
+        if len(r.user_question or "") > 80:
+            q += "…"
+        ts = r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else "—"
+        mode = "仅拼接" if r.dry_run else "Opus"
+        items.append(
+            f"<tr class='border-b border-gray-100 hover:bg-violet-50/40'>"
+            f"<td class='py-2 pr-3 text-xs text-gray-500 whitespace-nowrap'>{_esc(ts)}</td>"
+            f"<td class='py-2 pr-3 text-xs font-mono text-violet-700'>"
+            f"<a href='/audit?t2_id={_esc(r.request_id)}' class='underline'>{_esc(r.request_id)}</a></td>"
+            f"<td class='py-2 pr-3 text-xs text-gray-700'>{_esc(syms)}</td>"
+            f"<td class='py-2 pr-3 text-xs text-gray-600 max-w-md truncate' title='{_esc(r.user_question)}'>"
+            f"{_esc(q)}</td>"
+            f"<td class='py-2 pr-3 text-xs'>{_esc(r.model_id or '—')}</td>"
+            f"<td class='py-2 text-xs'>{_esc(mode)} · JL4 {'开' if r.include_t1_jl4 else '关'}</td>"
+            f"</tr>"
+        )
+    return (
+        "<div class='overflow-x-auto'><table class='w-full text-left text-sm'>"
+        "<thead><tr class='text-xs text-gray-500 border-b border-gray-200'>"
+        "<th class='py-2 pr-3'>时间</th><th class='py-2 pr-3'>request_id</th>"
+        "<th class='py-2 pr-3'>标的</th><th class='py-2 pr-3'>问题摘要</th>"
+        "<th class='py-2 pr-3'>模型</th><th class='py-2'>模式</th></tr></thead>"
+        f"<tbody>{''.join(items)}</tbody></table></div>"
+    )
+
+
+def _render_t2_analyst_audit_detail(row: Any) -> str:
+    import json
+
+    from apps.copilot.modules.executing.t2_analyst_render import render_t2_assistant_card
+
+    payload = row.payload_json or {}
+    opus = payload.get("opus_messages") or []
+    system_txt = opus[0].get("content", "") if opus else ""
+    user_txt = opus[1].get("content", "") if len(opus) > 1 else ""
+    try:
+        user_obj = json.loads(user_txt) if user_txt else {}
+        user_pretty = json.dumps(user_obj, ensure_ascii=False, indent=2)
+    except json.JSONDecodeError:
+        user_obj = {}
+        user_pretty = user_txt
+    full_pretty = json.dumps(payload, ensure_ascii=False, indent=2)
+    if len(full_pretty) > 200_000:
+        full_pretty = full_pretty[:200_000] + "\n…(截断)"
+
+    syms = ", ".join(row.symbols_json or [])
+    ts = row.created_at.strftime("%Y-%m-%d %H:%M:%S") if row.created_at else "—"
+    status = "ok" if row.api_connected and payload.get("opus_audit") else (
+        "error" if payload.get("opus_error") else "assembly_only"
+    )
+    render_html = payload.get("assistant_render_html") or ""
+    if not render_html and payload:
+        render_html = render_t2_assistant_card(
+            payload,
+            {
+                "status": status,
+                "request_id": row.request_id,
+                "error": payload.get("opus_error"),
+            },
+        )
+    opus_raw = (payload.get("opus_raw_text") or "")[:120000]
+    opus_audit_json = json.dumps(payload.get("opus_audit"), ensure_ascii=False, indent=2)[:80000]
+    opus_reply_block = ""
+    if render_html:
+        opus_reply_block = (
+            "<div class='mb-4 rounded-xl border border-emerald-200 bg-white p-3'>"
+            "<h4 class='text-xs font-semibold text-emerald-800 mb-2'>Opus 结构化回复（已落库）</h4>"
+            f"{render_html}</div>"
+        )
+    return f"""
+<div class="rounded-xl border border-violet-200 bg-violet-50/30 p-4 mb-4 text-sm">
+  <h3 class="font-semibold text-violet-900 mb-2">T2 持仓审计 · {_esc(row.request_id)}</h3>
+  <p class="text-xs text-gray-600 mb-3">
+    时间 {_esc(ts)} · 标的 {_esc(syms)} · 模型 {_esc(row.model_id or '—')} ·
+    JL4 {'开' if row.include_t1_jl4 else '关'} ·
+    preview_only={str(row.dry_run).lower()} · api_connected={str(row.api_connected).lower()}
+  </p>
+  <p class="text-xs text-gray-700 mb-3 whitespace-pre-wrap border-l-2 border-violet-300 pl-3">
+    <span class="text-gray-400">user_question：</span>{_esc(row.user_question)}
+  </p>
+  {opus_reply_block}
+  <details class="mb-2" open>
+    <summary class="cursor-pointer text-xs font-medium text-emerald-800">opus_audit（模型输出 JSON）</summary>
+    <pre class="mt-2 text-[10px] bg-emerald-950 text-emerald-100 p-3 rounded-lg overflow-x-auto max-h-96">{_esc(opus_audit_json)}</pre>
+  </details>
+  <details class="mb-2">
+    <summary class="cursor-pointer text-xs font-medium text-violet-800">opus_raw_text（原始文本）</summary>
+    <pre class="mt-2 text-[10px] bg-gray-900 text-green-100 p-3 rounded-lg overflow-x-auto max-h-48">{_esc(opus_raw)}</pre>
+  </details>
+  <details class="mb-2">
+    <summary class="cursor-pointer text-xs font-medium text-violet-800">Opus 收到什么？（消息结构说明）</summary>
+    <div class="mt-2 text-xs text-gray-600 space-y-2 pl-2">
+      <p><strong>messages[0] system</strong>：投资哲学 + 问答路由 + 输出铁律（约 {len(system_txt)} 字）</p>
+      <p><strong>messages[1] user</strong>：JSON 字符串，含 qa_index、t1、profit、optional、checklist、jl4_catalog、output_contract、coverage、user_question</p>
+      <p>JL4 指标数：{_esc(str(payload.get('jl4_indicator_counts')))}</p>
+    </div>
+  </details>
+  <details class="mb-2">
+    <summary class="cursor-pointer text-xs font-medium text-violet-800">messages[0] system_prompt</summary>
+    <pre class="mt-2 text-[10px] bg-gray-900 text-green-100 p-3 rounded-lg overflow-x-auto max-h-48">{_esc(system_txt[:60000])}</pre>
+  </details>
+  <details class="mb-2" open>
+    <summary class="cursor-pointer text-xs font-medium text-violet-800">messages[1] user JSON（Opus 实际输入）</summary>
+    <pre class="mt-2 text-[10px] bg-slate-900 text-slate-100 p-3 rounded-lg overflow-x-auto max-h-96">{_esc(user_pretty[:120000])}</pre>
+  </details>
+  <details>
+    <summary class="cursor-pointer text-xs font-medium text-violet-800">完整 payload（envelope + opus_messages + 元数据）</summary>
+    <pre class="mt-2 text-[10px] bg-slate-950 text-slate-200 p-3 rounded-lg overflow-x-auto max-h-[32rem]">{_esc(full_pretty)}</pre>
+  </details>
+  <p class="text-[10px] text-gray-400 mt-2">
+    <a href="/api/executing/analyst/audit/{_esc(row.request_id)}" class="text-violet-600 underline" target="_blank">下载 JSON</a>
+  </p>
+</div>
+"""
+
+
+@router.get("/api/executing/analyst/audit-html", response_class=HTMLResponse)
+async def api_t2_analyst_audit_list_html(
+    session: AsyncSession = Depends(get_db),
+    limit: int = 30,
+):
+    """T2 预分析审计列表（HTMX 片段）。"""
+    from apps.copilot.db.models import ExecutingT2AnalystRequest
+    from sqlalchemy import select
+
+    rows = (
+        await session.scalars(
+            select(ExecutingT2AnalystRequest)
+            .order_by(ExecutingT2AnalystRequest.created_at.desc())
+            .limit(min(limit, 100))
+        )
+    ).all()
+    return HTMLResponse(_render_t2_analyst_audit_list(list(rows)))
+
+
+@router.get("/api/executing/analyst/audit/{request_id}")
+async def api_t2_analyst_audit_detail(
+    request_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """单条 T2 数据集（JSON 或 HTML）。"""
+    from apps.copilot.db.models import ExecutingT2AnalystRequest
+
+    row = await session.scalar(
+        select(ExecutingT2AnalystRequest).where(
+            ExecutingT2AnalystRequest.request_id == request_id.strip()
+        )
+    )
+    if row is None:
+        raise HTTPException(404, "T2 审计记录不存在")
+    if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
+        return HTMLResponse(_render_t2_analyst_audit_detail(row))
+    return JSONResponse(row.payload_json or {})
+
+
+@router.get("/api/executing/analyst/audit-detail-html", response_class=HTMLResponse)
+async def api_t2_analyst_audit_detail_html(
+    t2_id: str = "",
+    session: AsyncSession = Depends(get_db),
+):
+    """审计页按 t2_id 加载详情片段。"""
+    from apps.copilot.db.models import ExecutingT2AnalystRequest
+
+    rid = (t2_id or "").strip()
+    if not rid:
+        return HTMLResponse("<p class='text-sm text-gray-400'>选择上方记录查看完整数据集</p>")
+    row = await session.scalar(
+        select(ExecutingT2AnalystRequest).where(ExecutingT2AnalystRequest.request_id == rid)
+    )
+    if row is None:
+        return HTMLResponse(f"<p class='text-sm text-rose-700'>未找到记录 {_esc(rid)}</p>")
+    return HTMLResponse(_render_t2_analyst_audit_detail(row))

@@ -1,4 +1,4 @@
-"""探针注册表 · #15~#24 统一分发。
+"""探针注册表 · #15~#25 统一分发。
 
 [Ref: 28_ §4.4 · probes 架构]
 """
@@ -14,6 +14,7 @@ from apps.copilot.modules.executing.probes import margin_short_skew as margin_sh
 from apps.copilot.modules.executing.probes import qmt_atr_trailing as qmt_atr_trailing_mod
 from apps.copilot.modules.executing.probes import retail_concentration as retail_concentration_mod
 from apps.copilot.modules.executing.probes import smart_money_flow as smart_money_flow_mod
+from apps.copilot.modules.executing.probes import tech_beta_correlation as tech_beta_correlation_mod
 from apps.copilot.modules.executing.probes import turnover_acceleration as turnover_acceleration_mod
 from apps.copilot.modules.executing.probes import volume_price_div as volume_price_div_mod
 
@@ -28,6 +29,7 @@ _PROBE_MODULES: tuple[ExecutingProbe, ...] = (
     retail_concentration_mod.PROBE,
     insider_sell_actual_mod.PROBE,
     etf_redemption_impact_mod.PROBE,
+    tech_beta_correlation_mod.PROBE,
 )
 
 PROBE_REGISTRY: dict[str, ExecutingProbe] = {p.spec.key: p for p in _PROBE_MODULES}

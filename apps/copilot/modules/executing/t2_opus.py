@@ -57,14 +57,13 @@ def run_t2_audit(telemetry: dict[str, Any]) -> tuple[dict[str, Any], str]:
         )
 
     model = _t2_model()
-    prompt = (
-        "你是首席风控官。输入为批量巡检 T1 JSON（batch_meta + portfolio_signals，"
-        "每只股票代码下含 position_context 与 indicators）。"
-        "仅基于下列遥测输出一个 JSON 对象，结构含 Executing_Daily_Audit, Reasoning_Engine, "
-        "Execution_Command, probe_coverage。禁止编造未给出的数字。"
-        "action 仅 hold|trim_30_pct|dump_all|rotate。\n\n"
-        + json.dumps(telemetry, ensure_ascii=False)[:120000]
+    from apps.copilot.modules.executing.t2_preexec_envelope import (
+        build_executing_opus_messages,
+        build_t2_preexec_envelope,
     )
+
+    envelope = build_t2_preexec_envelope(telemetry)
+    messages = build_executing_opus_messages(envelope)
 
     try:
         from apps.common.ai_dispatcher import AIDispatcher, BudgetExceededError
@@ -72,7 +71,7 @@ def run_t2_audit(telemetry: dict[str, Any]) -> tuple[dict[str, Any], str]:
         disp = AIDispatcher.default()
         resp = disp.call(
             "radar_assess",
-            [{"role": "user", "content": prompt}],
+            messages,
             max_tokens=4096,
             temperature=0.2,
             force_route="remote",

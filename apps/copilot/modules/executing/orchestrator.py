@@ -1001,6 +1001,113 @@ async def run_turnover_acceleration_eod(
     return {"job_id": "l4-turnover-accel-eod", "status": "ok" if ok else "error", "results": results}
 
 
+async def run_tech_beta_correlation_sync_symbol(
+    session: AsyncSession,
+    symbol: str,
+    redis_client: Any,
+    *,
+    mode: str = "incremental",
+) -> dict[str, Any]:
+    """#25 单标的：Tushare daily + index_daily → PG + T0 摘要 + T1 Beta 快照。"""
+    from apps.copilot.modules.executing.beta_correlation_storage import BETA_MIN_TRADING_DAYS
+    from apps.copilot.modules.executing.indicator_nodes import build_tech_beta_correlation_node
+    from apps.copilot.modules.executing.smart_money_flow import tushare_token
+    from apps.copilot.modules.executing.storage import save_t0_batch, upsert_t1_snapshot
+    from apps.copilot.modules.executing.tech_beta_correlation import (
+        SOURCE_BETA,
+        compute_tech_beta_correlation_metrics,
+        sync_tech_beta_correlation_symbol,
+    )
+
+    sym = symbol.zfill(6)[-6:]
+    if not tushare_token():
+        return {"symbol": sym, "status": "error", "error": "TUSHARE_TOKEN 未配置"}
+
+    try:
+        result = await sync_tech_beta_correlation_symbol(
+            session, sym, redis_client=redis_client, mode=mode
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[beta-correlation] sync 失败 symbol=%s: %s", sym, exc)
+        return {"symbol": sym, "status": "error", "error": str(exc)[:200]}
+
+    payload = result.get("payload")
+    pg_count = int(result.get("pg_count") or 0)
+    ok = payload is not None and pg_count >= BETA_MIN_TRADING_DAYS
+    t0_item = {
+        "probe_key": "tech_beta_correlation",
+        "ok": ok,
+        "payload": result.get("t0_summary") or {},
+        "source": SOURCE_BETA,
+    }
+    if not ok:
+        err = result.get("error")
+        if err:
+            t0_item["blocker"] = str(err)[:200]
+        else:
+            t0_item["blocker"] = f"beta PG 行数={pg_count} 需>={BETA_MIN_TRADING_DAYS}"[:200]
+    await save_t0_batch(session, sym, [t0_item], trade_date=date.today())
+
+    t1_value = None
+    if ok and payload:
+        try:
+            metrics = compute_tech_beta_correlation_metrics(payload)
+            node = build_tech_beta_correlation_node(metrics, source=SOURCE_BETA)
+            await upsert_t1_snapshot(
+                session,
+                sym,
+                "tech_beta_correlation",
+                node,
+                trade_date=date.today(),
+                source=SOURCE_BETA,
+            )
+            t1_value = node.get("value")
+        except ValueError as exc:
+            t0_item["ok"] = False
+            t0_item["blocker"] = str(exc)[:200]
+            ok = False
+
+    return {
+        **result,
+        "symbol": sym,
+        "status": "ok" if ok else "error",
+        "t1_value": t1_value,
+        "target_trading_days": BETA_MIN_TRADING_DAYS,
+    }
+
+
+async def run_tech_beta_correlation_eod(
+    session: AsyncSession,
+    symbols: list[str],
+    redis_client: Any,
+) -> dict[str, Any]:
+    """15:30 · 全执行区标的板块β对齐序列增量/回填 + T1 快照。"""
+    from apps.copilot.modules.executing.beta_correlation_storage import (
+        BETA_MIN_TRADING_DAYS,
+        count_beta_rows,
+    )
+
+    results: list[dict[str, Any]] = []
+    for sym in symbols:
+        code = sym.zfill(6)[-6:]
+        n = await count_beta_rows(session, code)
+        mode = "full" if n < BETA_MIN_TRADING_DAYS else "incremental"
+        results.append(
+            await run_tech_beta_correlation_sync_symbol(session, sym, redis_client, mode=mode)
+        )
+    ok = [r for r in results if r.get("status") == "ok"]
+    await upsert_watermark(
+        session,
+        "l4-beta-correlation-eod",
+        "*",
+        success=bool(ok),
+        trade_date=date.today(),
+        row_count=len(ok),
+        error=None if ok else "tech_beta_correlation_eod_failed",
+    )
+    return {"job_id": "l4-beta-correlation-eod", "status": "ok" if ok else "error", "results": results}
+
+
 async def run_block_trade_sync_symbol(
     session: AsyncSession,
     symbol: str,
@@ -1324,7 +1431,10 @@ async def run_etf_redemption_sync_symbol(
         return {"symbol": sym, "status": "error", "error": str(exc)[:200]}
 
     backfill = is_etf_backfill_done(redis_client, sym) or mode == "full"
-    ok = result.get("status") == "ok" and backfill and (result.get("links_count") or 0) > 0
+    links_count = int(result.get("links_count") or 0)
+    sync_ok = result.get("status") == "ok"
+    # T0 就绪 = 同步成功且已建立 ETF 链接；份额深回填与 T0 blocker 解耦
+    ok = sync_ok and links_count > 0
     t0_item = {
         "probe_key": "etf_redemption_impact",
         "ok": ok,
@@ -1332,12 +1442,20 @@ async def run_etf_redemption_sync_symbol(
         "source": SOURCE_ETF,
     }
     if not ok:
-        if not backfill:
-            t0_item["blocker"] = "需 60 交易日 ETF 份额回填 · 首次 full sync"
-        elif (result.get("links_count") or 0) < 1:
-            t0_item["blocker"] = "未建立标的↔ETF 持仓链接 · index_weight/增量扫描中"
+        if not sync_ok:
+            t0_item["blocker"] = (result.get("error") or "etf redemption sync 失败")[:200]
+        elif links_count < 1:
+            t0_item["blocker"] = (
+                "未建立标的↔ETF 持仓链接 · 请确认 profile sector_index_code 或等待增量扫描"
+            )[:200]
         else:
             t0_item["blocker"] = result.get("error") or "etf redemption sync 未完成"
+    elif not backfill:
+        t0_item["payload"] = {
+            **(t0_item.get("payload") or {}),
+            "backfill_pending": True,
+            "note": "ETF 份额深回填进行中 · 链接已建立",
+        }
     await save_t0_batch(session, sym, [t0_item], trade_date=date.today())
 
     t1_value = None

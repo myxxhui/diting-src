@@ -22,6 +22,7 @@ _WARMUP_LOADERS: tuple[str, ...] = (
     "apps.copilot.modules.executing.level2_super_order:load_level2_super_order_payload",
     "apps.copilot.modules.executing.margin_short_skew:load_margin_skew_payload",
     "apps.copilot.modules.executing.turnover_acceleration:load_turnover_acceleration_payload",
+    "apps.copilot.modules.executing.tech_beta_correlation:load_tech_beta_correlation_payload",
     "apps.copilot.modules.executing.block_trade_discount:load_block_trade_payload",
     "apps.copilot.modules.executing.retail_concentration:load_retail_concentration_payload",
     "apps.copilot.modules.executing.insider_sell_actual:load_insider_sell_payload",
@@ -81,6 +82,25 @@ async def warm_executing_redis_from_pg(
         warmed,
     )
     return {"symbols": len(syms), "warmed": warmed}
+
+
+async def warm_executing_all_redis_from_pg(
+    session: AsyncSession,
+    redis_client: Any,
+    *,
+    symbols: list[str] | None = None,
+    analyst_session_limit: int = 50,
+) -> dict[str, Any]:
+    """探针热缓存 + T2 分析对话会话一并预热。"""
+    from apps.copilot.modules.executing.t2_analyst import warm_t2_analyst_sessions_from_pg
+
+    probe_stats = await warm_executing_redis_from_pg(
+        session, redis_client, symbols=symbols
+    )
+    chat_stats = await warm_t2_analyst_sessions_from_pg(
+        session, redis_client, limit=analyst_session_limit
+    )
+    return {"probe": probe_stats, "t2_analyst_chat": chat_stats}
 
 
 async def count_t1_snapshots(session: AsyncSession, symbol: str) -> int:

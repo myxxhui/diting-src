@@ -135,7 +135,7 @@ async def test_executing_workspace_renders_all_symbol_loaders():
     assert "revealed once" not in body
     assert "/api/executing/601138/detail" in body
     assert "/api/executing/002837/detail" in body
-    assert " open" in body.split("executing-symbol-card")[1]
+    assert " open" not in body.split("executing-symbol-card")[1]
 
 
 @pytest.mark.asyncio

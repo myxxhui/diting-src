@@ -34,6 +34,7 @@ async def test_probe_keys_count():
         "retail_concentration",
         "insider_sell_actual",
         "etf_redemption_impact",
+        "tech_beta_correlation",
     )
 
 
@@ -412,3 +413,61 @@ async def test_sync_status_api(db_ready):
         r = await client.get("/api/executing/sync-status")
         assert r.status_code == 200
         assert "601138" in r.json().get("collect_symbols", [])
+
+
+@pytest.mark.asyncio
+async def test_load_cached_stock_signal(db_ready):
+    from apps.copilot.modules.executing.storage import upsert_t1_snapshot
+    from apps.copilot.modules.executing.t1_assembler import load_cached_stock_signal
+    from apps.copilot.modules.executing.universe import upsert_executing_collect
+
+    async with AsyncSessionLocal() as session:
+        await upsert_executing_collect(session, "601138")
+        await upsert_t1_snapshot(
+            session,
+            "601138",
+            "qmt_atr_trailing",
+            {"value": 1.2, "fact_statement": "test", "source": "unit"},
+        )
+        await session.commit()
+        async with AsyncSessionLocal() as s2:
+            sig = await load_cached_stock_signal(s2, "601138", redis_client=None)
+    assert "qmt_atr_trailing" in (sig.get("indicators") or {})
+    assert sig.get("cache_only") is True
+
+
+@pytest.mark.asyncio
+async def test_executing_detail_uses_snapshot_cache(db_ready):
+    from apps.copilot.modules.executing.storage import upsert_t1_snapshot
+    from apps.copilot.modules.executing.universe import upsert_executing_collect
+
+    from apps.copilot.modules.executing.positions import upsert_position
+
+    async with AsyncSessionLocal() as session:
+        await upsert_executing_collect(session, "601138")
+        await upsert_position(
+            session,
+            {
+                "symbol": "601138",
+                "name": "工业富联",
+                "quantity": 1500,
+                "cost_price": 56.82,
+                "position_pct": 29.7,
+                "opened_at": "2024-04-14",
+            },
+        )
+        await upsert_t1_snapshot(
+            session,
+            "601138",
+            "smart_money_flow",
+            {"value": 0.5, "fact_statement": "主力净流入", "source": "unit"},
+        )
+        await session.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/api/executing/601138/detail")
+    assert r.status_code == 200
+    assert "executing-detail-601138" in r.text
+    assert "PG 快照缓存" in r.text
+    assert "smart_money_flow" in r.text or "主力净流入" in r.text

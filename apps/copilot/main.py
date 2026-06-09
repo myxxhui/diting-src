@@ -156,9 +156,28 @@ async def lifespan(app: FastAPI):
         if n:
             print(f"[copilot] A 股简称索引已预热：{n} 条", flush=True)
 
+    async def _warm_executing_redis() -> None:
+        from apps.copilot.modules.executing.executing_warmup import (
+            warm_executing_all_redis_from_pg,
+        )
+        from apps.copilot.services.redis_wait import wait_for_sync_redis
+
+        try:
+            sync_redis = await asyncio.to_thread(
+                wait_for_sync_redis, timeout_sec=30.0
+            )
+            async with AsyncSessionLocal() as session:
+                stats = await warm_executing_all_redis_from_pg(
+                    session, sync_redis
+                )
+            print(f"[copilot] Executing Redis 预热完成: {stats}", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[copilot] Executing Redis 预热跳过: {exc}", flush=True)
+
     app.state.radar_bg_tasks = [
         asyncio.create_task(_warm_radar_names()),
         asyncio.create_task(_purge_funnel_expired()),
+        asyncio.create_task(_warm_executing_redis()),
     ]
 
     yield

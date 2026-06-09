@@ -208,6 +208,15 @@ def _collect_margin_skew(symbol: str) -> dict[str, Any]:
     )
 
 
+def _collect_tech_beta_correlation(symbol: str) -> dict[str, Any]:
+    """#25 · Tushare daily + index_daily · 由 l4-beta-correlation-eod Cron 落 PG。"""
+    return _block_typed(
+        "tech_beta_correlation",
+        "A",
+        "需 Tushare 板块β PG 底库 · 请运行 l4-beta-correlation-eod（15:30 盘后）",
+    )
+
+
 def _collect_turnover_acceleration(symbol: str) -> dict[str, Any]:
     """#20 · Tushare daily_basic turnover_rate_f · 由 l4-turnover-accel-eod Cron 落 PG。"""
     return _block_typed(
@@ -536,7 +545,6 @@ def collect_l4_micro(
         for k in (
             "qmt_atr_trailing",
             "volume_price_div",
-            "tech_beta_correlation",
         ):
             if k == "qmt_atr_trailing" and qmt_from_pg:
                 continue
@@ -590,58 +598,7 @@ def collect_l4_micro(
         )
     )
 
-    from apps.copilot.modules.radar.t0.collectors._em_fetch import fetch_daily_kline_closes
-    from apps.state_watch.probes.datasource.quote_adapter import fetch_bars
-
-    idx_kline = fetch_daily_kline_closes("000852", days=15)
-    sym_kline = fetch_daily_kline_closes(symbol, days=15)
-    if len(sym_kline) < 11:
-        bars15 = fetch_bars(symbol, 15)
-        sym_kline = [(b.date, b.close, None) for b in bars15]
-    if len(idx_kline) < 11:
-        idx_bars = fetch_bars("000852", 15)
-        idx_kline = [(b.date, b.close, None) for b in idx_bars]
-    if len(idx_kline) >= 11 and len(sym_kline) >= 11:
-        sym_map = {d: c for d, c, _t in sym_kline}
-        idx_map = {d: c for d, c, _t in idx_kline}
-        dates = sorted(set(sym_map) & set(idx_map))[-11:]
-        sym_rets = []
-        idx_rets = []
-        for i in range(1, len(dates)):
-            d0, d1 = dates[i - 1], dates[i]
-            s0, s1 = sym_map[d0], sym_map[d1]
-            i0, i1 = idx_map[d0], idx_map[d1]
-            if s0 > 0 and i0 > 0:
-                sym_rets.append((s1 - s0) / s0)
-                idx_rets.append((i1 - i0) / i0)
-        if len(sym_rets) >= 10:
-            n = len(sym_rets)
-            ms = sum(sym_rets) / n
-            mi = sum(idx_rets) / n
-            cov = sum((sym_rets[j] - ms) * (idx_rets[j] - mi) for j in range(n)) / n
-            vs = (sum((sym_rets[j] - ms) ** 2 for j in range(n)) / n) ** 0.5
-            vi = (sum((idx_rets[j] - mi) ** 2 for j in range(n)) / n) ** 0.5
-            rho = cov / (vs * vi) if vs > 0 and vi > 0 else None
-            if rho is not None:
-                out.append(
-                    _ok(
-                        "tech_beta_correlation",
-                        {
-                            "rho_10d": round(rho, 4),
-                            "benchmark": "000852",
-                            "benchmark_name": "中证1000",
-                            "window_days": n,
-                        },
-                        "eastmoney:kline_returns_corr",
-                    )
-                )
-            else:
-                out.append(_block_typed("tech_beta_correlation", "C", "10日收益率协方差为0"))
-        else:
-            out.append(_block_typed("tech_beta_correlation", "C", "有效收益率样本不足10日"))
-    else:
-        out.append(_block_typed("tech_beta_correlation", "B", "标的或中证1000 K线不足"))
-
+    out.append(_collect_tech_beta_correlation(symbol))
     out.append(_collect_smart_money_flow(symbol))
 
     out.append(_collect_margin_skew(symbol))

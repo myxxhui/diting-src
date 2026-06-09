@@ -178,6 +178,22 @@ def _probe_node_from_raw(key: str, raw: dict[str, Any] | None) -> dict[str, Any]
         if val is None:
             return None
         return _node(val, source, "毛利率", str(payload.get("fact_statement", f"毛利率 {val}")))
+    if key == "tech_beta_correlation":
+        try:
+            from apps.copilot.modules.executing.indicator_nodes import build_tech_beta_correlation_node
+            from apps.copilot.modules.executing.tech_beta_correlation import (
+                compute_tech_beta_correlation_metrics,
+            )
+
+            if payload.get("aligned_rows"):
+                metrics = compute_tech_beta_correlation_metrics(payload)
+                return build_tech_beta_correlation_node(metrics, source=source)
+            val = payload.get("value")
+            if val is not None:
+                return build_tech_beta_correlation_node(payload, source=source)
+        except Exception as exc:
+            return _node(None, source, "板块 Beta 共振度计算失败", str(exc))
+        return None
 
     scalar = payload.get("value")
     if scalar is None:

@@ -6,7 +6,13 @@ from __future__ import annotations
 
 import pytest
 
-from apps.common.ai_dispatcher import AIDispatcher, AIResponse, BudgetExceededError, Route
+from apps.common.ai_dispatcher import (
+    AIDispatcher,
+    AIResponse,
+    BudgetExceededError,
+    Route,
+    anthropic_read_timeout_sec,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -23,6 +29,10 @@ MESSAGES = [{"role": "user", "content": "只回复 OK"}]
 # ---------------------------------------------------------------------------
 # T1: mock 路由（无 key）
 # ---------------------------------------------------------------------------
+
+def test_anthropic_read_timeout_t2_16k():
+    assert anthropic_read_timeout_sec(scene="radar_assess", max_tokens=16_384) == 600.0
+
 
 def test_call_mock_no_key():
     d = make_dispatcher()

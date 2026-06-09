@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.copilot.modules.executing.positions import profit_context
 from apps.copilot.modules.executing.storage import (
     latest_raw_map,
+    load_all_t1_snapshots,
     persist_indicator_snapshots,
 )
 from apps.copilot.modules.executing.t1_build import (
@@ -89,6 +90,29 @@ async def _gather_stock_indicators(
             degraded.append(_degraded_line(probe_key, raw_by_key.get(probe_key)))
 
     return indicators, degraded
+
+
+async def load_cached_stock_signal(
+    session: AsyncSession,
+    symbol: str,
+    *,
+    redis_client: Any = None,
+) -> dict[str, Any]:
+    """单标的 · 优先 PG 快照（执行区卡片秒开，不触发 Scatter-Gather live 算子）。"""
+    sym = symbol.zfill(6)[-6:]
+    pc = await profit_context(session, sym, redis_client)
+    indicators = await load_all_t1_snapshots(session, sym)
+    signal: dict[str, Any] = {
+        "stock_name": pc.get("name") or sym,
+        "indicators": indicators,
+        "cache_only": True,
+    }
+    pos = _position_context_batch(pc)
+    if pos:
+        signal["position_context"] = pos
+    if not indicators:
+        signal["degraded_probes"] = [f"{sym}: PG 尚无 T1 快照 · 点「立即跑今日体检」或等待 Cron"]
+    return signal
 
 
 async def assemble_stock_signal(

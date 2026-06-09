@@ -4,7 +4,7 @@
 """
 from __future__ import annotations
 
-# 权威启用列表（#15~#24 · seq 序）
+# 权威启用列表（#15~#25 · seq 序）
 PROBE_KEYS: tuple[str, ...] = (
     "qmt_atr_trailing",
     "volume_price_div",
@@ -16,6 +16,7 @@ PROBE_KEYS: tuple[str, ...] = (
     "retail_concentration",
     "insider_sell_actual",
     "etf_redemption_impact",
+    "tech_beta_correlation",
 )
 
 OPTIONAL_EVENT_PROBE_KEYS: frozenset[str] = frozenset(

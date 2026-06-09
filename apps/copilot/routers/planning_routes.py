@@ -294,11 +294,13 @@ async def _audit_page_context(
     vid = ver_q or (versions[0]["version_id"] if versions else "")
     if symbol and vid:
         bundle = await load_version_merged(session, symbol, vid)
+    t2_id = (request.query_params.get("t2_id") or "").strip()
     return {
         "audit_symbol": symbol,
         "audit_name": name,
         "audit_versions": versions,
         "audit_version_id": vid,
+        "t2_id": t2_id,
         "audit_html": render_audit_page(
             symbol=symbol or "—",
             name=name or "—",
@@ -1632,7 +1634,7 @@ def _render_workspace_symbols_html(
                 f"stroke-width='4'></circle>"
                 f"<path class='opacity-75' fill='currentColor' "
                 f"d='M4 12a8 8 0 018-8v8H4z'></path></svg>"
-                f"加载探针与持仓监控…</p></div>"
+                f"正在加载 JL1–4 指标缓存…</p></div>"
                 f"</div></details>"
             )
     if view == "executing":

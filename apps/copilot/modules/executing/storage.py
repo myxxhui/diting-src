@@ -255,11 +255,17 @@ async def upsert_t1_snapshot(
     source: str | None = None,
 ) -> None:
     """T1 指标节点 UPSERT（Redis 之外 PG 权威快照）。"""
+    from apps.copilot.modules.executing.probe_card_timing import t1_node_signature
+
     sym = symbol.zfill(6)[-6:]
     now = utc_now_naive()
     row = await session.get(
         ExecutingT1ProbeSnapshot, {"symbol": sym, "probe_key": probe_key}
     )
+    new_sig = t1_node_signature(node)
+    if row is not None and row.node_json:
+        if t1_node_signature(row.node_json) == new_sig:
+            return
     if row is None:
         row = ExecutingT1ProbeSnapshot(symbol=sym, probe_key=probe_key)
         session.add(row)
@@ -268,6 +274,29 @@ async def upsert_t1_snapshot(
     row.source = (source or node.get("source") or "")[:256] or None
     row.collected_at = now
     await session.flush()
+
+
+async def load_all_t1_snapshots(
+    session: AsyncSession,
+    symbol: str,
+) -> dict[str, Any]:
+    """从 PG 批量读取已缓存 T1 节点（页面展示优先走快照，避免每次 live 装配）。"""
+    from sqlalchemy import select
+
+    sym = symbol.zfill(6)[-6:]
+    rows = (
+        await session.scalars(
+            select(ExecutingT1ProbeSnapshot).where(ExecutingT1ProbeSnapshot.symbol == sym)
+        )
+    ).all()
+    out: dict[str, Any] = {}
+    for row in rows:
+        if row.probe_key and row.node_json:
+            node = dict(row.node_json)
+            if row.source and not node.get("source"):
+                node["source"] = row.source
+            out[str(row.probe_key)] = node
+    return out
 
 
 async def load_t1_snapshot(

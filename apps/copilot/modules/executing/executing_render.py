@@ -15,6 +15,7 @@ from apps.copilot.modules.executing.indicator_nodes import (
     raw_metrics_for_display,
 )
 from apps.copilot.modules.executing.profile import PROBE_KEYS
+from apps.copilot.modules.executing.probe_card_timing import ProbeCardTiming, render_card_timing_bar
 from apps.copilot.modules.executing.probe_labels import probe_indicator_name, probe_label
 
 # ── Design tokens（Tailwind · 卡片间距 gap-6 · 左侧 accent · Tag 语义色）──
@@ -67,6 +68,13 @@ PROBE_THEMES: dict[str, dict[str, str]] = {
         "border": "border border-gray-200 border-l-[4px] border-l-sky-500",
         "badge": "bg-sky-50 text-sky-700",
         "formula_accent": "border-l-sky-500",
+    },
+    "tech_beta_correlation": {
+        "category": "percentile",
+        "accent_hex": "#8b5cf6",
+        "border": "border border-gray-200 border-l-[4px] border-l-violet-500",
+        "badge": "bg-violet-50 text-violet-700",
+        "formula_accent": "border-l-violet-500",
     },
     "block_trade_discount": {
         "category": "event",
@@ -285,6 +293,7 @@ def _render_probe_card(
     value_html: str,
     value_color: str = "text-gray-900",
     timestamp: str | None = None,
+    card_timing: ProbeCardTiming | None = None,
     subtitle: str | None = None,
     fact_statement: str = "",
     calculation_logic: str = "",
@@ -302,11 +311,12 @@ def _render_probe_card(
     card_cls, card_style = _card_shell(probe_key, visual_cooldown=visual_cooldown)
     badge_cls = theme["badge"]
     formula_border = formula_accent or theme["formula_accent"]
-    ts_line = (
-        f'<p class="text-[11px] text-gray-400 mb-3 font-mono">{_esc(timestamp)}</p>'
-        if timestamp
-        else ""
-    )
+    timing_bar = render_card_timing_bar(card_timing)
+    if not timing_bar and timestamp:
+        timing_bar = f'<p class="text-[11px] text-gray-400 mb-3 font-mono">{_esc(timestamp)}</p>'
+    status_ok_effective = status_ok
+    if card_timing and card_timing.health in ("failed", "stale", "missing"):
+        status_ok_effective = False
     sub_line = (
         f'<p class="text-xs text-gray-500 mt-1">{_esc(subtitle)}</p>' if subtitle else ""
     )
@@ -325,9 +335,13 @@ def _render_probe_card(
     footer_json = _render_t1_json_details(probe_key, t1_json) if t1_json else ""
     source_line = _esc(source or "—")
 
+    timing_attr = ""
+    if card_timing is not None:
+        timing_attr = f' data-timing-health="{_esc(card_timing.health)}"'
+
     return f"""
-<article class="{card_cls}" style="{card_style}" data-probe-key="{_esc(probe_key)}" data-probe-category="{_esc(theme.get('category', ''))}">
-  {ts_line}
+<article class="{card_cls}" style="{card_style}" data-probe-key="{_esc(probe_key)}" data-probe-category="{_esc(theme.get('category', ''))}"{timing_attr}>
+  {timing_bar}
   <header class="flex items-start justify-between gap-4">
     <div class="min-w-0 flex-1">
       <h3 class="text-base font-semibold text-gray-900 leading-snug">{_esc(title)}</h3>
@@ -338,7 +352,7 @@ def _render_probe_card(
       {sub_line}
     </div>
     <div class="flex items-center gap-2 shrink-0">
-      {_status_dot(status_ok)}
+      {_status_dot(status_ok_effective)}
       <span class="text-xl font-bold tabular-nums {value_color}">{value_html}</span>
     </div>
   </header>
@@ -426,6 +440,7 @@ def render_qmt_atr_trailing_card(
     node: dict[str, Any],
     *,
     quote_job_at: str | None = None,
+    card_timing: ProbeCardTiming | None = None,
 ) -> str:
     """#15 ATR 止盈。"""
     val = node.get("value")
@@ -442,7 +457,8 @@ def render_qmt_atr_trailing_card(
         short_label=short,
         value_html=value_html,
         value_color=_value_color_class(val, mode="atr"),
-        timestamp=_qmt_timestamp_line(rm, quote_job_at=quote_job_at),
+        card_timing=card_timing,
+        timestamp=_qmt_timestamp_line(rm, quote_job_at=quote_job_at) if not card_timing else None,
         fact_statement=str(node.get("fact_statement") or ""),
         calculation_logic=str(node.get("calculation_logic") or ""),
         source=str(node.get("source") or ""),
@@ -456,7 +472,11 @@ def render_qmt_atr_trailing_card(
     )
 
 
-def render_volume_price_div_card(node: dict[str, Any]) -> str:
+def render_volume_price_div_card(
+    node: dict[str, Any],
+    *,
+    card_timing: ProbeCardTiming | None = None,
+) -> str:
     """#16 15分钟高位量价背离。"""
     val = node.get("value")
     st = _indicator_status(node)
@@ -473,7 +493,8 @@ def render_volume_price_div_card(node: dict[str, Any]) -> str:
         short_label=short,
         value_html=val_disp,
         value_color="text-gray-900",
-        timestamp=ts,
+        card_timing=card_timing,
+        timestamp=ts if not card_timing else None,
         fact_statement=str(node.get("fact_statement") or ""),
         calculation_logic=str(node.get("calculation_logic") or ""),
         source=str(node.get("source") or ""),
@@ -489,7 +510,11 @@ def render_volume_price_div_card(node: dict[str, Any]) -> str:
     )
 
 
-def render_smart_money_flow_card(node: dict[str, Any]) -> str:
+def render_smart_money_flow_card(
+    node: dict[str, Any],
+    *,
+    card_timing: ProbeCardTiming | None = None,
+) -> str:
     """#17 L2 主力大单 · 3 日 Smart Money Delta。"""
     val = node.get("value")
     st = _indicator_status(node)
@@ -517,7 +542,8 @@ def render_smart_money_flow_card(node: dict[str, Any]) -> str:
         short_label=short,
         value_html=_esc(pct_disp),
         value_color=_value_color_class(val, mode="signed"),
-        timestamp=ts,
+        card_timing=card_timing,
+        timestamp=ts if not card_timing else None,
         subtitle=f"近 3 交易日主力（特大单+大单）相对自由流通盘 · {direction}",
         fact_statement=str(node.get("fact_statement") or ""),
         calculation_logic=str(node.get("calculation_logic") or ""),
@@ -532,7 +558,11 @@ def render_smart_money_flow_card(node: dict[str, Any]) -> str:
     )
 
 
-def render_level2_super_order_card(node: dict[str, Any]) -> str:
+def render_level2_super_order_card(
+    node: dict[str, Any],
+    *,
+    card_timing: ProbeCardTiming | None = None,
+) -> str:
     """#18 L2 特大单 · 120 日历史分位。"""
     val = node.get("value")
     st = _indicator_status(node)
@@ -557,6 +587,7 @@ def render_level2_super_order_card(node: dict[str, Any]) -> str:
         short_label=short,
         value_html=_esc(pct_disp),
         value_color=_value_color_class(val, mode="percentile"),
+        card_timing=card_timing,
         subtitle="仅特大单(elg) · 120 交易日历史分位",
         fact_statement=str(node.get("fact_statement") or ""),
         calculation_logic=str(node.get("calculation_logic") or ""),
@@ -575,7 +606,11 @@ def render_level2_super_order_card(node: dict[str, Any]) -> str:
     )
 
 
-def render_margin_short_skew_card(node: dict[str, Any]) -> str:
+def render_margin_short_skew_card(
+    node: dict[str, Any],
+    *,
+    card_timing: ProbeCardTiming | None = None,
+) -> str:
     """#19 两融杠杆倾斜度 · 250 日历史分位。"""
     val = node.get("value")
     st = _indicator_status(node)
@@ -616,7 +651,8 @@ def render_margin_short_skew_card(node: dict[str, Any]) -> str:
         short_label=short,
         value_html=_esc(pct_disp),
         value_color=_value_color_class(val, mode="percentile"),
-        timestamp=ts,
+        card_timing=card_timing,
+        timestamp=ts if not card_timing else None,
         subtitle=f"融资余额/流通市值 · 250 日历史分位 · 占盘 {ratio_pct}",
         fact_statement=str(node.get("fact_statement") or ""),
         calculation_logic=str(node.get("calculation_logic") or ""),
@@ -639,7 +675,11 @@ def render_margin_short_skew_card(node: dict[str, Any]) -> str:
     )
 
 
-def render_turnover_acceleration_card(node: dict[str, Any]) -> str:
+def render_turnover_acceleration_card(
+    node: dict[str, Any],
+    *,
+    card_timing: ProbeCardTiming | None = None,
+) -> str:
     """#20 自由换手率异动倍数。"""
     val = node.get("value")
     st = _indicator_status(node)
@@ -682,7 +722,8 @@ def render_turnover_acceleration_card(node: dict[str, Any]) -> str:
         short_label=short,
         value_html=value_html,
         value_color=value_color,
-        timestamp=ts,
+        card_timing=card_timing,
+        timestamp=ts if not card_timing else None,
         subtitle=(
             f"自由流通换手率 turnover_rate_f · 120日加速分位 {pct}%"
             if pct is not None
@@ -701,6 +742,74 @@ def render_turnover_acceleration_card(node: dict[str, Any]) -> str:
             "今日换手(小数)": _pct_fmt,
             "20日均换手": _pct_fmt,
             "120日加速分位": lambda v: f"{float(v):.1f}%",
+        },
+        alert_html=alert,
+        t1_json=t1_json,
+        status_ok=st == "ok",
+    )
+
+
+def render_tech_beta_correlation_card(
+    node: dict[str, Any],
+    *,
+    card_timing: ProbeCardTiming | None = None,
+) -> str:
+    """#25 板块 Beta 共振度与解释系数。"""
+    val = node.get("value")
+    st = _indicator_status(node)
+    name = node.get("indicator_name") or probe_indicator_name("tech_beta_correlation")
+    short = probe_label("tech_beta_correlation")
+    rm = raw_metrics_for_display(node)
+    val_disp = f"{float(val):.2f}" if val is not None else "—"
+    value_html = f"{_esc(val_disp)} <span class='text-sm font-medium text-gray-500'>ρ</span>"
+    r2 = rm.get("r_squared")
+    beta = rm.get("beta_coefficient")
+    sector = rm.get("sector_index_name") or rm.get("sector_index_used")
+    trade_date = rm.get("trade_date")
+    ts = f"数据交易日 {trade_date} · 盘后 index_daily" if trade_date else "盘后 daily + index_daily"
+    alert = ""
+    if r2 is not None and float(r2) >= 0.64:
+        alert = (
+            '<p class="mt-3 text-xs font-medium text-amber-600">'
+            "⚠ R² ≥0.64 · 板块大势主导标的波动，警惕 Alpha 幻觉</p>"
+        )
+    t1_json = {
+        "tech_beta_correlation": {
+            "indicator_name": name,
+            "value": val,
+            "fact_statement": node.get("fact_statement"),
+            "calculation_logic": node.get("calculation_logic"),
+            "source": node.get("source"),
+            "raw_metrics": rm,
+        }
+    }
+    value_color = "text-amber-600" if r2 is not None and float(r2) >= 0.64 else "text-gray-900"
+
+    return _render_probe_card(
+        probe_key="tech_beta_correlation",
+        title=name,
+        short_label=short,
+        value_html=value_html,
+        value_color=value_color,
+        card_timing=card_timing,
+        timestamp=ts if not card_timing else None,
+        subtitle=(
+            f"基准 {sector} · 60日 Pearson ρ · Beta {beta}"
+            if beta is not None
+            else f"基准 {sector} · 60日滚动相关"
+        ),
+        fact_statement=str(node.get("fact_statement") or ""),
+        calculation_logic=str(node.get("calculation_logic") or ""),
+        source=str(node.get("source") or ""),
+        metric_items=[
+            ("Pearson ρ", rm.get("pearson_r"), "highlight"),
+            ("R²", rm.get("r_squared"), "neutral"),
+            ("Beta", rm.get("beta_coefficient"), "outline"),
+            ("今日 Alpha 残差", rm.get("alpha_deviation_today"), "outline"),
+        ],
+        metric_formatters={
+            "R²": lambda v: f"{float(v) * 100:.1f}%",
+            "今日 Alpha 残差": lambda v: f"{float(v) * 100:.2f}%",
         },
         alert_html=alert,
         t1_json=t1_json,
@@ -780,7 +889,11 @@ def render_block_trade_silent_card(state: dict[str, Any]) -> str:
 """
 
 
-def render_block_trade_discount_card(node: dict[str, Any]) -> str:
+def render_block_trade_discount_card(
+    node: dict[str, Any],
+    *,
+    card_timing: ProbeCardTiming | None = None,
+) -> str:
     """#21 大宗交易加权折价与盘口冲击。"""
     val = node.get("value")
     st = _indicator_status(node)
@@ -834,7 +947,8 @@ def render_block_trade_discount_card(node: dict[str, Any]) -> str:
         short_label=short,
         value_html=_esc(pct_disp),
         value_color=value_color,
-        timestamp=ts,
+        card_timing=card_timing,
+        timestamp=ts if not card_timing else None,
         subtitle=f"盘口冲击 {impact_pct} · 仅冲击≥0.1% 才上报 Opus",
         fact_statement=str(node.get("fact_statement") or ""),
         calculation_logic=str(node.get("calculation_logic") or ""),
@@ -860,7 +974,11 @@ def render_block_trade_discount_card(node: dict[str, Any]) -> str:
     )
 
 
-def render_retail_concentration_card(node: dict[str, Any]) -> str:
+def render_retail_concentration_card(
+    node: dict[str, Any],
+    *,
+    card_timing: ProbeCardTiming | None = None,
+) -> str:
     """#22 户均持股集中度 · 3 年分位 + 时效性标注。"""
     val = node.get("value")
     st = _indicator_status(node)
@@ -919,7 +1037,8 @@ def render_retail_concentration_card(node: dict[str, Any]) -> str:
         short_label=short,
         value_html=_esc(pct_disp),
         value_color=value_color,
-        timestamp=ts,
+        card_timing=card_timing,
+        timestamp=ts if not card_timing else None,
         subtitle=f"数据可靠性 {rm.get('data_reliability', '—')} · 户均持股历史分位（越低越分散）",
         fact_statement=str(node.get("fact_statement") or ""),
         calculation_logic=str(node.get("calculation_logic") or ""),
@@ -942,7 +1061,11 @@ def render_retail_concentration_card(node: dict[str, Any]) -> str:
     )
 
 
-def render_insider_sell_actual_card(node: dict[str, Any]) -> str:
+def render_insider_sell_actual_card(
+    node: dict[str, Any],
+    *,
+    card_timing: ProbeCardTiming | None = None,
+) -> str:
     """#23 内部人90日净减持当量 · 集群逃生检测。"""
     val = node.get("value")
     st = _indicator_status(node)
@@ -1008,7 +1131,8 @@ def render_insider_sell_actual_card(node: dict[str, Any]) -> str:
         short_label=short,
         value_html=_esc(pct_disp),
         value_color=value_color,
-        timestamp=ts,
+        card_timing=card_timing,
+        timestamp=ts if not card_timing else None,
         subtitle="仅实际 stk_holdertrade · 禁止减持计划公告口径",
         fact_statement=str(node.get("fact_statement") or ""),
         calculation_logic=str(node.get("calculation_logic") or ""),
@@ -1085,7 +1209,11 @@ def render_etf_redemption_silent_card(state: dict[str, Any]) -> str:
 """
 
 
-def render_etf_redemption_impact_card(node: dict[str, Any]) -> str:
+def render_etf_redemption_impact_card(
+    node: dict[str, Any],
+    *,
+    card_timing: ProbeCardTiming | None = None,
+) -> str:
     """#24 ETF 被动资金穿透冲击当量。"""
     val = node.get("value")
     st = _indicator_status(node)
@@ -1138,7 +1266,8 @@ def render_etf_redemption_impact_card(node: dict[str, Any]) -> str:
         short_label=short,
         value_html=_esc(pct_disp),
         value_color=value_color,
-        timestamp=ts,
+        card_timing=card_timing,
+        timestamp=ts if not card_timing else None,
         subtitle="穿透当量化 · 禁止将 ETF 总申赎额直接等同于个股威胁",
         fact_statement=str(node.get("fact_statement") or ""),
         calculation_logic=str(node.get("calculation_logic") or ""),
@@ -1163,7 +1292,12 @@ def render_etf_redemption_impact_card(node: dict[str, Any]) -> str:
     )
 
 
-def render_generic_probe_card(key: str, node: dict[str, Any]) -> str:
+def render_generic_probe_card(
+    key: str,
+    node: dict[str, Any],
+    *,
+    card_timing: ProbeCardTiming | None = None,
+) -> str:
     val = node.get("value")
     st = _indicator_status(node)
     name = node.get("indicator_name") or probe_indicator_name(key)
@@ -1172,6 +1306,7 @@ def render_generic_probe_card(key: str, node: dict[str, Any]) -> str:
         title=name,
         short_label=probe_label(key),
         value_html=_esc(val if val is not None else "—"),
+        card_timing=card_timing,
         fact_statement=str(node.get("fact_statement") or ""),
         calculation_logic=str(node.get("calculation_logic") or ""),
         source=str(node.get("source") or ""),
@@ -1221,6 +1356,7 @@ def render_probe_domain(
     symbol: str = "",
     sync: dict[str, Any] | None = None,
     event_probe_states: dict[str, dict[str, Any]] | None = None,
+    timing_map: dict[str, ProbeCardTiming] | None = None,
 ) -> str:
     _ = accent  # 保留签名兼容；新设计不再使用彩色 accent 包裹
     event_probe_states = event_probe_states or {}
@@ -1233,9 +1369,11 @@ def render_probe_domain(
 </section>
 """
     quote_at = _quote_intraday_watermark(sync, symbol) if symbol else None
+    timing_map = timing_map or {}
     cards: list[str] = []
     for k in PROBE_KEYS:
         node = domain.get(k)
+        card_timing = timing_map.get(k)
         if k == "block_trade_discount" and not isinstance(node, dict):
             bt_state = event_probe_states.get("block_trade_discount")
             if bt_state and bt_state.get("mode") != "active":
@@ -1249,27 +1387,31 @@ def render_probe_domain(
         if not isinstance(node, dict):
             continue
         if k == "qmt_atr_trailing":
-            cards.append(render_qmt_atr_trailing_card(node, quote_job_at=quote_at))
+            cards.append(
+                render_qmt_atr_trailing_card(node, quote_job_at=quote_at, card_timing=card_timing)
+            )
         elif k == "volume_price_div":
-            cards.append(render_volume_price_div_card(node))
+            cards.append(render_volume_price_div_card(node, card_timing=card_timing))
         elif k == "smart_money_flow":
-            cards.append(render_smart_money_flow_card(node))
+            cards.append(render_smart_money_flow_card(node, card_timing=card_timing))
         elif k == "level2_super_order":
-            cards.append(render_level2_super_order_card(node))
+            cards.append(render_level2_super_order_card(node, card_timing=card_timing))
         elif k == "margin_short_skew":
-            cards.append(render_margin_short_skew_card(node))
+            cards.append(render_margin_short_skew_card(node, card_timing=card_timing))
         elif k == "turnover_acceleration":
-            cards.append(render_turnover_acceleration_card(node))
+            cards.append(render_turnover_acceleration_card(node, card_timing=card_timing))
         elif k == "block_trade_discount":
-            cards.append(render_block_trade_discount_card(node))
+            cards.append(render_block_trade_discount_card(node, card_timing=card_timing))
         elif k == "retail_concentration":
-            cards.append(render_retail_concentration_card(node))
+            cards.append(render_retail_concentration_card(node, card_timing=card_timing))
         elif k == "insider_sell_actual":
-            cards.append(render_insider_sell_actual_card(node))
+            cards.append(render_insider_sell_actual_card(node, card_timing=card_timing))
         elif k == "etf_redemption_impact":
-            cards.append(render_etf_redemption_impact_card(node))
+            cards.append(render_etf_redemption_impact_card(node, card_timing=card_timing))
+        elif k == "tech_beta_correlation":
+            cards.append(render_tech_beta_correlation_card(node, card_timing=card_timing))
         else:
-            cards.append(render_generic_probe_card(k, node))
+            cards.append(render_generic_probe_card(k, node, card_timing=card_timing))
     body = "".join(cards) or '<p class="text-sm text-gray-500">尚无 T1 数据</p>'
     return f"""
 <section class="{_SECTION}">

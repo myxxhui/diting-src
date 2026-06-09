@@ -1195,6 +1195,17 @@
     ⚠️ 全部为 advisory 建议，不含任何交易操作，请自行判断
   </div>
   <div hx-get="/api/executing/settings-html" hx-trigger="load" hx-swap="innerHTML" class="mb-2"></div>
+  <div id="executing-analyst-panel-slot"
+       hx-get="/api/executing/analyst-panel-html"
+       hx-trigger="load"
+       hx-swap="innerHTML"
+       class="mb-2 min-h-[2rem]"
+       hx-on::response-error="this.innerHTML='<p class=\'text-sm text-rose-700 border border-rose-200 rounded-lg p-3 bg-rose-50\'>T2 预分析工作台加载失败 · 请刷新或检查 Copilot 是否已部署最新版本</p>'">
+    <p class="text-xs text-violet-600 flex items-center gap-2 py-2">
+      <svg class="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
+      加载 T2 持仓分析工作台…
+    </p>
+  </div>
   {% endif %}
   <div hx-get="/api/campaigns?view={{ active }}" hx-trigger="load" hx-swap="innerHTML"
        hx-headers='{"Accept": "text/html"}'>

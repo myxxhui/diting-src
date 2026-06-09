@@ -423,15 +423,19 @@ PUSH_COPILOT_LATEST ?= 0
 .PHONY: build-copilot-image push-copilot-image push-copilot-image-only copilot-image-all
 build-copilot-image:
 	@root="$$(dirname $(realpath $(firstword $(MAKEFILE_LIST))))"; \
-	cd "$$root" && docker build --platform $(DOCKER_PLATFORM) -f Dockerfile.copilot -t diting-copilot:latest .
-	@echo "build-copilot-image: diting-copilot:latest OK ($(DOCKER_PLATFORM))"
+	cd "$$root" && echo "▶ [build-copilot-image] 开始 docker build（依赖层有缓存时较快 · 约 5–10min 无缓存）…" && \
+	docker build --progress=plain --platform $(DOCKER_PLATFORM) -f Dockerfile.copilot -t diting-copilot:latest . && \
+	docker tag diting-copilot:latest diting-copilot:$(COPILOT_IMAGE_TAG) && \
+	echo "build-copilot-image: diting-copilot:latest + :$(COPILOT_IMAGE_TAG) OK ($(DOCKER_PLATFORM))"
 
 # 仅推送已构建的本地镜像（默认只推 $(COPILOT_IMAGE_TAG)；PUSH_COPILOT_LATEST=1 时额外推 latest）
 push-copilot-image-only:
 	@if [ -z "$(DITING_ACR_PASSWORD)" ]; then echo "错误: 请 export DITING_ACR_PASSWORD 或在 Makefile 赋值"; exit 1; fi; \
 	echo "$(DITING_ACR_PASSWORD)" | docker login $(ACR_REGISTRY) -u $(ACR_USERNAME) --password-stdin || exit 1; \
-	docker tag diting-copilot:latest $(ACR_IMAGE_COPILOT) && docker push $(ACR_IMAGE_COPILOT) && \
-	echo "push-copilot-image: $(ACR_IMAGE_COPILOT) OK"; \
+	_src="diting-copilot:latest"; \
+	if docker image inspect "diting-copilot:$(COPILOT_IMAGE_TAG)" >/dev/null 2>&1; then _src="diting-copilot:$(COPILOT_IMAGE_TAG)"; fi; \
+	docker tag "$$_src" $(ACR_IMAGE_COPILOT) && docker push $(ACR_IMAGE_COPILOT) && \
+	echo "push-copilot-image: $(ACR_IMAGE_COPILOT) OK (from $$_src)"; \
 	if [ "$(PUSH_COPILOT_LATEST)" = "1" ]; then \
 	  docker tag diting-copilot:latest $(ACR_IMAGE_COPILOT_LATEST) && docker push $(ACR_IMAGE_COPILOT_LATEST) && \
 	  echo "push-copilot-image: $(ACR_IMAGE_COPILOT_LATEST) OK"; \

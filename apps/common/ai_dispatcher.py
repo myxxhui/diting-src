@@ -43,6 +43,27 @@ def anthropic_https_proxy_url() -> str:
     ).strip()
 
 
+def anthropic_omit_temperature(model: str) -> bool:
+    """Opus 4.5+ 部分型号已弃用 temperature 参数。"""
+    m = (model or "").lower()
+    prefixes = (
+        "claude-opus-4-6",
+        "claude-opus-4-7",
+        "claude-opus-4-8",
+        "claude-opus-4-5",
+    )
+    return any(m.startswith(p) for p in prefixes)
+
+
+def anthropic_read_timeout_sec(*, scene: Scene, max_tokens: int) -> float:
+    """T2 大 payload 读超时放宽（16k 输出约需 3～5 分钟）。"""
+    if scene == "radar_assess" and max_tokens >= 8192:
+        return 600.0
+    if scene == "radar_assess" and max_tokens >= 4096:
+        return 300.0
+    return 120.0
+
+
 Scene = Literal[
     "scorer_policy",
     "scorer_mapping",
@@ -144,19 +165,34 @@ class AIDispatcher:
 
                 http_client: Any = None
                 proxy = anthropic_https_proxy_url()
+                read_timeout = float(
+                    os.getenv(
+                        "ANTHROPIC_READ_TIMEOUT_SEC",
+                        str(
+                            anthropic_read_timeout_sec(
+                                scene="radar_assess", max_tokens=32_768
+                            )
+                        ),
+                    )
+                )
+                client_kw: dict[str, Any] = {
+                    "api_key": self._anthropic_key,
+                    "base_url": self._anthropic_base,
+                    "timeout": read_timeout,
+                }
                 if proxy:
                     import httpx  # noqa: PLC0415
 
                     http_client = httpx.Client(
                         proxy=proxy,
-                        timeout=httpx.Timeout(120.0, connect=30.0),
+                        timeout=httpx.Timeout(read_timeout, connect=30.0),
                     )
-                    logger.info("[AIDispatcher] Anthropic 客户端使用 ANTHROPIC_HTTPS_PROXY")
-                self._anthropic_client = anthropic.Anthropic(
-                    api_key=self._anthropic_key,
-                    base_url=self._anthropic_base,
-                    **({"http_client": http_client} if http_client else {}),
-                )
+                    client_kw["http_client"] = http_client
+                    logger.info(
+                        "[AIDispatcher] Anthropic 客户端使用 ANTHROPIC_HTTPS_PROXY · read_timeout=%ss",
+                        int(read_timeout),
+                    )
+                self._anthropic_client = anthropic.Anthropic(**client_kw)
             except ImportError:
                 logger.warning("anthropic SDK 未安装；remote 路由将不可用（pip install anthropic）")
 
@@ -370,21 +406,29 @@ class AIDispatcher:
                 user_msgs.append(m)
 
         model = (model_override or "").strip() or self._anthropic_model
+        create_kw: dict[str, Any] = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": user_msgs,
+        }
+        if system:
+            create_kw["system"] = system
+        if not anthropic_omit_temperature(model):
+            create_kw["temperature"] = temperature
         try:
-            resp = self._anthropic_client.messages.create(
-                model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                **({"system": system} if system else {}),
-                messages=user_msgs,
-            )
+            resp = self._anthropic_client.messages.create(**create_kw)
             text = resp.content[0].text if resp.content else ""
+            raw: dict[str, Any] = (
+                resp.model_dump() if hasattr(resp, "model_dump") else {}
+            )
+            if raw and "stop_reason" not in raw and hasattr(resp, "stop_reason"):
+                raw["stop_reason"] = resp.stop_reason
             return {
                 "text": text,
                 "model": model,
                 "tokens_in": resp.usage.input_tokens,
                 "tokens_out": resp.usage.output_tokens,
-                "raw": resp.model_dump() if hasattr(resp, "model_dump") else {},
+                "raw": raw,
             }
         except Exception as exc:
             logger.warning("[AIDispatcher] remote 调用失败: %s", exc)
