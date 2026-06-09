@@ -313,6 +313,7 @@ async def api_executing_detail_html(symbol: str, session: AsyncSession = Depends
     degraded_hints: list[str] = []
     l3: dict = {}
     l4: dict = {}
+    event_probe_states: dict[str, dict] = {}
     layer_b_banner = ""
     if not has_entry:
         layer_b_banner = render_layer_b_prerequisite_banner()
@@ -322,6 +323,24 @@ async def api_executing_detail_html(symbol: str, session: AsyncSession = Depends
         l3 = {k: v for k, v in indicators.items() if k in L3_KEYS}
         l4 = {k: v for k, v in indicators.items() if k in L4_KEYS}
         degraded_hints = list(signal.get("degraded_probes") or [])
+        if "block_trade_discount" not in l4:
+            from apps.copilot.modules.executing.block_trade_discount import (
+                describe_block_trade_ui_state,
+                load_block_trade_payload,
+            )
+
+            bt_payload = await load_block_trade_payload(session, sym, redis_client=redis)
+            event_probe_states["block_trade_discount"] = describe_block_trade_ui_state(bt_payload)
+        if "etf_redemption_impact" not in l4:
+            from apps.copilot.modules.executing.etf_redemption_impact import (
+                describe_etf_redemption_ui_state,
+                load_etf_redemption_payload,
+            )
+
+            etf_payload = await load_etf_redemption_payload(session, sym, redis_client=redis)
+            event_probe_states["etf_redemption_impact"] = describe_etf_redemption_ui_state(
+                etf_payload
+            )
 
     cmd_root = (audit.get("Execution_Command") or {}) if isinstance(audit, dict) else {}
     code_key = f"{sym}.{'SH' if sym.startswith('6') else 'SZ'}"
@@ -371,7 +390,7 @@ async def api_executing_detail_html(symbol: str, session: AsyncSession = Depends
         f"{layer_b_banner}"
         f"{render_degraded_probes(degraded_hints)}"
         f"{hot_timeline}"
-        f'{render_probe_domain(l4, title="层 B · T1 指标（#15~#20）", accent="orange", empty_hint="暂无可用指标 · 点「立即跑今日体检」或等待 Cron 采集", symbol=sym, sync=sync)}'
+        f'{render_probe_domain(l4, title="层 B · T1 指标（#15~#23）", accent="orange", empty_hint="暂无可用指标 · 点「立即跑今日体检」或等待 Cron 采集", symbol=sym, sync=sync, event_probe_states=event_probe_states)}'
     )
 
     return HTMLResponse(

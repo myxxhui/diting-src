@@ -30,7 +30,27 @@ async def test_probe_keys_count():
         "level2_super_order",
         "margin_short_skew",
         "turnover_acceleration",
+        "block_trade_discount",
+        "retail_concentration",
+        "insider_sell_actual",
+        "etf_redemption_impact",
     )
+
+
+def test_probe_registry_covers_all_keys():
+    from apps.copilot.modules.executing.probe_registry import (
+        OPTIONAL_SILENT_PROBE_KEYS,
+        PROBE_REGISTRY,
+        REGISTERED_PROBE_KEYS,
+    )
+
+    assert REGISTERED_PROBE_KEYS == PROBE_KEYS
+    assert set(PROBE_REGISTRY) == set(PROBE_KEYS)
+    assert OPTIONAL_SILENT_PROBE_KEYS == frozenset(
+        {"block_trade_discount", "etf_redemption_impact"}
+    )
+    for key in PROBE_KEYS:
+        assert PROBE_REGISTRY[key].spec.key == key
 
 
 def test_render_volume_price_div_card():

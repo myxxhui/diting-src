@@ -187,6 +187,78 @@ def build_turnover_acceleration_node(metrics: dict[str, Any], *, source: str = "
     }
 
 
+def build_block_trade_discount_node(metrics: dict[str, Any], *, source: str = "") -> dict[str, Any]:
+    """#21 大宗交易加权折价与盘口冲击白盒节点。"""
+    value = metrics.get("value")
+    if value is None:
+        raise ValueError("block_trade_discount value 缺失")
+    value_f = round(float(value), 2)
+    raw_metrics = dict(metrics.get("raw_metrics") or {})
+    src = source or str(metrics.get("source") or "Tushare Block Trade (VWAP Aggregated)")
+    return {
+        "indicator_name": probe_indicator_name("block_trade_discount"),
+        "value": value_f,
+        "fact_statement": str(metrics.get("fact_statement") or ""),
+        "calculation_logic": str(metrics.get("calculation_logic") or ""),
+        "source": src,
+        "raw_metrics": raw_metrics,
+    }
+
+
+def build_retail_concentration_node(metrics: dict[str, Any], *, source: str = "") -> dict[str, Any]:
+    """#22 户均持股集中度白盒节点。"""
+    value = metrics.get("value")
+    if value is None:
+        raise ValueError("retail_concentration value 缺失")
+    value_f = round(float(value), 2)
+    raw_metrics = dict(metrics.get("raw_metrics") or {})
+    src = source or str(metrics.get("source") or "AkShare Interactive Platform Scraper (Event-Driven)")
+    return {
+        "indicator_name": probe_indicator_name("retail_concentration"),
+        "value": value_f,
+        "fact_statement": str(metrics.get("fact_statement") or ""),
+        "calculation_logic": str(metrics.get("calculation_logic") or ""),
+        "source": src,
+        "raw_metrics": raw_metrics,
+    }
+
+
+def build_insider_sell_actual_node(metrics: dict[str, Any], *, source: str = "") -> dict[str, Any]:
+    """#23 内部人90日净减持当量白盒节点。"""
+    value = metrics.get("value")
+    if value is None:
+        raise ValueError("insider_sell_actual value 缺失")
+    value_f = round(float(value), 2)
+    raw_metrics = dict(metrics.get("raw_metrics") or {})
+    src = source or str(metrics.get("source") or "Tushare Pro (stk_holdertrade)")
+    return {
+        "indicator_name": probe_indicator_name("insider_sell_actual"),
+        "value": value_f,
+        "fact_statement": str(metrics.get("fact_statement") or ""),
+        "calculation_logic": str(metrics.get("calculation_logic") or ""),
+        "source": src,
+        "raw_metrics": raw_metrics,
+    }
+
+
+def build_etf_redemption_impact_node(metrics: dict[str, Any], *, source: str = "") -> dict[str, Any]:
+    """#24 ETF 被动资金冲击当量白盒节点。"""
+    value = metrics.get("value")
+    if value is None:
+        raise ValueError("etf_redemption_impact value 缺失")
+    value_f = round(float(value), 2)
+    raw_metrics = dict(metrics.get("raw_metrics") or {})
+    src = source or str(metrics.get("source") or "Tushare Pro Fund Share & Portfolio (T+1 Lag)")
+    return {
+        "indicator_name": probe_indicator_name("etf_redemption_impact"),
+        "value": value_f,
+        "fact_statement": str(metrics.get("fact_statement") or ""),
+        "calculation_logic": str(metrics.get("calculation_logic") or ""),
+        "source": src,
+        "raw_metrics": raw_metrics,
+    }
+
+
 def build_indicator_node(key: str, payload: dict[str, Any]) -> dict[str, Any]:
     if key == "qmt_atr_trailing":
         return build_qmt_atr_trailing_node(payload)
@@ -200,6 +272,14 @@ def build_indicator_node(key: str, payload: dict[str, Any]) -> dict[str, Any]:
         return build_margin_short_skew_node(payload, source=str(payload.get("source") or ""))
     if key == "turnover_acceleration":
         return build_turnover_acceleration_node(payload, source=str(payload.get("source") or ""))
+    if key == "block_trade_discount":
+        return build_block_trade_discount_node(payload, source=str(payload.get("source") or ""))
+    if key == "retail_concentration":
+        return build_retail_concentration_node(payload, source=str(payload.get("source") or ""))
+    if key == "insider_sell_actual":
+        return build_insider_sell_actual_node(payload, source=str(payload.get("source") or ""))
+    if key == "etf_redemption_impact":
+        return build_etf_redemption_impact_node(payload, source=str(payload.get("source") or ""))
     val = payload.get("value")
     if val is None:
         raise ValueError(f"{key} value 缺失")

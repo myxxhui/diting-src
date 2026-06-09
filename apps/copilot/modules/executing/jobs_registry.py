@@ -35,6 +35,14 @@ JOB_REGISTRY: tuple[ExecutingJobSpec, ...] = (
     ExecutingJobSpec("l4-margin-skew-morning", "30 8 * * 2-6", True, True, 3600),
     # #20 turnover_acceleration · 自由换手率异动（15:30 盘后）
     ExecutingJobSpec("l4-turnover-accel-eod", "30 15 * * 1-5", True, True, 3600),
+    # #21 block_trade_discount · 大宗交易折溢价（18:00 盘后完整发布）
+    ExecutingJobSpec("l4-block-trade-eod", "0 18 * * 1-5", True, True, 3600),
+    # #22 retail_concentration · 股东户数/互动易穿透（20:30 盘后）
+    ExecutingJobSpec("l4-retail-concentration-eod", "30 20 * * 1-5", True, True, 3600),
+    # #23 insider_sell_actual · 内部人实际增减持（20:30 盘后）
+    ExecutingJobSpec("l4-insider-sell-eod", "30 20 * * 1-5", True, True, 3600),
+    # #24 etf_redemption_impact · ETF 申赎穿透冲击（周二至周六 08:30 盘前 T+1）
+    ExecutingJobSpec("l4-etf-redemption-morning", "30 8 * * 2-6", True, True, 3600),
     ExecutingJobSpec("l4-atr-bars-sync", "0 16 * * 1-5", True, True, 900),
     ExecutingJobSpec("l4-micro-eod", "10 16 * * 1-5", True, True, 1800),
     ExecutingJobSpec("l3-news-daily", "0 18 * * 1-5", True, True, 1800),

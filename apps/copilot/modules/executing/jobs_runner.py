@@ -211,6 +211,30 @@ async def run_job(
         result = await run_turnover_acceleration_eod(session, symbols, redis)
         return result
 
+    if job_id == "l4-block-trade-eod":
+        from apps.copilot.modules.executing.orchestrator import run_block_trade_eod
+
+        result = await run_block_trade_eod(session, symbols, redis)
+        return result
+
+    if job_id == "l4-retail-concentration-eod":
+        from apps.copilot.modules.executing.orchestrator import run_retail_concentration_eod
+
+        result = await run_retail_concentration_eod(session, symbols, redis)
+        return result
+
+    if job_id == "l4-insider-sell-eod":
+        from apps.copilot.modules.executing.orchestrator import run_insider_sell_eod
+
+        result = await run_insider_sell_eod(session, symbols, redis)
+        return result
+
+    if job_id == "l4-etf-redemption-morning":
+        from apps.copilot.modules.executing.orchestrator import run_etf_redemption_morning
+
+        result = await run_etf_redemption_morning(session, symbols, redis)
+        return result
+
     if job_id in ("l4-micro-eod", "l3-news-daily", "collect-once"):
         out = []
         for sym in symbols:

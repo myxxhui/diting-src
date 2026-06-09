@@ -999,3 +999,404 @@ async def run_turnover_acceleration_eod(
         error=None if ok else "turnover_acceleration_eod_failed",
     )
     return {"job_id": "l4-turnover-accel-eod", "status": "ok" if ok else "error", "results": results}
+
+
+async def run_block_trade_sync_symbol(
+    session: AsyncSession,
+    symbol: str,
+    redis_client: Any,
+    *,
+    mode: str = "incremental",
+) -> dict[str, Any]:
+    """#21 单标的：Tushare block_trade → PG 日聚合 + T0 摘要 + T1 折价冲击快照。"""
+    from apps.copilot.modules.executing.block_trade_discount import (
+        SOURCE_BLOCK,
+        compute_block_trade_discount_metrics,
+        sync_block_trade_symbol,
+    )
+    from apps.copilot.modules.executing.block_trade_storage import (
+        mark_block_trade_backfill_done,
+    )
+    from apps.copilot.modules.executing.indicator_nodes import build_block_trade_discount_node
+    from apps.copilot.modules.executing.smart_money_flow import tushare_token
+    from apps.copilot.modules.executing.storage import save_t0_batch, upsert_t1_snapshot
+
+    sym = symbol.zfill(6)[-6:]
+    if not tushare_token():
+        return {"symbol": sym, "status": "error", "error": "TUSHARE_TOKEN 未配置"}
+
+    try:
+        result = await sync_block_trade_symbol(
+            session, sym, redis_client=redis_client, mode=mode
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[block-trade] sync 失败 symbol=%s: %s", sym, exc)
+        return {"symbol": sym, "status": "error", "error": str(exc)[:200]}
+
+    if mode == "full" and result.get("status") == "ok":
+        mark_block_trade_backfill_done(redis_client, sym)
+
+    ok = result.get("status") == "ok"
+    t0_item = {
+        "probe_key": "block_trade_discount",
+        "ok": ok,
+        "payload": result.get("t0_summary") or {},
+        "source": SOURCE_BLOCK,
+    }
+    if not ok:
+        t0_item["blocker"] = result.get("error") or "block_trade 同步未完成"[:200]
+    await save_t0_batch(session, sym, [t0_item], trade_date=date.today())
+
+    t1_value = None
+    payload = result.get("payload")
+    if ok and payload:
+        metrics = compute_block_trade_discount_metrics(payload)
+        if metrics is not None:
+            try:
+                node = build_block_trade_discount_node(metrics, source=SOURCE_BLOCK)
+                await upsert_t1_snapshot(
+                    session,
+                    sym,
+                    "block_trade_discount",
+                    node,
+                    trade_date=date.today(),
+                    source=SOURCE_BLOCK,
+                )
+                t1_value = node.get("value")
+            except ValueError as exc:
+                t0_item["ok"] = False
+                t0_item["blocker"] = str(exc)[:200]
+                ok = False
+
+    return {
+        **result,
+        "symbol": sym,
+        "status": "ok" if ok else "error",
+        "t1_value": t1_value,
+        "t1_silent": t1_value is None and ok,
+    }
+
+
+async def run_block_trade_eod(
+    session: AsyncSession,
+    symbols: list[str],
+    redis_client: Any,
+) -> dict[str, Any]:
+    """18:00 · 全执行区标的大宗交易增量/750日回填 + T1 快照。"""
+    from apps.copilot.modules.executing.block_trade_storage import is_block_trade_backfill_done
+
+    results: list[dict[str, Any]] = []
+    for sym in symbols:
+        code = sym.zfill(6)[-6:]
+        mode = "incremental" if is_block_trade_backfill_done(redis_client, code) else "full"
+        results.append(
+            await run_block_trade_sync_symbol(session, sym, redis_client, mode=mode)
+        )
+    ok = [r for r in results if r.get("status") == "ok"]
+    await upsert_watermark(
+        session,
+        "l4-block-trade-eod",
+        "*",
+        success=bool(ok),
+        trade_date=date.today(),
+        row_count=len(ok),
+        error=None if ok else "block_trade_eod_failed",
+    )
+    return {"job_id": "l4-block-trade-eod", "status": "ok" if ok else "error", "results": results}
+
+
+async def run_retail_concentration_sync_symbol(
+    session: AsyncSession,
+    symbol: str,
+    redis_client: Any,
+) -> dict[str, Any]:
+    """#22 单标的：AkShare 股东户数 → PG + T0 摘要 + T1 分位快照。"""
+    from apps.copilot.modules.executing.indicator_nodes import build_retail_concentration_node
+    from apps.copilot.modules.executing.retail_concentration import (
+        SOURCE_RETAIL,
+        compute_retail_concentration_metrics,
+        sync_retail_concentration_symbol,
+    )
+    from apps.copilot.modules.executing.retail_concentration_storage import RETAIL_MIN_SNAPSHOTS
+    from apps.copilot.modules.executing.storage import save_t0_batch, upsert_t1_snapshot
+
+    sym = symbol.zfill(6)[-6:]
+    try:
+        result = await sync_retail_concentration_symbol(session, sym, redis_client=redis_client)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[retail-concentration] sync 失败 symbol=%s: %s", sym, exc)
+        return {"symbol": sym, "status": "error", "error": str(exc)[:200]}
+
+    payload = result.get("payload")
+    pg_count = int(result.get("pg_count") or 0)
+    ok = result.get("status") == "ok" and pg_count >= RETAIL_MIN_SNAPSHOTS
+    t0_item = {
+        "probe_key": "retail_concentration",
+        "ok": ok,
+        "payload": result.get("t0_summary") or {},
+        "source": SOURCE_RETAIL,
+    }
+    if not ok:
+        t0_item["blocker"] = f"股东户数快照={pg_count} 需>={RETAIL_MIN_SNAPSHOTS}"[:200]
+    await save_t0_batch(session, sym, [t0_item], trade_date=date.today())
+
+    t1_value = None
+    if ok and payload:
+        try:
+            metrics = compute_retail_concentration_metrics(payload)
+            node = build_retail_concentration_node(metrics, source=SOURCE_RETAIL)
+            await upsert_t1_snapshot(
+                session,
+                sym,
+                "retail_concentration",
+                node,
+                trade_date=date.today(),
+                source=SOURCE_RETAIL,
+            )
+            t1_value = node.get("value")
+        except ValueError as exc:
+            t0_item["ok"] = False
+            t0_item["blocker"] = str(exc)[:200]
+            ok = False
+
+    return {
+        **result,
+        "symbol": sym,
+        "status": "ok" if ok else "error",
+        "t1_value": t1_value,
+    }
+
+
+async def run_retail_concentration_eod(
+    session: AsyncSession,
+    symbols: list[str],
+    redis_client: Any,
+) -> dict[str, Any]:
+    """20:30 · 全执行区标的股东户数快照 + T1 分位。"""
+    results: list[dict[str, Any]] = []
+    for sym in symbols:
+        results.append(await run_retail_concentration_sync_symbol(session, sym, redis_client))
+    ok = [r for r in results if r.get("status") == "ok"]
+    await upsert_watermark(
+        session,
+        "l4-retail-concentration-eod",
+        "*",
+        success=bool(ok),
+        trade_date=date.today(),
+        row_count=len(ok),
+        error=None if ok else "retail_concentration_eod_failed",
+    )
+    return {"job_id": "l4-retail-concentration-eod", "status": "ok" if ok else "error", "results": results}
+
+
+async def run_insider_sell_sync_symbol(
+    session: AsyncSession,
+    symbol: str,
+    redis_client: Any,
+    *,
+    mode: str = "incremental",
+) -> dict[str, Any]:
+    """#23 单标的：stk_holdertrade → PG + T0 + T1 净减持当量。"""
+    from apps.copilot.modules.executing.indicator_nodes import build_insider_sell_actual_node
+    from apps.copilot.modules.executing.insider_sell_actual import (
+        SOURCE_INSIDER,
+        compute_insider_sell_metrics,
+        sync_insider_sell_symbol,
+    )
+    from apps.copilot.modules.executing.insider_sell_storage import is_insider_backfill_done
+    from apps.copilot.modules.executing.smart_money_flow import tushare_token
+    from apps.copilot.modules.executing.storage import save_t0_batch, upsert_t1_snapshot
+
+    sym = symbol.zfill(6)[-6:]
+    if not tushare_token():
+        return {"symbol": sym, "status": "error", "error": "TUSHARE_TOKEN 未配置"}
+
+    try:
+        result = await sync_insider_sell_symbol(
+            session, sym, redis_client=redis_client, mode=mode
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[insider-sell] sync 失败 symbol=%s: %s", sym, exc)
+        return {"symbol": sym, "status": "error", "error": str(exc)[:200]}
+
+    payload = result.get("payload")
+    ff = result.get("free_float_shares")
+    backfill = is_insider_backfill_done(redis_client, sym) or mode == "full"
+    ok = result.get("status") == "ok" and backfill and ff
+    t0_item = {
+        "probe_key": "insider_sell_actual",
+        "ok": ok,
+        "payload": result.get("t0_summary") or {},
+        "source": SOURCE_INSIDER,
+    }
+    if not ok:
+        if not backfill:
+            t0_item["blocker"] = "需 3 年 stk_holdertrade 回填 · 首次 full sync"
+        elif not ff:
+            t0_item["blocker"] = "daily_basic 缺 free_share"
+        else:
+            t0_item["blocker"] = result.get("error") or "insider sync 未完成"
+    await save_t0_batch(session, sym, [t0_item], trade_date=date.today())
+
+    t1_value = None
+    if ok and payload:
+        try:
+            metrics = compute_insider_sell_metrics(payload)
+            node = build_insider_sell_actual_node(metrics, source=SOURCE_INSIDER)
+            await upsert_t1_snapshot(
+                session,
+                sym,
+                "insider_sell_actual",
+                node,
+                trade_date=date.today(),
+                source=SOURCE_INSIDER,
+            )
+            t1_value = node.get("value")
+        except ValueError as exc:
+            t0_item["ok"] = False
+            t0_item["blocker"] = str(exc)[:200]
+            ok = False
+
+    return {
+        **result,
+        "symbol": sym,
+        "status": "ok" if ok else "error",
+        "t1_value": t1_value,
+    }
+
+
+async def run_insider_sell_eod(
+    session: AsyncSession,
+    symbols: list[str],
+    redis_client: Any,
+) -> dict[str, Any]:
+    """20:30 · 内部人增减持增量/3年回填 + T1 快照。"""
+    from apps.copilot.modules.executing.insider_sell_storage import is_insider_backfill_done
+
+    results: list[dict[str, Any]] = []
+    for sym in symbols:
+        code = sym.zfill(6)[-6:]
+        mode = "incremental" if is_insider_backfill_done(redis_client, code) else "full"
+        results.append(
+            await run_insider_sell_sync_symbol(session, sym, redis_client, mode=mode)
+        )
+    ok = [r for r in results if r.get("status") == "ok"]
+    await upsert_watermark(
+        session,
+        "l4-insider-sell-eod",
+        "*",
+        success=bool(ok),
+        trade_date=date.today(),
+        row_count=len(ok),
+        error=None if ok else "insider_sell_eod_failed",
+    )
+    return {"job_id": "l4-insider-sell-eod", "status": "ok" if ok else "error", "results": results}
+
+
+async def run_etf_redemption_sync_symbol(
+    session: AsyncSession,
+    symbol: str,
+    redis_client: Any,
+    *,
+    mode: str = "incremental",
+) -> dict[str, Any]:
+    """#24 单标的：ETF 链接 + fund_share → PG + T0 + T1 穿透冲击快照。"""
+    from apps.copilot.modules.executing.etf_redemption_impact import (
+        SOURCE_ETF,
+        compute_etf_redemption_metrics,
+        sync_etf_redemption_symbol,
+    )
+    from apps.copilot.modules.executing.etf_redemption_storage import is_etf_backfill_done
+    from apps.copilot.modules.executing.indicator_nodes import build_etf_redemption_impact_node
+    from apps.copilot.modules.executing.smart_money_flow import tushare_token
+    from apps.copilot.modules.executing.storage import save_t0_batch, upsert_t1_snapshot
+
+    sym = symbol.zfill(6)[-6:]
+    if not tushare_token():
+        return {"symbol": sym, "status": "error", "error": "TUSHARE_TOKEN 未配置"}
+
+    try:
+        result = await sync_etf_redemption_symbol(
+            session, sym, redis_client=redis_client, mode=mode
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[etf-redemption] sync 失败 symbol=%s: %s", sym, exc)
+        return {"symbol": sym, "status": "error", "error": str(exc)[:200]}
+
+    backfill = is_etf_backfill_done(redis_client, sym) or mode == "full"
+    ok = result.get("status") == "ok" and backfill and (result.get("links_count") or 0) > 0
+    t0_item = {
+        "probe_key": "etf_redemption_impact",
+        "ok": ok,
+        "payload": result.get("t0_summary") or {},
+        "source": SOURCE_ETF,
+    }
+    if not ok:
+        if not backfill:
+            t0_item["blocker"] = "需 60 交易日 ETF 份额回填 · 首次 full sync"
+        elif (result.get("links_count") or 0) < 1:
+            t0_item["blocker"] = "未建立标的↔ETF 持仓链接 · index_weight/增量扫描中"
+        else:
+            t0_item["blocker"] = result.get("error") or "etf redemption sync 未完成"
+    await save_t0_batch(session, sym, [t0_item], trade_date=date.today())
+
+    t1_value = None
+    payload = result.get("payload")
+    if ok and payload:
+        metrics = compute_etf_redemption_metrics(payload)
+        if metrics is not None:
+            try:
+                node = build_etf_redemption_impact_node(metrics, source=SOURCE_ETF)
+                await upsert_t1_snapshot(
+                    session,
+                    sym,
+                    "etf_redemption_impact",
+                    node,
+                    trade_date=date.today(),
+                    source=SOURCE_ETF,
+                )
+                t1_value = node.get("value")
+            except ValueError as exc:
+                t0_item["ok"] = False
+                t0_item["blocker"] = str(exc)[:200]
+                ok = False
+
+    return {
+        **result,
+        "symbol": sym,
+        "status": "ok" if ok else "error",
+        "t1_value": t1_value,
+        "t1_silent": t1_value is None and result.get("status") == "ok",
+    }
+
+
+async def run_etf_redemption_morning(
+    session: AsyncSession,
+    symbols: list[str],
+    redis_client: Any,
+) -> dict[str, Any]:
+    """08:30 · ETF 申赎 T+1 盘前穿透 + T1 快照（周二至周六）。"""
+    from apps.copilot.modules.executing.etf_redemption_storage import is_etf_backfill_done
+
+    results: list[dict[str, Any]] = []
+    for sym in symbols:
+        code = sym.zfill(6)[-6:]
+        mode = "incremental" if is_etf_backfill_done(redis_client, code) else "full"
+        results.append(
+            await run_etf_redemption_sync_symbol(session, sym, redis_client, mode=mode)
+        )
+    ok = [r for r in results if r.get("status") == "ok"]
+    await upsert_watermark(
+        session,
+        "l4-etf-redemption-morning",
+        "*",
+        success=bool(ok),
+        trade_date=date.today(),
+        row_count=len(ok),
+        error=None if ok else "etf_redemption_morning_failed",
+    )
+    return {
+        "job_id": "l4-etf-redemption-morning",
+        "status": "ok" if ok else "error",
+        "results": results,
+    }

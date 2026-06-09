@@ -862,6 +862,134 @@ class ExecutingMarginDaily(Base):
     )
 
 
+class ExecutingInsiderTradeEvent(Base):
+    """#23 insider_sell_actual · Tushare stk_holdertrade 日度事件追加。
+
+    [Ref: 28_ §3.2.7]
+    """
+
+    __tablename__ = "executing_insider_trade_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "ann_date",
+            "trade_date",
+            "holder_name",
+            "in_out",
+            "change_vol_shares",
+            name="uq_insider_trade_event",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(6), nullable=False, index=True)
+    ann_date: Mapped[date] = mapped_column(Date, nullable=False)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    holder_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    holder_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    in_out: Mapped[str] = mapped_column(String(8), nullable=False)
+    change_vol_shares: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    source: Mapped[str] = mapped_column(
+        String(96), nullable=False, default="Tushare Pro (stk_holdertrade)"
+    )
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class ExecutingRetailHolderSnapshot(Base):
+    """#22 retail_concentration · AkShare 股东户数快照（阶跃型 · 按 end_date 落库）。
+
+    [Ref: 28_ §3.2.6]
+    """
+
+    __tablename__ = "executing_retail_holder_snapshots"
+
+    symbol: Mapped[str] = mapped_column(String(6), primary_key=True)
+    end_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    announce_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    holder_num: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    previous_holder_num: Mapped[Optional[float]] = mapped_column(nullable=True)
+    holder_num_change: Mapped[Optional[float]] = mapped_column(nullable=True)
+    avg_hold_vol: Mapped[Optional[float]] = mapped_column(nullable=True)
+    free_float_shares: Mapped[Optional[float]] = mapped_column(nullable=True)
+    source: Mapped[str] = mapped_column(
+        String(96), nullable=False, default="AkShare Interactive Platform Scraper (Event-Driven)"
+    )
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class ExecutingBlockTradeDaily(Base):
+    """#21 block_trade_discount · Tushare block_trade 日聚合（稀疏事件 · 有成交日才落库）。
+
+    [Ref: 28_ §3.2.5]
+    """
+
+    __tablename__ = "executing_block_trade_daily"
+
+    symbol: Mapped[str] = mapped_column(String(6), primary_key=True)
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    vwap_price: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    total_vol_wan: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    total_amount_yuan: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    trades_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    close_price: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    free_float_mv_yuan: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    vwap_discount_rate: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    float_impact_ratio: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    buyers_sellers: Mapped[Optional[list]] = mapped_column(JSON_TYPE, nullable=True)
+    source: Mapped[str] = mapped_column(
+        String(96), nullable=False, default="Tushare Block Trade (VWAP Aggregated)"
+    )
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class ExecutingEtfStockLink(Base):
+    """#24 etf_redemption_impact · 标的 ↔ 核心 ETF 持仓权重链接。
+
+    [Ref: 28_ §3.2.8]
+    """
+
+    __tablename__ = "executing_etf_stock_link"
+
+    symbol: Mapped[str] = mapped_column(String(6), primary_key=True)
+    etf_ts_code: Mapped[str] = mapped_column(String(16), primary_key=True)
+    stock_weight: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    report_end_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    link_source: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source: Mapped[str] = mapped_column(
+        String(96), nullable=False, default="Tushare Pro Fund Share & Portfolio (T+1 Lag)"
+    )
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class ExecutingEtfShareDaily(Base):
+    """#24 etf_redemption_impact · ETF 份额 + 净值日序列（T+1 滞后）。
+
+    [Ref: 28_ §3.2.8]
+    """
+
+    __tablename__ = "executing_etf_share_daily"
+
+    etf_ts_code: Mapped[str] = mapped_column(String(16), primary_key=True)
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    fd_share: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    fd_share_change: Mapped[Optional[float]] = mapped_column(nullable=True)
+    unit_nav: Mapped[Optional[float]] = mapped_column(nullable=True)
+    source: Mapped[str] = mapped_column(
+        String(96), nullable=False, default="Tushare Pro Fund Share & Portfolio (T+1 Lag)"
+    )
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
 class ExecutingTurnoverDaily(Base):
     """#20 turnover_acceleration · Tushare daily_basic 自由换手率底库（目标 140 交易日）。
 

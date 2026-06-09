@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import html as _html
 import json
+import re
 from typing import Any, Callable
 
 from apps.copilot.db.datetime_util import utc_naive_to_shanghai_display
@@ -16,18 +17,101 @@ from apps.copilot.modules.executing.indicator_nodes import (
 from apps.copilot.modules.executing.profile import PROBE_KEYS
 from apps.copilot.modules.executing.probe_labels import probe_indicator_name, probe_label
 
-# ── Design tokens（Tailwind · 对齐 #F9FAFB / #FFFFFF / #E5E7EB / #10B981）──
-_CARD = (
+# ── Design tokens（Tailwind · 卡片间距 gap-6 · 左侧 accent · Tag 语义色）──
+_CARD_BASE = (
     "probe-indicator-card bg-white border border-gray-200 rounded-xl "
-    "shadow-sm hover:shadow-md transition-shadow p-6 mb-4"
+    "shadow-sm hover:shadow-md transition-shadow p-6 mb-0"
 )
 _SECTION = "executing-probe-section mb-6"
-_TAG = (
-    "inline-flex items-center justify-between gap-3 min-w-[7rem] "
-    "px-2.5 py-1.5 rounded border border-gray-200 bg-gray-50"
-)
+
+# probe_key → 分类主题（Tailwind 完整类名 + inline 左边框兜底）
+PROBE_THEMES: dict[str, dict[str, str]] = {
+    "qmt_atr_trailing": {
+        "category": "risk",
+        "accent_hex": "#3b82f6",
+        "border": "border border-gray-200 border-l-[4px] border-l-blue-500",
+        "badge": "bg-blue-50 text-blue-700",
+        "formula_accent": "border-l-blue-500",
+    },
+    "volume_price_div": {
+        "category": "volume_price",
+        "accent_hex": "#a855f7",
+        "border": "border border-gray-200 border-l-[4px] border-l-purple-500",
+        "badge": "bg-purple-50 text-purple-700",
+        "formula_accent": "border-l-purple-500",
+    },
+    "smart_money_flow": {
+        "category": "flow",
+        "accent_hex": "#f97316",
+        "border": "border border-gray-200 border-l-[4px] border-l-orange-500",
+        "badge": "bg-orange-50 text-orange-700",
+        "formula_accent": "border-l-orange-500",
+    },
+    "level2_super_order": {
+        "category": "percentile",
+        "accent_hex": "#14b8a6",
+        "border": "border border-gray-200 border-l-[4px] border-l-teal-500",
+        "badge": "bg-teal-50 text-teal-800",
+        "formula_accent": "border-l-teal-500",
+    },
+    "margin_short_skew": {
+        "category": "percentile",
+        "accent_hex": "#14b8a6",
+        "border": "border border-gray-200 border-l-[4px] border-l-teal-500",
+        "badge": "bg-teal-50 text-teal-800",
+        "formula_accent": "border-l-teal-500",
+    },
+    "turnover_acceleration": {
+        "category": "volume_price",
+        "accent_hex": "#0ea5e9",
+        "border": "border border-gray-200 border-l-[4px] border-l-sky-500",
+        "badge": "bg-sky-50 text-sky-700",
+        "formula_accent": "border-l-sky-500",
+    },
+    "block_trade_discount": {
+        "category": "event",
+        "accent_hex": "#6366f1",
+        "border": "border border-gray-200 border-l-[4px] border-l-indigo-500",
+        "badge": "bg-indigo-50 text-indigo-700",
+        "formula_accent": "border-l-indigo-500",
+    },
+    "retail_concentration": {
+        "category": "percentile",
+        "accent_hex": "#14b8a6",
+        "border": "border border-gray-200 border-l-[4px] border-l-teal-500",
+        "badge": "bg-teal-50 text-teal-800",
+        "formula_accent": "border-l-teal-500",
+    },
+    "insider_sell_actual": {
+        "category": "insider",
+        "accent_hex": "#e11d48",
+        "border": "border border-gray-200 border-l-[4px] border-l-rose-500",
+        "badge": "bg-rose-50 text-rose-700",
+        "formula_accent": "border-l-rose-500",
+    },
+    "etf_redemption_impact": {
+        "category": "passive_flow",
+        "accent_hex": "#7c3aed",
+        "border": "border border-gray-200 border-l-[4px] border-l-violet-500",
+        "badge": "bg-violet-50 text-violet-700",
+        "formula_accent": "border-l-violet-500",
+    },
+}
+_DEFAULT_THEME = {
+    "category": "neutral",
+    "accent_hex": "#9ca3af",
+    "border": "border border-gray-200 border-l-[4px] border-l-gray-400",
+    "badge": "bg-slate-50 text-slate-700",
+    "formula_accent": "border-l-gray-400",
+}
+
+_TAG_NEUTRAL = "inline-flex items-baseline gap-1.5 px-2 py-1 rounded text-xs bg-gray-50 text-gray-800"
+_TAG_HIGHLIGHT = "inline-flex items-baseline gap-1.5 px-2 py-1 rounded text-xs bg-blue-50 text-blue-800"
+_TAG_POSITIVE = "inline-flex items-baseline gap-1.5 px-2 py-1 rounded text-xs bg-red-50 text-red-700"
+_TAG_NEGATIVE = "inline-flex items-baseline gap-1.5 px-2 py-1 rounded text-xs bg-emerald-50 text-emerald-700"
+_TAG_OUTLINE = "inline-flex items-baseline gap-1.5 px-2 py-1 rounded text-xs text-gray-700"
 _FORMULA = (
-    "mt-4 mb-1 px-4 py-3 rounded-r-md bg-gray-100 border-l-4 "
+    "mt-4 mb-1 px-4 py-3 rounded-r-md bg-slate-100 border-l-4 "
     "font-mono text-xs sm:text-sm text-gray-700 leading-relaxed"
 )
 
@@ -88,25 +172,94 @@ def _value_color_class(
     return "text-gray-900"
 
 
+def _probe_theme(probe_key: str) -> dict[str, str]:
+    return PROBE_THEMES.get(probe_key, _DEFAULT_THEME)
+
+
+def _card_shell(probe_key: str, *, visual_cooldown: bool = False) -> tuple[str, str]:
+    """返回 (class, inline-style) · 双保险确保左侧 accent 可见。"""
+    if visual_cooldown:
+        cls = f"{_CARD_BASE} border border-gray-200 border-l-[4px] border-l-gray-400 opacity-90"
+        style = (
+            "border-left-width:4px;border-left-style:solid;border-left-color:#9ca3af;"
+            "opacity:0.88;"
+        )
+        return cls, style
+    theme = _probe_theme(probe_key)
+    cls = f"{_CARD_BASE} {theme['border']}"
+    style = f"border-left-width:4px;border-left-style:solid;border-left-color:{theme['accent_hex']};"
+    return cls, style
+
+
+def _highlight_formula(formula: str) -> str:
+    """公式区：逐 token 转义后再包 span，避免 HTML 被当作纯文本输出。"""
+    if not formula:
+        return ""
+    parts: list[str] = []
+    for m in re.finditer(r"\d+\.?\d*|[+\-=/*()]|.", formula):
+        tok = m.group(0)
+        if re.fullmatch(r"\d+\.?\d*", tok):
+            parts.append(f'<span class="text-slate-900 font-semibold">{_esc(tok)}</span>')
+        elif re.fullmatch(r"[+\-=/*()]", tok):
+            parts.append(f'<span class="text-gray-400">{_esc(tok)}</span>')
+        else:
+            parts.append(_esc(tok))
+    return "".join(parts)
+
+
+def _infer_tag_tone(label: str, raw: Any) -> str:
+    """A 股习惯：正数红（涨/流入）· 负数绿（跌/流出）。"""
+    signed_hints = ("净", "折价", "delta", "Delta", "比", "分位")
+    if not any(h in label for h in signed_hints):
+        return "neutral"
+    try:
+        f = float(raw)
+    except (TypeError, ValueError):
+        return "neutral"
+    if f > 0:
+        return "positive"
+    if f < 0:
+        return "negative"
+    return "neutral"
+
+
+def _tag_shell(tone: str) -> tuple[str, str]:
+    if tone == "highlight":
+        return _TAG_HIGHLIGHT, "text-blue-800"
+    if tone == "positive":
+        return _TAG_POSITIVE, "text-red-700"
+    if tone == "negative":
+        return _TAG_NEGATIVE, "text-emerald-700"
+    if tone == "outline":
+        return _TAG_OUTLINE, "text-gray-800"
+    return _TAG_NEUTRAL, "text-gray-900"
+
+
 def _render_metric_tags(
-    items: list[tuple[str, Any]],
+    items: list[tuple[str, Any] | tuple[str, Any, str]],
     *,
     formatters: dict[str, Callable[[Any], str]] | None = None,
 ) -> str:
     formatters = formatters or {}
     tags: list[str] = []
-    for label, raw in items:
+    for item in items:
+        label = item[0]
+        raw = item[1]
+        tone = item[2] if len(item) > 2 else _infer_tag_tone(label, raw)
+        if tone == "signed":
+            tone = _infer_tag_tone(label, raw)
         if raw is None or raw == "":
             continue
         if label in formatters:
             disp = formatters[label](raw)
         else:
             disp = _esc(raw)
+        shell, val_cls = _tag_shell(tone)
         tags.append(
-            f'<div class="{_TAG}">'
-            f'<span class="text-[11px] text-gray-400">{_esc(label)}</span>'
-            f'<span class="text-sm font-semibold text-gray-900">{disp}</span>'
-            f"</div>"
+            f'<span class="{shell}">'
+            f'<span class="text-gray-400">{_esc(label)}</span>'
+            f'<span class="font-semibold {val_cls}">{disp}</span>'
+            f"</span>"
         )
     if not tags:
         return ""
@@ -138,12 +291,17 @@ def _render_probe_card(
     source: str = "",
     metric_items: list[tuple[str, Any]] | None = None,
     metric_formatters: dict[str, Callable[[Any], str]] | None = None,
-    formula_accent: str = "border-indigo-500",
+    formula_accent: str = "",
     alert_html: str = "",
     t1_json: dict[str, Any] | None = None,
     status_ok: bool = True,
+    visual_cooldown: bool = False,
 ) -> str:
     """统一指标卡片：Header · 描述 · 公式区 · Tag 栏 · 来源 Footer。"""
+    theme = _probe_theme(probe_key)
+    card_cls, card_style = _card_shell(probe_key, visual_cooldown=visual_cooldown)
+    badge_cls = theme["badge"]
+    formula_border = formula_accent or theme["formula_accent"]
     ts_line = (
         f'<p class="text-[11px] text-gray-400 mb-3 font-mono">{_esc(timestamp)}</p>'
         if timestamp
@@ -160,21 +318,22 @@ def _render_probe_card(
     formula_block = ""
     if calculation_logic:
         formula_block = (
-            f'<div class="{_FORMULA} {formula_accent}">{_esc(calculation_logic)}</div>'
+            f'<div class="{_FORMULA} {formula_border}">'
+            f"{_highlight_formula(calculation_logic)}</div>"
         )
     tags_html = _render_metric_tags(metric_items or [], formatters=metric_formatters)
     footer_json = _render_t1_json_details(probe_key, t1_json) if t1_json else ""
     source_line = _esc(source or "—")
 
     return f"""
-<article class="{_CARD}" data-probe-key="{_esc(probe_key)}">
+<article class="{card_cls}" style="{card_style}" data-probe-key="{_esc(probe_key)}" data-probe-category="{_esc(theme.get('category', ''))}">
   {ts_line}
   <header class="flex items-start justify-between gap-4">
     <div class="min-w-0 flex-1">
       <h3 class="text-base font-semibold text-gray-900 leading-snug">{_esc(title)}</h3>
       <div class="mt-1.5 flex flex-wrap items-center gap-2">
         <span class="text-xs text-gray-500">{_esc(short_label)}</span>
-        <code class="text-[11px] font-mono text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{_esc(probe_key)}</code>
+        <code class="text-[11px] font-mono px-2 py-0.5 rounded-md {badge_cls}">{_esc(probe_key)}</code>
       </div>
       {sub_line}
     </div>
@@ -288,12 +447,11 @@ def render_qmt_atr_trailing_card(
         calculation_logic=str(node.get("calculation_logic") or ""),
         source=str(node.get("source") or ""),
         metric_items=[
-            ("ATR₂₀", rm.get("atr_20")),
-            ("峰值价", rm.get("peak_price")),
-            ("现价", rm.get("current_price")),
-            ("快照时间", rm.get("last_tick_time")),
+            ("ATR₂₀", rm.get("atr_20"), "outline"),
+            ("峰值价", rm.get("peak_price"), "highlight"),
+            ("现价", rm.get("current_price"), "neutral"),
+            ("快照时间", rm.get("last_tick_time"), "outline"),
         ],
-        formula_accent="border-orange-500",
         status_ok=st == "ok",
     )
 
@@ -320,14 +478,13 @@ def render_volume_price_div_card(node: dict[str, Any]) -> str:
         calculation_logic=str(node.get("calculation_logic") or ""),
         source=str(node.get("source") or ""),
         metric_items=[
-            ("高位阴线量", rm.get("high_zone_down_vol")),
-            ("高位阳线量", rm.get("high_zone_up_vol")),
-            ("高位阈值价", rm.get("high_zone_threshold_price")),
-            ("区间最高", rm.get("period_max")),
-            ("区间最低", rm.get("period_min")),
-            ("全样本量比", rm.get("global_vol_ratio")),
+            ("高位阴线量", rm.get("high_zone_down_vol"), "outline"),
+            ("高位阳线量", rm.get("high_zone_up_vol"), "outline"),
+            ("高位阈值价", rm.get("high_zone_threshold_price"), "highlight"),
+            ("区间最高", rm.get("period_max"), "neutral"),
+            ("区间最低", rm.get("period_min"), "neutral"),
+            ("全样本量比", rm.get("global_vol_ratio"), "neutral"),
         ],
-        formula_accent="border-violet-500",
         status_ok=st == "ok",
     )
 
@@ -366,11 +523,10 @@ def render_smart_money_flow_card(node: dict[str, Any]) -> str:
         calculation_logic=str(node.get("calculation_logic") or ""),
         source=str(node.get("source") or ""),
         metric_items=[
-            ("3日主力净股数", rm.get("3d_smart_money_net_vol")),
-            ("3日散户净股数", rm.get("3d_retail_net_vol")),
-            ("自由流通股本", rm.get("free_float_shares")),
+            ("3日主力净股数", rm.get("3d_smart_money_net_vol"), "signed"),
+            ("3日散户净股数", rm.get("3d_retail_net_vol"), "signed"),
+            ("自由流通股本", rm.get("free_float_shares"), "neutral"),
         ],
-        formula_accent="border-emerald-500",
         t1_json=t1_json,
         status_ok=st == "ok",
     )
@@ -406,15 +562,14 @@ def render_level2_super_order_card(node: dict[str, Any]) -> str:
         calculation_logic=str(node.get("calculation_logic") or ""),
         source=str(node.get("source") or ""),
         metric_items=[
-            ("今日特大单净额(元)", rm.get("current_net_elg_amount")),
-            ("今日特大单买入(元)", rm.get("current_buy_elg_amount")),
-            ("今日特大单卖出(元)", rm.get("current_sell_elg_amount")),
-            ("120日均值(元)", rm.get("120d_mean_net_amount")),
-            ("120日P95(元)", rm.get("120d_p95_threshold")),
-            ("120日P05(元)", rm.get("120d_p05_threshold")),
-            ("回看窗口(日)", rm.get("lookback_window_days")),
+            ("今日特大单净额(元)", rm.get("current_net_elg_amount"), "signed"),
+            ("今日特大单买入(元)", rm.get("current_buy_elg_amount"), "positive"),
+            ("今日特大单卖出(元)", rm.get("current_sell_elg_amount"), "negative"),
+            ("120日均值(元)", rm.get("120d_mean_net_amount"), "outline"),
+            ("120日P95(元)", rm.get("120d_p95_threshold"), "outline"),
+            ("120日P05(元)", rm.get("120d_p05_threshold"), "outline"),
+            ("回看窗口(日)", rm.get("lookback_window_days"), "outline"),
         ],
-        formula_accent="border-amber-500",
         t1_json=t1_json,
         status_ok=st == "ok",
     )
@@ -467,18 +622,17 @@ def render_margin_short_skew_card(node: dict[str, Any]) -> str:
         calculation_logic=str(node.get("calculation_logic") or ""),
         source=str(node.get("source") or ""),
         metric_items=[
-            ("融资余额(元)", rm.get("margin_balance")),
-            ("融券余额(元)", rm.get("short_balance")),
-            ("融资买入额(元)", rm.get("margin_purchase_today")),
-            ("杠杆占流通盘", rm.get("margin_to_float_ratio")),
-            ("250日均占盘比", rm.get("250d_mean_ratio")),
-            ("披露滞后(日)", rm.get("settlement_lag_days")),
+            ("融资余额(元)", rm.get("margin_balance"), "neutral"),
+            ("融券余额(元)", rm.get("short_balance"), "outline"),
+            ("融资买入额(元)", rm.get("margin_purchase_today"), "positive"),
+            ("杠杆占流通盘", rm.get("margin_to_float_ratio"), "highlight"),
+            ("250日均占盘比", rm.get("250d_mean_ratio"), "outline"),
+            ("披露滞后(日)", rm.get("settlement_lag_days"), "outline"),
         ],
         metric_formatters={
             "杠杆占流通盘": _ratio_fmt,
             "250日均占盘比": _ratio_fmt,
         },
-        formula_accent="border-rose-500",
         alert_html=alert,
         t1_json=t1_json,
         status_ok=st == "ok",
@@ -538,17 +692,471 @@ def render_turnover_acceleration_card(node: dict[str, Any]) -> str:
         calculation_logic=str(node.get("calculation_logic") or ""),
         source=str(node.get("source") or ""),
         metric_items=[
-            ("今日换手(小数)", rm.get("current_turnover_f")),
-            ("20日均换手", rm.get("20d_mean_turnover_f")),
-            ("120日加速分位", rm.get("120d_accel_percentile")),
-            ("量比", rm.get("volume_ratio")),
+            ("今日换手(小数)", rm.get("current_turnover_f"), "highlight"),
+            ("20日均换手", rm.get("20d_mean_turnover_f"), "outline"),
+            ("120日加速分位", rm.get("120d_accel_percentile"), "neutral"),
+            ("量比", rm.get("volume_ratio"), "outline"),
         ],
         metric_formatters={
             "今日换手(小数)": _pct_fmt,
             "20日均换手": _pct_fmt,
             "120日加速分位": lambda v: f"{float(v):.1f}%",
         },
-        formula_accent="border-sky-500",
+        alert_html=alert,
+        t1_json=t1_json,
+        status_ok=st == "ok",
+    )
+
+
+def render_block_trade_silent_card(state: dict[str, Any]) -> str:
+    """#21 静默态 · 已采集但未达实质冲击阈值（事件驱动探针常驻可见）。"""
+    mode = str(state.get("mode") or "silent")
+    name = probe_indicator_name("block_trade_discount")
+    short = probe_label("block_trade_discount")
+    message = str(state.get("message") or "无实质大宗冲击 · 探针静默")
+    theme = _probe_theme("block_trade_discount")
+    card_cls, card_style = _card_shell("block_trade_discount")
+    card_cls = f"{card_cls} opacity-95"
+
+    if mode == "not_ready":
+        value_html = "待同步"
+        value_color = "text-amber-600 text-base"
+        status_ok = False
+    elif mode == "no_events":
+        value_html = "无成交"
+        value_color = "text-gray-400 text-base"
+        status_ok = True
+    else:
+        value_html = "静默"
+        value_color = "text-gray-500 text-base"
+        status_ok = True
+
+    metric_items: list[tuple[str, Any] | tuple[str, Any, str]] = []
+    if state.get("latest_trade_date"):
+        metric_items.append(("最近大宗日", state.get("latest_trade_date"), "outline"))
+    if state.get("vwap_discount_rate") is not None:
+        metric_items.append(("最近折价率", state.get("vwap_discount_rate"), "signed"))
+    if state.get("float_impact_ratio") is not None:
+        metric_items.append(("最近冲击比", state.get("float_impact_ratio"), "outline"))
+    if state.get("history_event_days") is not None:
+        metric_items.append(("3年有成交日", state.get("history_event_days"), "neutral"))
+
+    def _ratio_fmt(v: Any) -> str:
+        try:
+            return f"{float(v) * 100:+.2f}%"
+        except (TypeError, ValueError):
+            return _esc(v)
+
+    def _impact_fmt(v: Any) -> str:
+        try:
+            return f"{float(v) * 100:.3f}%"
+        except (TypeError, ValueError):
+            return _esc(v)
+
+    badge_cls = theme["badge"]
+    return f"""
+<article class="{card_cls}" style="{card_style}" data-probe-key="block_trade_discount" data-probe-mode="{_esc(mode)}">
+  <header class="flex items-start justify-between gap-4">
+    <div class="min-w-0 flex-1">
+      <h3 class="text-base font-semibold text-gray-900 leading-snug">{_esc(name)}</h3>
+      <div class="mt-1.5 flex flex-wrap items-center gap-2">
+        <span class="text-xs text-gray-500">{_esc(short)}</span>
+        <code class="text-[11px] font-mono px-2 py-0.5 rounded-md {badge_cls}">block_trade_discount</code>
+        <span class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-100">事件驱动 · 监控中</span>
+      </div>
+      <p class="text-xs text-gray-500 mt-1">仅当盘口冲击 ≥0.1% 时升级为完整 T1 卡片并喂 Opus</p>
+    </div>
+    <div class="flex items-center gap-2 shrink-0">
+      {_status_dot(status_ok)}
+      <span class="font-bold tabular-nums {value_color}">{value_html}</span>
+    </div>
+  </header>
+  <p class="text-sm text-gray-600 leading-relaxed mt-4">{_esc(message)}</p>
+  {_render_metric_tags(metric_items, formatters={"最近折价率": _ratio_fmt, "最近冲击比": _impact_fmt})}
+  <footer class="mt-5 pt-3 border-t border-gray-200">
+    <p class="text-[11px] text-gray-400">来源 · Tushare Block Trade · 静默过滤已生效（非探针故障）</p>
+  </footer>
+</article>
+"""
+
+
+def render_block_trade_discount_card(node: dict[str, Any]) -> str:
+    """#21 大宗交易加权折价与盘口冲击。"""
+    val = node.get("value")
+    st = _indicator_status(node)
+    name = node.get("indicator_name") or probe_indicator_name("block_trade_discount")
+    short = probe_label("block_trade_discount")
+    rm = raw_metrics_for_display(node)
+    pct_disp = f"{float(val):+.2f}%" if val is not None else "—"
+    trade_date = rm.get("trade_date")
+    ts = f"数据交易日 {trade_date} · 盘后 block_trade" if trade_date else "18:00 盘后采集"
+    impact = rm.get("float_impact_ratio")
+    impact_pct = f"{float(impact) * 100:.2f}%" if impact is not None else "—"
+    alert = ""
+    if val is not None and float(val) <= -10:
+        alert = (
+            '<p class="mt-3 text-xs font-medium text-rose-600">'
+            "⚠ 加权折价率 ≤-10% · 实质性暗盘抛压</p>"
+        )
+    t1_json = {
+        "block_trade_discount": {
+            "indicator_name": name,
+            "value": val,
+            "fact_statement": node.get("fact_statement"),
+            "calculation_logic": node.get("calculation_logic"),
+            "source": node.get("source"),
+            "raw_metrics": rm,
+        }
+    }
+
+    def _amt_fmt(v: Any) -> str:
+        try:
+            f = float(v)
+            if abs(f) >= 1e8:
+                return f"{f / 1e8:.2f}亿"
+            if abs(f) >= 1e4:
+                return f"{f / 1e4:.0f}万"
+            return f"{f:.0f}"
+        except (TypeError, ValueError):
+            return _esc(v)
+
+    def _ratio_fmt(v: Any) -> str:
+        try:
+            return f"{float(v) * 100:.2f}%"
+        except (TypeError, ValueError):
+            return _esc(v)
+
+    value_color = "text-rose-600" if val is not None and float(val) < 0 else "text-gray-900"
+
+    return _render_probe_card(
+        probe_key="block_trade_discount",
+        title=name,
+        short_label=short,
+        value_html=_esc(pct_disp),
+        value_color=value_color,
+        timestamp=ts,
+        subtitle=f"盘口冲击 {impact_pct} · 仅冲击≥0.1% 才上报 Opus",
+        fact_statement=str(node.get("fact_statement") or ""),
+        calculation_logic=str(node.get("calculation_logic") or ""),
+        source=str(node.get("source") or ""),
+        metric_items=[
+            ("加权折价率", rm.get("vwap_discount_rate"), "signed"),
+            ("盘口冲击比", rm.get("float_impact_ratio"), "highlight"),
+            ("大宗总额", rm.get("total_block_amount"), "neutral"),
+            ("自由流通市值", rm.get("free_float_mv"), "outline"),
+            ("历史均折价", rm.get("historical_mean_discount"), "signed"),
+            ("成交笔数", rm.get("trades_count"), "outline"),
+        ],
+        metric_formatters={
+            "加权折价率": _ratio_fmt,
+            "盘口冲击比": _ratio_fmt,
+            "大宗总额": _amt_fmt,
+            "自由流通市值": _amt_fmt,
+            "历史均折价": _ratio_fmt,
+        },
+        alert_html=alert,
+        t1_json=t1_json,
+        status_ok=st == "ok",
+    )
+
+
+def render_retail_concentration_card(node: dict[str, Any]) -> str:
+    """#22 户均持股集中度 · 3 年分位 + 时效性标注。"""
+    val = node.get("value")
+    st = _indicator_status(node)
+    name = node.get("indicator_name") or probe_indicator_name("retail_concentration")
+    short = probe_label("retail_concentration")
+    rm = raw_metrics_for_display(node)
+    pct_disp = f"{float(val):.1f}%" if val is not None else "—"
+    end_date = rm.get("snapshot_end_date")
+    days = rm.get("days_since_snapshot")
+    stale = bool(rm.get("data_stale_warning"))
+    ts = f"快照截止 {end_date} · 距今 {days} 天" if end_date else "股东户数快照"
+    alert = ""
+    if stale:
+        alert = (
+            '<p class="mt-3 text-xs font-medium text-amber-700">'
+            "⚠ data_stale_warning · 快照超过 30 天，请勿刻舟求剑</p>"
+        )
+    elif val is not None and float(val) <= 20:
+        alert = (
+            '<p class="mt-3 text-xs font-medium text-rose-600">'
+            "⚠ 户均持股分位 ≤20% · 高危散户化区间</p>"
+        )
+    t1_json = {
+        "retail_concentration": {
+            "indicator_name": name,
+            "value": val,
+            "fact_statement": node.get("fact_statement"),
+            "calculation_logic": node.get("calculation_logic"),
+            "source": node.get("source"),
+            "raw_metrics": rm,
+        }
+    }
+
+    def _chg_fmt(v: Any) -> str:
+        try:
+            return f"{float(v) * 100:+.1f}%"
+        except (TypeError, ValueError):
+            return _esc(v)
+
+    def _vol_fmt(v: Any) -> str:
+        try:
+            f = float(v)
+            if f >= 1e4:
+                return f"{f/1e4:.1f}万"
+            return f"{f:.0f}"
+        except (TypeError, ValueError):
+            return _esc(v)
+
+    value_color = _value_color_class(val, mode="percentile")
+    if val is not None and float(val) <= 20:
+        value_color = "text-rose-600"
+
+    return _render_probe_card(
+        probe_key="retail_concentration",
+        title=name,
+        short_label=short,
+        value_html=_esc(pct_disp),
+        value_color=value_color,
+        timestamp=ts,
+        subtitle=f"数据可靠性 {rm.get('data_reliability', '—')} · 户均持股历史分位（越低越分散）",
+        fact_statement=str(node.get("fact_statement") or ""),
+        calculation_logic=str(node.get("calculation_logic") or ""),
+        source=str(node.get("source") or ""),
+        metric_items=[
+            ("股东户数", rm.get("current_holder_num"), "neutral"),
+            ("户数变动率", rm.get("holder_change_rate"), "signed"),
+            ("户均持股", rm.get("current_avg_hold_vol"), "highlight"),
+            ("3年P80户均", rm.get("3yr_p80_concentration"), "outline"),
+            ("距今(天)", rm.get("days_since_snapshot"), "outline"),
+        ],
+        metric_formatters={
+            "户数变动率": _chg_fmt,
+            "户均持股": _vol_fmt,
+            "3年P80户均": _vol_fmt,
+        },
+        alert_html=alert,
+        t1_json=t1_json,
+        status_ok=st == "ok" and not stale,
+    )
+
+
+def render_insider_sell_actual_card(node: dict[str, Any]) -> str:
+    """#23 内部人90日净减持当量 · 集群逃生检测。"""
+    val = node.get("value")
+    st = _indicator_status(node)
+    name = node.get("indicator_name") or probe_indicator_name("insider_sell_actual")
+    short = probe_label("insider_sell_actual")
+    rm = raw_metrics_for_display(node)
+    pct_disp = f"{float(val):+.2f}%" if val is not None else "—"
+    latest = rm.get("latest_trade_date")
+    days = rm.get("days_since_last_sale")
+    threat = str(rm.get("threat_urgency") or "")
+    try:
+        days_int = int(days) if days is not None else None
+    except (TypeError, ValueError):
+        days_int = None
+    faded = threat == "LOW_FADED" or (days_int is not None and days_int > 30)
+    ts = f"最近卖出 {latest} · 距今 {days} 天" if latest and latest != "—" else "stk_holdertrade 事件流"
+    cluster = bool(rm.get("cluster_escape_triggered"))
+    alert = ""
+    if faded:
+        alert = (
+            '<p class="mt-3 text-xs font-medium text-gray-500">'
+            "🌋 信号已衰减 · 最近卖出已超过 30 天 · 休眠火山（统计仍计入 90 日窗口）</p>"
+        )
+    elif cluster:
+        alert = (
+            '<p class="mt-3 text-xs font-medium text-rose-600">'
+            "⚠ 集群逃生触发 · 净抛售≥1% 且独立卖出人数≥3</p>"
+        )
+    elif val is not None and float(val) >= 1.0:
+        alert = (
+            '<p class="mt-3 text-xs font-medium text-amber-700">'
+            "⚠ 净减持占流通盘 ≥1% · 关注内部人抛压</p>"
+        )
+    t1_json = {
+        "insider_sell_actual": {
+            "indicator_name": name,
+            "value": val,
+            "fact_statement": node.get("fact_statement"),
+            "calculation_logic": node.get("calculation_logic"),
+            "source": node.get("source"),
+            "raw_metrics": rm,
+        }
+    }
+
+    def _vol_fmt(v: Any) -> str:
+        try:
+            f = float(v)
+            if abs(f) >= 1e8:
+                return f"{f/1e8:.2f}亿股"
+            if abs(f) >= 1e4:
+                return f"{f/1e4:.0f}万股"
+            return f"{f:.0f}股"
+        except (TypeError, ValueError):
+            return _esc(v)
+
+    value_color = "text-gray-500" if faded else (
+        "text-rose-600" if val is not None and float(val) > 0 else "text-gray-900"
+    )
+
+    return _render_probe_card(
+        probe_key="insider_sell_actual",
+        title=name,
+        short_label=short,
+        value_html=_esc(pct_disp),
+        value_color=value_color,
+        timestamp=ts,
+        subtitle="仅实际 stk_holdertrade · 禁止减持计划公告口径",
+        fact_statement=str(node.get("fact_statement") or ""),
+        calculation_logic=str(node.get("calculation_logic") or ""),
+        source=str(node.get("source") or ""),
+        metric_items=[
+            ("90日净卖量", rm.get("90d_net_sell_vol"), "signed"),
+            ("占流通盘比", rm.get("net_sell_to_float_ratio"), "highlight"),
+            ("独立卖出人数", rm.get("unique_sellers_count"), "neutral"),
+            ("威胁紧迫度", threat or "—", "outline"),
+            ("独立买入人数", rm.get("unique_buyers_count"), "outline"),
+            ("90日卖出总量", rm.get("90d_sell_vol"), "outline"),
+        ],
+        metric_formatters={
+            "90日净卖量": _vol_fmt,
+            "90日卖出总量": _vol_fmt,
+            "占流通盘比": lambda v: f"{float(v)*100:+.2f}%",
+        },
+        alert_html=alert,
+        t1_json=t1_json,
+        status_ok=st == "ok",
+        visual_cooldown=faded,
+    )
+
+
+def render_etf_redemption_silent_card(state: dict[str, Any]) -> str:
+    """#24 静默态 · 已监控关联 ETF 但穿透冲击 <1%。"""
+    mode = str(state.get("mode") or "silent")
+    name = probe_indicator_name("etf_redemption_impact")
+    short = probe_label("etf_redemption_impact")
+    message = str(state.get("message") or "无实质 ETF 被动冲击 · 探针静默")
+    theme = _probe_theme("etf_redemption_impact")
+    card_cls, card_style = _card_shell("etf_redemption_impact")
+    card_cls = f"{card_cls} opacity-95"
+
+    if mode == "not_ready":
+        value_html = "待同步"
+        value_color = "text-amber-600 text-base"
+        status_ok = False
+    else:
+        value_html = "静默"
+        value_color = "text-gray-500 text-base"
+        status_ok = True
+
+    metric_items: list[tuple[str, Any] | tuple[str, Any, str]] = []
+    if state.get("links_count") is not None:
+        metric_items.append(("关联 ETF", state.get("links_count"), "neutral"))
+    if state.get("latest_trade_date"):
+        metric_items.append(("T-1 交易日", state.get("latest_trade_date"), "outline"))
+
+    badge_cls = theme["badge"]
+    return f"""
+<article class="{card_cls}" style="{card_style}" data-probe-key="etf_redemption_impact" data-probe-mode="{_esc(mode)}">
+  <header class="flex items-start justify-between gap-4">
+    <div class="min-w-0 flex-1">
+      <h3 class="text-base font-semibold text-gray-900 leading-snug">{_esc(name)}</h3>
+      <div class="mt-1.5 flex flex-wrap items-center gap-2">
+        <span class="text-xs text-gray-500">{_esc(short)}</span>
+        <code class="text-[11px] font-mono px-2 py-0.5 rounded-md {badge_cls}">etf_redemption_impact</code>
+        <span class="text-[10px] px-2 py-0.5 rounded-full bg-violet-50 text-violet-600 border border-violet-100">穿透监控 · T+1</span>
+      </div>
+      <p class="text-xs text-gray-500 mt-1">仅当个股穿透冲击 ≥1% 时升级完整 T1 卡片（剥离 ETF 总额幻觉）</p>
+    </div>
+    <div class="flex items-center gap-2 shrink-0">
+      {_status_dot(status_ok)}
+      <span class="font-bold tabular-nums {value_color}">{value_html}</span>
+    </div>
+  </header>
+  <p class="text-sm text-gray-600 leading-relaxed mt-4">{_esc(message)}</p>
+  {_render_metric_tags(metric_items)}
+  <footer class="mt-5 pt-3 border-t border-gray-200">
+    <p class="text-[11px] text-gray-400">来源 · Tushare fund_share + index_weight · 静默过滤已生效</p>
+  </footer>
+</article>
+"""
+
+
+def render_etf_redemption_impact_card(node: dict[str, Any]) -> str:
+    """#24 ETF 被动资金穿透冲击当量。"""
+    val = node.get("value")
+    st = _indicator_status(node)
+    name = node.get("indicator_name") or probe_indicator_name("etf_redemption_impact")
+    short = probe_label("etf_redemption_impact")
+    rm = raw_metrics_for_display(node)
+    pct_disp = f"{float(val):+.2f}%" if val is not None else "—"
+    trade_date = rm.get("inferred_trade_date")
+    ts = f"T-1 数据日 {trade_date} · 08:30 盘前采集" if trade_date else "T+1 盘前 fund_share"
+    urgency = str(rm.get("threat_urgency") or "")
+    alert = ""
+    if urgency == "ELEVATED":
+        alert = (
+            '<p class="mt-3 text-xs font-medium text-violet-700">'
+            "⚠ 实质性被动抛压 · 穿透冲击 ≥3%</p>"
+        )
+    elif val is not None and abs(float(val)) >= 1.0:
+        alert = (
+            '<p class="mt-3 text-xs font-medium text-amber-700">'
+            "⚠ 穿透冲击 ≥1% · 关注 ETF 赎回连带</p>"
+        )
+
+    t1_json = {
+        "etf_redemption_impact": {
+            "indicator_name": name,
+            "value": val,
+            "fact_statement": node.get("fact_statement"),
+            "calculation_logic": node.get("calculation_logic"),
+            "source": node.get("source"),
+            "raw_metrics": rm,
+        }
+    }
+
+    def _amt_fmt(v: Any) -> str:
+        try:
+            f = float(v)
+            if abs(f) >= 1e8:
+                return f"{f/1e8:.2f}亿"
+            if abs(f) >= 1e4:
+                return f"{f/1e4:.0f}万"
+            return f"{f:.0f}"
+        except (TypeError, ValueError):
+            return _esc(v)
+
+    value_color = "text-violet-700" if val is not None and float(val) < 0 else "text-gray-900"
+
+    return _render_probe_card(
+        probe_key="etf_redemption_impact",
+        title=name,
+        short_label=short,
+        value_html=_esc(pct_disp),
+        value_color=value_color,
+        timestamp=ts,
+        subtitle="穿透当量化 · 禁止将 ETF 总申赎额直接等同于个股威胁",
+        fact_statement=str(node.get("fact_statement") or ""),
+        calculation_logic=str(node.get("calculation_logic") or ""),
+        source=str(node.get("source") or ""),
+        metric_items=[
+            ("核心 ETF", rm.get("top_associated_etf"), "highlight"),
+            ("标的权重", rm.get("stock_weight_in_etf"), "outline"),
+            ("被动抛压", rm.get("implied_passive_sell_amount"), "signed"),
+            ("成交额基数", rm.get("stock_daily_amount_base"), "neutral"),
+            ("穿透冲击比", rm.get("impact_ratio"), "highlight"),
+            ("威胁紧迫度", urgency or "—", "outline"),
+        ],
+        metric_formatters={
+            "标的权重": lambda v: f"{float(v)*100:.2f}%",
+            "被动抛压": _amt_fmt,
+            "成交额基数": _amt_fmt,
+            "穿透冲击比": lambda v: f"{float(v)*100:+.2f}%",
+        },
         alert_html=alert,
         t1_json=t1_json,
         status_ok=st == "ok",
@@ -612,9 +1220,12 @@ def render_probe_domain(
     empty_hint: str = "尚无 T1 数据 · 点击下方「立即跑今日体检」",
     symbol: str = "",
     sync: dict[str, Any] | None = None,
+    event_probe_states: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     _ = accent  # 保留签名兼容；新设计不再使用彩色 accent 包裹
-    if not domain:
+    event_probe_states = event_probe_states or {}
+    domain = domain or {}
+    if not domain and not event_probe_states:
         return f"""
 <section class="{_SECTION}">
   <h4 class="text-sm font-semibold text-gray-900 pb-2 mb-3 border-b border-gray-200">{_esc(title)}</h4>
@@ -625,6 +1236,16 @@ def render_probe_domain(
     cards: list[str] = []
     for k in PROBE_KEYS:
         node = domain.get(k)
+        if k == "block_trade_discount" and not isinstance(node, dict):
+            bt_state = event_probe_states.get("block_trade_discount")
+            if bt_state and bt_state.get("mode") != "active":
+                cards.append(render_block_trade_silent_card(bt_state))
+            continue
+        if k == "etf_redemption_impact" and not isinstance(node, dict):
+            etf_state = event_probe_states.get("etf_redemption_impact")
+            if etf_state and etf_state.get("mode") != "active":
+                cards.append(render_etf_redemption_silent_card(etf_state))
+            continue
         if not isinstance(node, dict):
             continue
         if k == "qmt_atr_trailing":
@@ -639,12 +1260,20 @@ def render_probe_domain(
             cards.append(render_margin_short_skew_card(node))
         elif k == "turnover_acceleration":
             cards.append(render_turnover_acceleration_card(node))
+        elif k == "block_trade_discount":
+            cards.append(render_block_trade_discount_card(node))
+        elif k == "retail_concentration":
+            cards.append(render_retail_concentration_card(node))
+        elif k == "insider_sell_actual":
+            cards.append(render_insider_sell_actual_card(node))
+        elif k == "etf_redemption_impact":
+            cards.append(render_etf_redemption_impact_card(node))
         else:
             cards.append(render_generic_probe_card(k, node))
     body = "".join(cards) or '<p class="text-sm text-gray-500">尚无 T1 数据</p>'
     return f"""
 <section class="{_SECTION}">
   <h4 class="text-sm font-semibold text-gray-900 pb-2 mb-1 border-b border-gray-200">{_esc(title)}</h4>
-  <div class="mt-4 space-y-0">{body}</div>
+  <div class="flex flex-col gap-6 mt-4">{body}</div>
 </section>
 """

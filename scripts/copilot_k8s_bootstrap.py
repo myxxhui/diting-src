@@ -24,6 +24,12 @@ async def _main() -> None:
     redis_client = wait_for_sync_redis(timeout_sec=180.0)
     log.info("Redis 就绪")
 
+    from apps.copilot.modules.executing.executing_warmup import warm_executing_redis_from_pg
+
+    async with AsyncSessionLocal() as session:
+        warm_stats = await warm_executing_redis_from_pg(session, redis_client)
+    log.info("Executing PG→Redis 预热: %s", warm_stats)
+
     async with AsyncSessionLocal() as session:
         campaign = await import_portfolio_to_campaign(session, redis_client=redis_client)
     log.info("Campaign 导入: %s", campaign)

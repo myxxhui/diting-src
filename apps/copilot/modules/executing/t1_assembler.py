@@ -1,6 +1,6 @@
 """T1 Scatter-Gather 装配车间 · 批量 portfolio_signals。
 
-[Ref: 28_ §4.1 · §4.2]
+[Ref: 28_ §4.1 · §4.2 · probe_registry]
 """
 from __future__ import annotations
 
@@ -8,23 +8,13 @@ import asyncio
 import logging
 import os
 from datetime import date, datetime, timezone
-from typing import Any, Awaitable
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.copilot.modules.executing.collectors.daily_bars import LOOKBACK_TRADING_DAYS
-from apps.copilot.modules.executing.collectors.intraday_draft import (
-    compute_intraday_atr,
-    load_draft_bar,
-    load_draft_bar_dict,
-    merge_pg_rows_with_draft,
-)
-from apps.copilot.modules.executing.t1_operators.qmt_atr_trailing import SOURCE_PG
 from apps.copilot.modules.executing.positions import profit_context
 from apps.copilot.modules.executing.storage import (
     latest_raw_map,
-    load_daily_bars,
-    load_t1_snapshot,
     persist_indicator_snapshots,
 )
 from apps.copilot.modules.executing.t1_build import (
@@ -35,215 +25,15 @@ from apps.copilot.modules.executing.t1_build import (
 from apps.copilot.modules.executing.money_unit import attach_money_unit, round_price
 from apps.copilot.modules.executing.workspace_settings import get_workspace_settings
 from apps.copilot.modules.executing.profile import PROBE_KEYS
-from apps.copilot.modules.executing.t1_operators.qmt_atr_trailing import (
-    AtrTrailingError,
-    process_qmt_atr_trailing_from_rows,
+from apps.copilot.modules.executing.probe_registry import (
+    OPTIONAL_SILENT_PROBE_KEYS,
+    collect_t1_live_for_key,
 )
+from apps.copilot.modules.executing.probes._base import T1LiveContext
 
 logger = logging.getLogger(__name__)
 
 T1_OPERATOR_TIMEOUT_SEC = float(os.environ.get("EXECUTING_T1_OPERATOR_TIMEOUT_SEC", "10"))
-
-OperatorResult = tuple[str, dict[str, Any]]
-
-
-async def _calc_qmt_atr_trailing_live(
-    session: AsyncSession,
-    symbol: str,
-    *,
-    entry_date: date | None,
-    redis_client: Any,
-) -> OperatorResult:
-    """#15 实盘算子：PG 底库 + Redis 盘中草稿 → T1 五步法。"""
-    sym = symbol.zfill(6)[-6:]
-    pg_rows = await load_daily_bars(session, sym, limit=LOOKBACK_TRADING_DAYS)
-    draft = load_draft_bar(redis_client, sym) if redis_client else None
-    if draft is not None:
-        merged = merge_pg_rows_with_draft(pg_rows, draft)
-        payload = process_qmt_atr_trailing_from_rows(
-            merged,
-            entry_date,
-            source=SOURCE_PG,
-        )
-        payload["intraday"] = True
-        draft_meta = load_draft_bar_dict(redis_client, sym) if redis_client else None
-        if draft_meta and draft_meta.get("collected_at"):
-            payload["last_tick_time"] = draft_meta["collected_at"]
-    elif pg_rows:
-        payload = process_qmt_atr_trailing_from_rows(
-            pg_rows,
-            entry_date,
-            source=SOURCE_PG,
-        )
-    else:
-        snap = await load_t1_snapshot(session, sym, "qmt_atr_trailing")
-        if snap:
-            return "qmt_atr_trailing", snap
-        raise AtrTrailingError(f"无 PG 底库且无 Redis 草稿 symbol={sym}")
-
-    from apps.copilot.modules.executing.indicator_nodes import build_qmt_atr_trailing_node
-
-    node = build_qmt_atr_trailing_node(payload)
-    return "qmt_atr_trailing", node
-
-
-async def _calc_volume_price_div_live(
-    session: AsyncSession,
-    symbol: str,
-    *,
-    redis_client: Any,
-    raw_by_key: dict[str, dict[str, Any]],
-) -> OperatorResult:
-    """#16：Redis 15m 优先 → PG T1 快照 / bars_payload 回放。"""
-    from apps.copilot.modules.executing.collectors.bars_15m import load_bars_15m_redis
-    from apps.copilot.modules.executing.indicator_nodes import build_volume_price_div_node
-    from apps.copilot.modules.executing.t1_operators.volume_price_div import (
-        VolumePriceDivError,
-        process_volume_price_div_from_redis,
-    )
-
-    sym = symbol.zfill(6)[-6:]
-    cached = load_bars_15m_redis(redis_client, sym) if redis_client else None
-    bars_payload: dict[str, Any] | None = cached
-    if bars_payload is None:
-        raw = raw_by_key.get("volume_price_div") or {}
-        inner = raw.get("payload") or {}
-        bars_payload = inner.get("bars_payload")
-
-    if bars_payload:
-        payload = process_volume_price_div_from_redis(bars_payload)
-        node = build_volume_price_div_node(payload)
-        return "volume_price_div", node
-
-    snap = await load_t1_snapshot(session, sym, "volume_price_div")
-    if snap:
-        return "volume_price_div", snap
-
-    raw = raw_by_key.get("volume_price_div") or {}
-    preview = (raw.get("payload") or {}).get("t1_preview")
-    if preview and preview.get("value") is not None:
-        node = build_volume_price_div_node(
-            {**preview, "source": raw.get("source") or preview.get("source") or ""}
-        )
-        return "volume_price_div", node
-
-    raise VolumePriceDivError("Redis 15m 缓存缺失且 PG 无 bars_payload / T1 快照")
-
-
-async def _calc_smart_money_flow(
-    session: AsyncSession,
-    symbol: str,
-    *,
-    redis_client: Any,
-    raw_by_key: dict[str, dict[str, Any]],
-) -> OperatorResult:
-    """#17：PG/Redis 全量底库 → Smart Money Delta T1。"""
-    from apps.copilot.modules.executing.indicator_nodes import build_smart_money_flow_node
-    from apps.copilot.modules.executing.smart_money_flow import (
-        SOURCE_TUSHARE,
-        compute_smart_money_metrics,
-        load_smart_money_payload,
-    )
-
-    sym = symbol.zfill(6)[-6:]
-    payload = await load_smart_money_payload(session, sym, redis_client=redis_client)
-    if payload is None:
-        snap = await load_t1_snapshot(session, sym, "smart_money_flow")
-        if snap:
-            return "smart_money_flow", snap
-        raw = raw_by_key.get("smart_money_flow")
-        raise ValueError(raw.get("blocker") if raw else "smart_money_flow 未采集")
-
-    metrics = compute_smart_money_metrics(payload)
-    node = build_smart_money_flow_node(metrics, source=SOURCE_TUSHARE)
-    return "smart_money_flow", node
-
-
-async def _calc_level2_super_order(
-    session: AsyncSession,
-    symbol: str,
-    *,
-    redis_client: Any,
-    raw_by_key: dict[str, dict[str, Any]],
-) -> OperatorResult:
-    """#18：PG elg_amount 120 日底库 → 历史分位 T1。"""
-    from apps.copilot.modules.executing.indicator_nodes import build_level2_super_order_node
-    from apps.copilot.modules.executing.level2_super_order import (
-        SOURCE_ELG,
-        compute_level2_super_order_metrics,
-        load_level2_super_order_payload,
-    )
-
-    sym = symbol.zfill(6)[-6:]
-    payload = await load_level2_super_order_payload(session, sym)
-    if payload is None:
-        snap = await load_t1_snapshot(session, sym, "level2_super_order")
-        if snap:
-            return "level2_super_order", snap
-        raw = raw_by_key.get("level2_super_order")
-        raise ValueError(raw.get("blocker") if raw else "level2_super_order 未采集")
-
-    metrics = compute_level2_super_order_metrics(payload)
-    node = build_level2_super_order_node(metrics, source=SOURCE_ELG)
-    return "level2_super_order", node
-
-
-async def _calc_margin_short_skew(
-    session: AsyncSession,
-    symbol: str,
-    *,
-    redis_client: Any,
-    raw_by_key: dict[str, dict[str, Any]],
-) -> OperatorResult:
-    """#19：PG margin_detail 250 日底库 → 杠杆占盘比分位 T1。"""
-    from apps.copilot.modules.executing.indicator_nodes import build_margin_short_skew_node
-    from apps.copilot.modules.executing.margin_short_skew import (
-        SOURCE_MARGIN,
-        compute_margin_short_skew_metrics,
-        load_margin_skew_payload,
-    )
-
-    sym = symbol.zfill(6)[-6:]
-    payload = await load_margin_skew_payload(session, sym, redis_client=redis_client)
-    if payload is None:
-        snap = await load_t1_snapshot(session, sym, "margin_short_skew")
-        if snap:
-            return "margin_short_skew", snap
-        raw = raw_by_key.get("margin_short_skew")
-        raise ValueError(raw.get("blocker") if raw else "margin_short_skew 未采集")
-
-    metrics = compute_margin_short_skew_metrics(payload)
-    node = build_margin_short_skew_node(metrics, source=SOURCE_MARGIN)
-    return "margin_short_skew", node
-
-
-async def _calc_turnover_acceleration(
-    session: AsyncSession,
-    symbol: str,
-    *,
-    redis_client: Any,
-    raw_by_key: dict[str, dict[str, Any]],
-) -> OperatorResult:
-    """#20：PG daily_basic turnover_rate_f → 异动倍数 T1。"""
-    from apps.copilot.modules.executing.indicator_nodes import build_turnover_acceleration_node
-    from apps.copilot.modules.executing.turnover_acceleration import (
-        SOURCE_TURNOVER,
-        compute_turnover_acceleration_metrics,
-        load_turnover_acceleration_payload,
-    )
-
-    sym = symbol.zfill(6)[-6:]
-    payload = await load_turnover_acceleration_payload(session, sym, redis_client=redis_client)
-    if payload is None:
-        snap = await load_t1_snapshot(session, sym, "turnover_acceleration")
-        if snap:
-            return "turnover_acceleration", snap
-        raw = raw_by_key.get("turnover_acceleration")
-        raise ValueError(raw.get("blocker") if raw else "turnover_acceleration 未采集")
-
-    metrics = compute_turnover_acceleration_metrics(payload)
-    node = build_turnover_acceleration_node(metrics, source=SOURCE_TURNOVER)
-    return "turnover_acceleration", node
 
 
 async def _gather_stock_indicators(
@@ -255,40 +45,21 @@ async def _gather_stock_indicators(
     redis_client: Any,
     timeout_sec: float,
 ) -> tuple[dict[str, Any], list[str]]:
-    """Scatter-Gather：并发算子 + 绝对超时。"""
+    """Scatter-Gather：registry 并发算子 + 绝对超时。"""
     degraded: list[str] = []
+    sym = symbol.zfill(6)[-6:]
+    ctx = T1LiveContext(
+        session=session,
+        symbol=sym,
+        raw_by_key=raw_by_key,
+        entry_date=entry_date,
+        redis_client=redis_client,
+    )
 
-    tasks: list[tuple[str, Awaitable[Any]]] = []
+    async def _wrap_for_key(probe_key: str):
+        return await collect_t1_live_for_key(probe_key, ctx)
 
-    async def _wrap_for_key(probe_key: str) -> OperatorResult:
-        if probe_key == "qmt_atr_trailing":
-            return await _calc_qmt_atr_trailing_live(
-                session, symbol, entry_date=entry_date, redis_client=redis_client
-            )
-        if probe_key == "volume_price_div":
-            return await _calc_volume_price_div_live(
-                session, symbol, redis_client=redis_client, raw_by_key=raw_by_key
-            )
-        if probe_key == "smart_money_flow":
-            return await _calc_smart_money_flow(
-                session, symbol, redis_client=redis_client, raw_by_key=raw_by_key
-            )
-        if probe_key == "level2_super_order":
-            return await _calc_level2_super_order(
-                session, symbol, redis_client=redis_client, raw_by_key=raw_by_key
-            )
-        if probe_key == "margin_short_skew":
-            return await _calc_margin_short_skew(
-                session, symbol, redis_client=redis_client, raw_by_key=raw_by_key
-            )
-        if probe_key == "turnover_acceleration":
-            return await _calc_turnover_acceleration(
-                session, symbol, redis_client=redis_client, raw_by_key=raw_by_key
-            )
-        raise ValueError(f"未实现的 live 算子: {probe_key}")
-
-    for probe_key in PROBE_KEYS:
-        tasks.append((probe_key, _wrap_for_key(probe_key)))
+    tasks = [(probe_key, _wrap_for_key(probe_key)) for probe_key in PROBE_KEYS]
 
     async def _run_all() -> list[Any]:
         coros = [t[1] for t in tasks]
@@ -297,7 +68,7 @@ async def _gather_stock_indicators(
     try:
         results = await asyncio.wait_for(_run_all(), timeout=timeout_sec)
     except asyncio.TimeoutError:
-        degraded.append(f"{symbol}: T1 装配超时（>{timeout_sec}s）")
+        degraded.append(f"{sym}: T1 装配超时（>{timeout_sec}s）")
         results = []
 
     indicators: dict[str, Any] = {}
@@ -306,7 +77,7 @@ async def _gather_stock_indicators(
         key = task_keys[i] if i < len(task_keys) else f"task_{i}"
         if isinstance(result, Exception):
             degraded.append(f"{key} ({type(result).__name__}: {result})")
-            logger.warning("[%s] T1 算子失败 %s: %s", symbol, key, result)
+            logger.warning("[%s] T1 算子失败 %s: %s", sym, key, result)
             continue
         if result is None:
             continue
@@ -314,7 +85,7 @@ async def _gather_stock_indicators(
         indicators[ind_key] = node
 
     for probe_key in PROBE_KEYS:
-        if probe_key not in indicators:
+        if probe_key not in indicators and probe_key not in OPTIONAL_SILENT_PROBE_KEYS:
             degraded.append(_degraded_line(probe_key, raw_by_key.get(probe_key)))
 
     return indicators, degraded

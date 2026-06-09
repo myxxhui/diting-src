@@ -20,7 +20,8 @@ from apps.copilot.db.models import (
     ExecutingT1ProbeSnapshot,
 )
 from apps.copilot.modules.executing.collectors.daily_bars import DailyBarRow
-from apps.copilot.modules.executing.profile import PROBE_KEYS, load_profile
+from apps.copilot.modules.executing.probe_keys import PROBE_KEYS
+from apps.copilot.modules.executing.profile import load_profile
 
 
 def _sanitize_json_value(obj: Any) -> Any:

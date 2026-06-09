@@ -1,4 +1,4 @@
-# 执行中工作区 · 601138 工业富联（逐项启用 · 当前 #15+#16+#17）
+# 执行中工作区 · 601138 工业富联（逐项启用 · 当前 #15~#24）
 # [Ref: 28_ §4.5]
 
 symbol: "601138"
@@ -7,11 +7,42 @@ profile: "601138"
 
 probes:
   qmt_atr_trailing:
+    enabled: true
     cadence: daily
     stale_days: 1
   volume_price_div:
+    enabled: true
     cadence: intraday_15m
     stale_days: 1
   smart_money_flow:
+    enabled: true
     cadence: daily
     stale_days: 1
+  level2_super_order:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  margin_short_skew:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  turnover_acceleration:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  block_trade_discount:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  retail_concentration:
+    enabled: true
+    cadence: dynamic
+    stale_days: 35
+  insider_sell_actual:
+    enabled: true
+    cadence: daily
+    stale_days: 1
+  etf_redemption_impact:
+    enabled: true
+    cadence: weekly
+    stale_days: 7

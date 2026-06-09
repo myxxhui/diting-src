@@ -218,38 +218,11 @@ def _collect_turnover_acceleration(symbol: str) -> dict[str, Any]:
 
 
 def _collect_block_trade(symbol: str) -> dict[str, Any]:
-    try:
-        import akshare as ak  # type: ignore
-    except ImportError:
-        return _block("block_trade_discount", "akshare 不可用")
-
-    sym = symbol.zfill(6)[-6:]
-    end = date.today()
-    start = end - timedelta(days=90)
-    dz = _ak_call(
-        ak.stock_dzjy_mrmx,
-        symbol="A股",
-        start_date=start.strftime("%Y%m%d"),
-        end_date=end.strftime("%Y%m%d"),
-    )
-    if dz is None or dz.empty:
-        return _block("block_trade_discount", "近90日A股大宗明细为空")
-    code_col = "证券代码" if "证券代码" in dz.columns else None
-    if not code_col:
-        return _block("block_trade_discount", "大宗表缺证券代码列")
-    sub = dz[dz[code_col].astype(str).str.zfill(6).str.endswith(sym)]
-    if sub.empty:
-        return _block("block_trade_discount", f"近90日无{sym}大宗成交记录")
-    last = sub.iloc[-1]
-    disc = float(last.get("折溢率", 0) or 0)
-    return _ok(
+    """#21 · Tushare block_trade · 由 l4-block-trade-eod Cron 落 PG（18:00）。"""
+    return _block_typed(
         "block_trade_discount",
-        {
-            "discount_pct": disc,
-            "amount": float(last.get("成交额", 0) or 0),
-            "trade_date": str(last.get("交易日期", "")),
-        },
-        "akshare stock_dzjy_mrmx A股过滤",
+        "A",
+        "需 Tushare 大宗 PG 底库 · 请运行 l4-block-trade-eod（18:00 盘后）",
     )
 
 
@@ -284,64 +257,21 @@ def _parse_insider_sell_pct(titles: list[str]) -> float | None:
     return best
 
 
+def _collect_insider_sell_actual(symbol: str) -> dict[str, Any]:
+    """#23 · Tushare stk_holdertrade · 由 l4-insider-sell-eod Cron 落 PG（20:30）。"""
+    return _block_typed(
+        "insider_sell_actual",
+        "A",
+        "需 stk_holdertrade PG 底库 · 请运行 l4-insider-sell-eod（20:30 盘后）",
+    )
+
+
 def _collect_retail_concentration(symbol: str) -> dict[str, Any]:
-    from apps.copilot.modules.radar.t0.collectors._em_fetch import fetch_holder_num_detail
-
-    em = fetch_holder_num_detail(symbol)
-    if em and em.get("holder_num_change_pct") is not None:
-        as_of = str(em.get("as_of") or "")
-        year_digits = "".join(c for c in as_of if c.isdigit())[:4]
-        if year_digits and int(year_digits) < 2023:
-            return _block_typed(
-                "retail_concentration",
-                "C",
-                f"股东户数截止日过旧({as_of})·非当前动态口径",
-            )
-        return _ok(
-            "retail_concentration",
-            {
-                "holder_num": em.get("holder_num"),
-                "prev_holder_num": em.get("prev_holder_num"),
-                "holder_num_change_pct": em.get("holder_num_change_pct"),
-                "as_of": as_of,
-            },
-            "eastmoney:RPT_HOLDERNUM_DET",
-        )
-
-    try:
-        import akshare as ak  # type: ignore
-    except ImportError:
-        return _block("retail_concentration", "akshare 不可用")
-
-    sym = symbol.zfill(6)[-6:]
-    df = _ak_call(ak.stock_zh_a_gdhs_detail_em, symbol=sym)
-    if df is None or df.empty:
-        return _block("retail_concentration", "股东户数表为空")
-    row = df.iloc[0]
-    holder = row.get("股东户数-本次") or row.get("股东户数")
-    prev = row.get("股东户数-上次") or row.get("上期股东户数")
-    chg = row.get("股东户数-增减比例") or row.get("股东户数增幅")
-    as_of = str(row.get("股东户数统计截止日") or row.get("END_DATE") or "")
-    if holder is None and prev is None:
-        return _block_typed("retail_concentration", "B", "股东户数字段为空")
-    year_digits = "".join(c for c in as_of if c.isdigit())[:4]
-    if year_digits and int(year_digits) < 2023:
-        return _block_typed(
-            "retail_concentration",
-            "C",
-            f"股东户数截止日过旧({as_of})·非当前动态口径",
-        )
-    if chg is None:
-        return _block_typed("retail_concentration", "C", "缺股东户数环比%字段")
-    return _ok(
+    """#22 · AkShare 股东户数 · 由 l4-retail-concentration-eod Cron 落 PG（20:30）。"""
+    return _block_typed(
         "retail_concentration",
-        {
-            "holder_num": float(holder) if holder is not None else None,
-            "prev_holder_num": float(prev) if prev is not None else None,
-            "holder_num_change_pct": float(chg),
-            "as_of": as_of,
-        },
-        "akshare stock_zh_a_gdhs_detail_em",
+        "A",
+        "需股东户数 PG 快照底库 · 请运行 l4-retail-concentration-eod（20:30 盘后）",
     )
 
 
@@ -526,37 +456,13 @@ def _etf_rows_from_spot_df(spot: Any) -> list[dict[str, Any]]:
     return rows
 
 
-def _collect_etf_redemption_impact() -> dict[str, Any]:
-    """科技/电子类 ETF 周净申赎（28_ §3.2 #24 · 须有 share_change）。"""
-    import re
-
-    from apps.copilot.modules.radar.t0.collectors._em_fetch import fetch_etf_spot_rows
-
-    try:
-        import akshare as ak  # type: ignore
-    except ImportError:
-        return _block_typed("etf_redemption_impact", "B", "akshare 不可用")
-
-    spot = _ak_call_timeout(ak.fund_etf_spot_em, _AK_TIMEOUT_ETF)
-    if spot is not None and not spot.empty:
-        rows = _etf_rows_from_spot_df(spot)
-        if rows and any(r.get("share_change") is not None for r in rows):
-            return _ok("etf_redemption_impact", {"etf_samples": rows}, "akshare fund_etf_spot_em")
-
-    spot_rows = fetch_etf_spot_rows(max_pages=5)
-    if spot_rows:
-        pat = re.compile(r"科技|电子|通信|AI|芯片|算力|半导体|5G", re.I)
-        matched = [r for r in spot_rows if pat.search(str(r.get("name") or ""))]
-        if matched:
-            return _block_typed(
-                "etf_redemption_impact",
-                "C",
-                "push2delay ETF 列表无周份额变动字段·禁止仅份额数 ok",
-            )
-
-    if spot is None or spot.empty:
-        return _block_typed("etf_redemption_impact", "B", "ETF现货表为空")
-    return _block_typed("etf_redemption_impact", "C", "缺 ETF 周净申赎(share_change)字段")
+def _collect_etf_redemption_impact(symbol: str) -> dict[str, Any]:
+    """#24 · Tushare fund_share + fund_portfolio · 由 l4-etf-redemption-morning Cron 落 PG（08:30 T+1）。"""
+    return _block_typed(
+        "etf_redemption_impact",
+        "A",
+        "需 ETF 穿透 PG 底库 · 请运行 l4-etf-redemption-morning（周二至周六 08:30 盘前）",
+    )
 
 
 def _collect_parent_honhai_revenue() -> dict[str, Any]:
@@ -823,42 +729,19 @@ def collect_l3_daily(symbol: str) -> list[dict[str, Any]]:
             )
         )
         sell_titles = [t for t in titles if "减持" in t]
-        sell_pct = _parse_insider_sell_pct(sell_titles)
-        if sell_pct is not None:
-            out.append(
-                _ok(
-                    "insider_sell_actual",
-                    {
-                        "sell_pct_of_float": sell_pct,
-                        "matched_headlines": sell_titles[:5],
-                        "match_count": len(sell_titles),
-                    },
-                    news_source,
-                )
-            )
-        elif sell_titles:
+        if sell_titles:
             out.append(
                 _block_typed(
                     "insider_sell_actual",
                     "A",
-                    "有减持标题但未解析出占总股本%（禁止仅标题 ok）",
+                    "禁止用公告标题冒充实际减持 · 见 l4-insider-sell-eod/stk_holdertrade",
                 )
             )
         else:
-            out.append(
-                _ok(
-                    "insider_sell_actual",
-                    {
-                        "sell_pct_of_float": 0.0,
-                        "match_count": 0,
-                        "disclosure": "cninfo_no_insider_sell_in_365d",
-                    },
-                    news_source,
-                )
-            )
+            out.append(_collect_insider_sell_actual(symbol))
     else:
         out.append(_block_typed("gb200_iteration_node", "B", "标的公告+快讯均为空"))
-        out.append(_block_typed("insider_sell_actual", "B", "标的公告+快讯均为空"))
+        out.append(_block_typed("insider_sell_actual", "B", "标的公告+快讯均为空 · 见 l4-insider-sell-eod"))
 
     out.append(_collect_mgmt_and_core_team(symbol))
     out.append(_collect_cloud_capex_sec())
@@ -902,7 +785,7 @@ def collect_l3_daily(symbol: str) -> list[dict[str, Any]]:
     out.append(_collect_parent_honhai_revenue())
     out.append(_collect_cpi_ppi_spread())
     out.append(_collect_retail_concentration(symbol))
-    out.append(_collect_etf_redemption_impact())
+    out.append(_collect_etf_redemption_impact(symbol))
     return out
 
 

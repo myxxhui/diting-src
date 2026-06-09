@@ -41,6 +41,10 @@ PROBE_INDICATOR_NAMES: dict[str, str] = {
     "level2_super_order": "L2特大单净动能历史分位",
     "margin_short_skew": "两融杠杆倾斜度历史分位",
     "turnover_acceleration": "自由换手率异动倍数",
+    "block_trade_discount": "大宗交易加权折价与盘口冲击",
+    "retail_concentration": "户均持股集中度与筹码分散检测",
+    "insider_sell_actual": "核心内部人90日实际净减持当量",
+    "etf_redemption_impact": "核心ETF被动资金冲击当量",
 }
 
 
