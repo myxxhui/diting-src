@@ -31,6 +31,11 @@ def shanghai_now() -> datetime:
     return datetime.now(ZoneInfo("Asia/Shanghai"))
 
 
+def shanghai_today():
+    """A 股交易日对齐用北京时间日历日。"""
+    return shanghai_now().date()
+
+
 def shanghai_now_iso() -> str:
     return shanghai_now().strftime("%Y-%m-%d %H:%M:%S")
 

@@ -378,7 +378,7 @@ async def quote_intraday_job(session: AsyncSession, symbol: str, redis_client: A
     import json
 
     from apps.copilot.db.datetime_util import shanghai_now_iso
-    from apps.copilot.modules.executing.collectors.intraday_draft import QUOTE_KEY
+    from apps.copilot.modules.executing.collectors.intraday_draft import DRAFT_BAR_TTL_SEC, QUOTE_KEY
 
     sym = symbol.zfill(6)[-6:]
     executed_at = shanghai_now_iso()
@@ -400,7 +400,7 @@ async def quote_intraday_job(session: AsyncSession, symbol: str, redis_client: A
         overwrite_draft_bar(redis_client, sym, draft)
         redis_client.setex(
             QUOTE_KEY.format(symbol=sym),
-            600,
+            DRAFT_BAR_TTL_SEC,
             json.dumps(
                 {
                     "close": draft.close,
@@ -410,6 +410,7 @@ async def quote_intraday_job(session: AsyncSession, symbol: str, redis_client: A
                     "trade_date": draft.trade_date.isoformat(),
                     "is_stale": False,
                     "mode": "intraday_overwrite",
+                    "collected_at": executed_at,
                 },
                 ensure_ascii=False,
             ),
@@ -1515,6 +1516,83 @@ async def run_etf_redemption_morning(
     )
     return {
         "job_id": "l4-etf-redemption-morning",
+        "status": "ok" if ok else "error",
+        "results": results,
+    }
+
+
+async def run_fii_twse_cloud_monthly(
+    session: AsyncSession,
+    symbols: list[str],
+) -> dict[str, Any]:
+    """每月 5 日 · 鸿海 2317 月营收 T0→T1（仅 601138 Profile 生效）。"""
+    from apps.copilot.modules.executing.l3.fii_twse_cloud.indicator_node import (
+        build_fii_twse_cloud_node,
+    )
+    from apps.copilot.modules.executing.l3.fii_twse_cloud.t0_collect import collect_fii_twse_cloud_t0
+    from apps.copilot.modules.executing.profile import load_profile, profile_l3_keys
+    from apps.copilot.modules.executing.storage import save_t0_batch, upsert_t1_snapshot
+
+    results: list[dict[str, Any]] = []
+    for sym in symbols:
+        code = sym.zfill(6)[-6:]
+        prof = load_profile(code)
+        if "fii_twse_cloud" not in profile_l3_keys(prof):
+            results.append({"symbol": code, "status": "skip", "reason": "no_l3_fii_twse_cloud"})
+            continue
+        twse_code = str(prof.get("honhai_twse_code") or "2317.TW")
+        t0_item = collect_fii_twse_cloud_t0(twse_code=twse_code)
+        if not t0_item.get("ok"):
+            await save_t0_batch(session, code, [t0_item])
+            results.append(
+                {
+                    "symbol": code,
+                    "status": "error",
+                    "error": t0_item.get("blocker"),
+                }
+            )
+            continue
+        payload = t0_item.get("payload") or {}
+        from apps.copilot.modules.executing.storage import load_fii_cloud_lo_history
+
+        cloud_hist = await load_fii_cloud_lo_history(session, code)
+        node = build_fii_twse_cloud_node(
+            payload,
+            source=t0_item.get("source") or "T0",
+            cloud_lo_history=cloud_hist,
+        )
+        payload["cloud_revenue_lower_ntd"] = node["raw_metrics"]["cloud_revenue_lower_ntd"]
+        payload["cloud_revenue_mid_ntd"] = node["raw_metrics"]["cloud_revenue_mid_ntd"]
+        payload["cloud_revenue_upper_ntd"] = node["raw_metrics"]["cloud_revenue_upper_ntd"]
+        await save_t0_batch(session, code, [t0_item])
+        await upsert_t1_snapshot(
+            session,
+            code,
+            "fii_twse_cloud",
+            node,
+            source=t0_item.get("source"),
+        )
+        results.append(
+            {
+                "symbol": code,
+                "status": "ok",
+                "report": f"{payload.get('report_year')}-{int(payload.get('report_month') or 0):02d}",
+                "cloud_mid_ntd": node.get("raw_metrics", {}).get("cloud_revenue_mid_ntd"),
+            }
+        )
+
+    ok = [r for r in results if r.get("status") == "ok"]
+    await upsert_watermark(
+        session,
+        "l3-fii-twse-monthly",
+        "*",
+        success=bool(ok),
+        trade_date=date.today(),
+        row_count=len(ok),
+        error=None if ok else "fii_twse_cloud_failed",
+    )
+    return {
+        "job_id": "l3-fii-twse-monthly",
         "status": "ok" if ok else "error",
         "results": results,
     }

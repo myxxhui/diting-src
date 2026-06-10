@@ -132,6 +132,55 @@ def _tpl(request: Request):
     return request.app.state.templates
 
 
+async def _strategic_roadmap_context(session: AsyncSession, request: Request) -> dict:
+    """滚动路线图 Tab 战略板块上下文。
+
+    [Ref: 30_ §4]
+    """
+    from apps.copilot.modules.strategic.render import (
+        render_board_list,
+        render_command_center_main,
+        render_phase_panel,
+    )
+    from apps.copilot.modules.strategic.service import (
+        get_board_detail,
+        get_phase_detail,
+        list_boards_summary,
+    )
+
+    boards = await list_boards_summary(session)
+    board_id_raw = request.query_params.get("board_id")
+    phase_id_raw = request.query_params.get("phase_id")
+    board_id: int | None = None
+    phase_id: int | None = None
+    if board_id_raw and str(board_id_raw).isdigit():
+        board_id = int(board_id_raw)
+    elif boards:
+        board_id = boards[0]["id"]
+    if phase_id_raw and str(phase_id_raw).isdigit():
+        phase_id = int(phase_id_raw)
+
+    detail = None
+    phase_detail = None
+    if board_id:
+        detail = await get_board_detail(session, board_id)
+        pid = phase_id or (detail or {}).get("active_phase_id")
+        if pid:
+            phase_id = pid
+            phase_detail = await get_phase_detail(session, pid)
+
+    return {
+        "strategic_boards": boards,
+        "strategic_board_id": board_id,
+        "strategic_phase_id": phase_id,
+        "strategic_board_list_html": render_board_list(boards, selected_id=board_id),
+        "strategic_main_html": render_command_center_main(
+            detail, selected_phase_id=phase_id
+        ),
+        "strategic_panel_html": render_phase_panel(phase_detail) if phase_detail else "",
+    }
+
+
 def _sync_redis():
     """阻塞等待 Redis PONG（不降级跳过）。"""
     return wait_for_sync_redis()
@@ -364,6 +413,8 @@ async def planning_page(
         "radar_chat_models": RADAR_CHAT_MODELS,
         "radar_default_model": DEFAULT_CHAT_MODEL,
     }
+    if view == "roadmap":
+        ctx.update(await _strategic_roadmap_context(session, request))
     return _tpl(request).TemplateResponse(request, "planning/workbench.html", ctx)
 
 
@@ -371,6 +422,7 @@ async def planning_page(
 async def planning_panel(
     request: Request,
     view: str = "radar",
+    session: AsyncSession = Depends(get_db),
 ):
     """工作台内容区片段（HTMX 切换 Tab · 避免整页刷新）。"""
     allowed = ("radar", "planning", "executing", "roadmap")
@@ -384,6 +436,8 @@ async def planning_panel(
         "radar_chat_models": RADAR_CHAT_MODELS,
         "radar_default_model": DEFAULT_CHAT_MODEL,
     }
+    if view == "roadmap":
+        ctx.update(await _strategic_roadmap_context(session, request))
     return _tpl(request).TemplateResponse(
         request,
         "planning/_workbench_panel.html",
@@ -440,13 +494,29 @@ async def api_list_campaigns(
         symbols = await list_workspace_symbols(session, view=view)
         container = await get_or_create_container(session)
         t2_summaries: dict = {}
+        sym_list = [s.get("symbol", "") for s in symbols if s.get("symbol")]
+        from apps.copilot.modules.strategic.service import (
+            get_primary_tags_map,
+            jl_summary_for_phase,
+            list_board_phase_options,
+            suggest_tag_for_symbol,
+        )
+
+        tags_map = await get_primary_tags_map(session, sym_list)
+        tag_options = await list_board_phase_options(session)
+        tag_suggested: dict[str, dict | None] = {}
+        jl_summaries: dict[str, str] = {}
+        for sym in sym_list:
+            tag_suggested[sym] = await suggest_tag_for_symbol(session, sym)
+            t = tags_map.get(sym)
+            if t and t.get("phase_id"):
+                jl_summaries[sym] = await jl_summary_for_phase(session, t["phase_id"])
         if view == "executing":
-            from apps.copilot.modules.executing.t2_executing_pin import (
-                load_pinned_t2_summaries_for_symbols,
+            from apps.copilot.modules.executing.t2_advice_summary import (
+                load_executing_t2_summaries_for_symbols,
             )
 
-            sym_list = [s.get("symbol", "") for s in symbols if s.get("symbol")]
-            t2_summaries = await load_pinned_t2_summaries_for_symbols(session, sym_list)
+            t2_summaries = await load_executing_t2_summaries_for_symbols(session, sym_list)
         await session.commit()
         if want_html:
             return _render_workspace_symbols_html(
@@ -454,6 +524,10 @@ async def api_list_campaigns(
                 view=view,
                 container_id=container.id,
                 t2_summaries=t2_summaries,
+                tags_map=tags_map,
+                tag_options=tag_options,
+                tag_suggested=tag_suggested,
+                jl_summaries=jl_summaries,
             )
         return symbols
     items = await list_campaigns(session, view=view)
@@ -479,8 +553,12 @@ async def _radar_candidates_html_response(
     *,
     flash: str = "",
 ) -> HTMLResponse:
+    from apps.copilot.modules.strategic.service import get_primary_tags_map
+
     items = await list_recent_candidates(session)
-    return _render_radar_candidates_html(items, flash=flash)
+    syms = [c.get("symbol", "") for c in items if c.get("symbol")]
+    tags_map = await get_primary_tags_map(session, syms)
+    return _render_radar_candidates_html(items, flash=flash, tags_map=tags_map)
 
 
 @router.get("/api/radar/symbols")
@@ -491,7 +569,11 @@ async def api_radar_symbols(
     """雷达区 = 扫描工作台：最近扫描候选（待晋级），不再混入持仓列表。"""
     items = await list_recent_candidates(session)
     if "text/html" in request.headers.get("accept", "") or request.headers.get("hx-request"):
-        return _render_radar_candidates_html(items)
+        from apps.copilot.modules.strategic.service import get_primary_tags_map
+
+        syms = [c.get("symbol", "") for c in items if c.get("symbol")]
+        tags_map = await get_primary_tags_map(session, syms)
+        return _render_radar_candidates_html(items, tags_map=tags_map)
     return items
 
 
@@ -1184,7 +1266,14 @@ async def api_promote_candidate(
     session: AsyncSession = Depends(get_db),
     new_theme: str | None = Form(None),
     campaign_id: int | None = Form(None),
+    board_id: int | None = Form(None),
+    phase_id: int | None = Form(None),
+    role_tag: str | None = Form(None),
+    add_to_watchlist: str | None = Form(None),
+    skip_tags: str | None = Form(None),
 ):
+    from apps.copilot.modules.strategic.service import upsert_primary_strategic_tag
+
     redis_client = _sync_redis()
     try:
         result = await promote_candidate(
@@ -1196,6 +1285,18 @@ async def api_promote_candidate(
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    sym = result.get("symbol", "")
+    skip = str(skip_tags or "").lower() in ("1", "true", "on", "yes")
+    if not skip and board_id and phase_id:
+        await upsert_primary_strategic_tag(
+            session,
+            sym,
+            board_id=int(board_id),
+            phase_id=int(phase_id),
+            role_tag=(role_tag or "").strip() or None,
+            tagged_from="radar",
+            add_to_watchlist=str(add_to_watchlist or "").lower() in ("1", "true", "on", "yes"),
+        )
     await session.commit()
     if request.headers.get("hx-request"):
         sym = result.get("symbol", "")
@@ -1343,10 +1444,9 @@ _PHASE_LABEL = {
 
 
 def _phase_chip(phase: str | None) -> str:
-    if not phase:
-        return "<span class='text-xs px-2 py-0.5 rounded bg-gray-50 text-gray-400'>阶段 pending</span>"
-    label, cls = _PHASE_LABEL.get(phase, (phase, "bg-gray-100 text-gray-600"))
-    return f"<span class='text-xs px-2 py-0.5 rounded {cls}'>{label}</span>"
+    from apps.copilot.modules.planning.workspace_render import render_phase_chip
+
+    return render_phase_chip(phase)
 
 
 def _render_collect_progress_panel(state: dict) -> str:
@@ -1509,8 +1609,13 @@ def _render_chat_panel(payload: dict) -> str:
     )
 
 
-def _render_radar_candidates_html(items: list, *, flash: str = "") -> HTMLResponse:
+def _render_radar_candidates_html(
+    items: list, *, flash: str = "", tags_map: dict | None = None
+) -> HTMLResponse:
     """雷达扫描候选卡（待晋级 → planning）；片段 HTML，由 #radar-candidates-list 容器 hx-swap 注入。"""
+    from apps.copilot.modules.strategic.render import render_strategic_chip
+
+    tags_map = tags_map or {}
     flash_html = ""
     if flash:
         flash_html = (
@@ -1557,11 +1662,11 @@ def _render_radar_candidates_html(items: list, *, flash: str = "") -> HTMLRespon
         promote_btn = ""
         if not promoted and cid:
             promote_btn = (
-                f"<form hx-post='/api/radar/candidates/{int(cid)}/promote' "
-                f"hx-target='#radar-candidates-list' hx-swap='innerHTML' class='inline'>"
-                f"<button type='submit' "
+                f"<button type='button' "
+                f"hx-get='/api/strategic/promote-modal/radar/{int(cid)}' "
+                f"hx-target='#strategic-promote-modal-root' hx-swap='innerHTML' "
                 f"class='text-sm px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700'>"
-                f"➕ 晋级规划</button></form>"
+                f"➕ 晋级规划</button>"
             )
         elif promoted:
             promote_btn = (
@@ -1584,11 +1689,13 @@ def _render_radar_candidates_html(items: list, *, flash: str = "") -> HTMLRespon
             f"<div class='flex flex-wrap gap-2 justify-end'>"
             f"{promote_btn}{demote_btn}{remove_btn}</div>"
         )
+        chip = render_strategic_chip(tags_map.get(sym_raw), symbol=sym_raw, editable=False)
         cards.append(
             f"<div class='flex items-center justify-between p-3 mb-2 rounded-lg"
             f" bg-gray-50 border border-gray-100'>"
             f"<div class='flex items-center gap-3 flex-wrap'>"
             f"{title}"
+            f"{chip}"
             f"{_phase_chip(c.get('market_phase'))}"
             f"<span class='text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700'>置信 {conf_txt}</span>"
             f"</div>"
@@ -1599,131 +1706,67 @@ def _render_radar_candidates_html(items: list, *, flash: str = "") -> HTMLRespon
 
 
 def _render_workspace_symbols_html(
-    items: list, *, view: str, container_id: int, t2_summaries: dict | None = None
+    items: list,
+    *,
+    view: str,
+    container_id: int,
+    t2_summaries: dict | None = None,
+    tags_map: dict | None = None,
+    tag_options: list | None = None,
+    tag_suggested: dict | None = None,
+    jl_summaries: dict | None = None,
 ) -> HTMLResponse:
     """规划/执行区标的卡（标的级漏斗联动渲染）。"""
+    from apps.copilot.modules.planning.workspace_render import (
+        render_executing_symbol_card,
+        render_planning_symbol_card,
+        render_workspace_symbol_list,
+    )
+    from apps.copilot.modules.strategic.render import render_strategic_chip
+
     t2_summaries = t2_summaries or {}
-    if view == "executing":
-        from apps.copilot.modules.executing.t2_advice_summary import render_executing_t2_banner
+    tags_map = tags_map or {}
+    tag_options = tag_options or []
+    tag_suggested = tag_suggested or {}
+    jl_summaries = jl_summaries or {}
     if not items:
         hint = {
             "planning": "规划区暂无标的 · 从行情雷达晋级，或导入持仓",
             "executing": "执行区暂无标的 · 在规划区人工确认晋级执行",
         }.get(view, "暂无标的")
-        return HTMLResponse(f"<p class='text-sm text-gray-500 py-4 text-center'>{hint}</p>")
+        return HTMLResponse(f"<p class='text-sm text-gray-500 py-6 text-center'>{hint}</p>")
 
     cards: list[str] = []
-    for s in items:
-        sym = s.get("symbol", "")
-        name = s.get("name", sym)
-        phase = _phase_chip(s.get("market_phase"))
-        if view == "planning":
+    if view == "planning":
+        for s in items:
+            sym = s.get("symbol", "")
             cards.append(
-                f"<div class='border border-gray-100 rounded-lg p-4 mb-3'>"
-                f"<div class='flex flex-wrap items-center gap-2 mb-2'>"
-                f"<span class='font-semibold text-gray-900'>{name}</span>"
-                f"<span class='text-gray-400 text-sm'>{sym}</span>"
-                f"{phase}"
-                f"<span class='text-xs px-2 py-0.5 rounded bg-indigo-50 text-indigo-700'>规划中</span>"
-                f"</div>"
-                f"<div class='flex flex-wrap gap-2 items-center'>"
-                f"<button type='button' class='text-sm text-blue-600 hover:underline falsify-panel-toggle' "
-                f"data-symbol='{sym}' data-campaign-id='{container_id}'>"
-                f"展开证伪监控面板 ▾</button>"
-                f"<button type='button' class='text-sm text-indigo-600 hover:underline planning-sandbox-toggle' "
-                f"data-symbol='{sym}'>Context-Aware Sandbox ▾</button>"
-                f"<a href='/api/campaigns/{container_id}/symbols/{sym}' "
-                f"class='text-sm text-gray-500 hover:underline'>6 维档案 JSON</a>"
-                f"<form hx-post='/api/campaigns/{container_id}/promote-executing' "
-                f"hx-swap='none' class='inline'>"
-                f"<input type='hidden' name='symbol' value='{sym}'>"
-                f"<input type='hidden' name='human_confirmed' value='true'>"
-                f"<button type='submit' "
-                f"class='text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700'>"
-                f"人工确认 · 晋级执行</button></form>"
-                f"<form hx-post='/api/funnel/symbols/{sym}/demote' hx-swap='none' class='inline'>"
-                f"<button type='submit' class='text-xs px-2 py-1 rounded border border-amber-200 "
-                f"text-amber-800'>降级到候选</button></form>"
-                f"<form hx-post='/api/funnel/symbols/{sym}/remove' hx-swap='none' class='inline ml-auto'>"
-                f"<button type='submit' class='text-xs px-2 py-1 rounded border border-gray-200 "
-                f"text-gray-600'>移除</button></form>"
-                f"</div>"
-                f"<div id='panel-{sym}' class='mt-3'></div>"
-                f"<div id='sandbox-{sym}' class='mt-3'></div>"
-                f"</div>"
+                render_planning_symbol_card(
+                    s,
+                    container_id=container_id,
+                    tags_map=tags_map,
+                    render_strategic_chip=render_strategic_chip,
+                )
             )
-        else:  # executing
-            pct = s.get("position_pct")
-            opened = s.get("opened_at") or "未填"
-            if opened and "T" in str(opened):
-                opened = str(opened)[:10]
-            qty = s.get("quantity")
-            cost = s.get("cost_price")
-            pct_txt = f"{pct:.2f}%" if isinstance(pct, (int, float)) else "—"
-            cost_txt = f"{cost}" if cost else "—"
-            summary_tail = (
-                f"<span class='text-xs text-gray-500'>仓位 {pct_txt}"
-                f" · 股数 {qty if qty else '—'}"
-                f" · 成本 {cost_txt}"
-                f" · 建仓 {opened}</span>"
-            )
-            t2_banner = render_executing_t2_banner(sym, t2_summaries.get(sym))
+    else:
+        from apps.copilot.modules.executing.t2_advice_summary import render_executing_t2_banner
+
+        for s in items:
+            sym = s.get("symbol", "")
             cards.append(
-                f"<div class='executing-symbol-card-wrap mb-4' data-symbol='{sym}'>"
-                f"{t2_banner}"
-                f"<details class='executing-symbol-card group bg-white border border-gray-200 rounded-b-xl "
-                f"{'rounded-t-xl border-t-0' if t2_banner else 'rounded-xl'} "
-                f"shadow-sm hover:shadow-md transition-shadow overflow-hidden' data-symbol='{sym}'>"
-                f"<summary class='cursor-pointer list-none px-5 py-4 hover:bg-gray-50 flex flex-wrap "
-                f"items-center gap-2 border-b border-transparent group-open:border-gray-200 "
-                f"[&::-webkit-details-marker]:hidden'>"
-                f"<span class='text-gray-400 text-[10px] group-open:rotate-90 transition-transform "
-                f"shrink-0'>▸</span>"
-                f"<span class='font-semibold text-gray-900'>{name}</span>"
-                f"<span class='text-gray-400 text-sm font-mono'>{sym}</span>"
-                f"{phase}"
-                f"<span class='text-xs px-2 py-0.5 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 font-medium'>执行中</span>"
-                f"{summary_tail}"
-                f"</summary>"
-                f"<div class='px-5 pb-5 pt-4 bg-gray-50 border-t border-gray-200'>"
-                f"<div class='flex flex-wrap gap-2 items-center mb-3'>"
-                f"<form hx-post='/api/campaigns/{container_id}/execution/advise' "
-                f"hx-target='#exec-{sym}' hx-swap='innerHTML' class='inline'>"
-                f"<input type='hidden' name='symbol' value='{sym}'>"
-                f"<button type='submit' "
-                f"class='text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700'>"
-                f"生成仓位建议</button></form>"
-                f"<form hx-post='/api/campaigns/{container_id}/archive' hx-swap='none' "
-                f"class='inline'>"
-                f"<input type='hidden' name='symbol' value='{sym}'>"
-                f"<button type='submit' "
-                f"class='text-sm px-3 py-1.5 rounded bg-gray-200 text-gray-800 hover:bg-gray-300'>"
-                f"本波完成 · 归档</button></form>"
-                f"<form hx-post='/api/funnel/symbols/{sym}/demote' hx-swap='none' class='inline'>"
-                f"<button type='submit' class='text-xs px-2 py-1 rounded border border-amber-200 "
-                f"text-amber-800'>降级到规划</button></form>"
-                f"<form hx-post='/api/funnel/symbols/{sym}/remove' hx-swap='none' class='inline ml-auto'>"
-                f"<button type='submit' class='text-xs px-2 py-1 rounded border border-gray-200 "
-                f"text-gray-600'>移除</button></form>"
-                f"</div>"
-                f"<div id='exec-{sym}' class='mb-2'></div>"
-                f"<div hx-get='/api/executing/{sym}/detail' hx-trigger='load once' "
-                f"hx-swap='outerHTML' class='executing-detail-slot' "
-                f"data-symbol='{sym}'>"
-                f"<p class='text-xs text-gray-400 py-3 flex items-center gap-2'>"
-                f"<svg class='animate-spin h-3.5 w-3.5' fill='none' viewBox='0 0 24 24'>"
-                f"<circle class='opacity-25' cx='12' cy='12' r='10' stroke='currentColor' "
-                f"stroke-width='4'></circle>"
-                f"<path class='opacity-75' fill='currentColor' "
-                f"d='M4 12a8 8 0 018-8v8H4z'></path></svg>"
-                f"正在加载 JL1–4 指标缓存…</p></div>"
-                f"</div></details></div>"
+                render_executing_symbol_card(
+                    s,
+                    container_id=container_id,
+                    t2_summaries=t2_summaries,
+                    tags_map=tags_map,
+                    render_strategic_chip=render_strategic_chip,
+                    render_executing_t2_banner=render_executing_t2_banner,
+                )
             )
-    if view == "executing":
-        return HTMLResponse(
-            f'<div class="executing-workspace-list rounded-xl">{"".join(cards)}</div>'
-        )
-    return HTMLResponse("".join(cards))
+
+    html = render_workspace_symbol_list(cards, view=view, count=len(items))
+    wrap_cls = "executing-workspace-list" if view == "executing" else "planning-workspace-list"
+    return HTMLResponse(f'<div class="{wrap_cls}">{html}</div>')
 
 
 def _render_radar_html(items: list) -> HTMLResponse:
@@ -1749,6 +1792,21 @@ def _render_radar_html(items: list) -> HTMLResponse:
             f"</div>"
         )
     return HTMLResponse("".join(cards))
+
+
+def _render_promote_executing_form(
+    campaign_id: int,
+    symbol: str,
+    *,
+    compact: bool = False,
+    tag_options: list | None = None,
+    tag_suggested: dict | None = None,
+    current_tag: dict | None = None,
+) -> str:
+    from apps.copilot.modules.planning.workspace_render import render_promote_executing_form
+
+    _ = (tag_options, tag_suggested, current_tag)  # 战略归属改由弹窗设置
+    return render_promote_executing_form(campaign_id, symbol, compact=compact)
 
 
 def _esc(v) -> str:
@@ -2621,15 +2679,9 @@ def _render_falsify_html(
     promote_btn = ""
     if snapshot.get("status") != "missing":
         promote_btn = (
-            f"<form hx-post='/api/campaigns/{campaign_id}/promote-executing' "
-            f"hx-swap='none' class='mt-3'>"
-            f"<input type='hidden' name='human_confirmed' value='true'>"
-            f"<input type='hidden' name='symbol' value='{symbol}'>"
-            f"<button type='submit' "
-            f"class='px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold "
-            f"hover:bg-blue-700'>人工确认 · 晋级执行（{symbol}）</button>"
-            f"<span class='text-xs text-gray-400 ml-2'>advisory · 须人工确认</span>"
-            f"</form>"
+            f"<div class='mt-3'>"
+            f"{_render_promote_executing_form(campaign_id, symbol, compact=False)}"
+            f"</div>"
         )
 
     body = (
@@ -2752,7 +2804,22 @@ async def api_promote_executing(
     session: AsyncSession = Depends(get_db),
     human_confirmed: str | None = Form(None),
     symbol: str | None = Form(None),
+    lifecycle_mode: str | None = Form(None),
+    opened_at: str | None = Form(None),
+    cost_price: float | None = Form(None),
+    quantity: float | None = Form(None),
+    position_pct: float | None = Form(None),
+    board_id: int | None = Form(None),
+    phase_id: int | None = Form(None),
+    role_tag: str | None = Form(None),
+    add_to_watchlist: str | None = Form(None),
 ):
+    from apps.copilot.modules.executing.position_lifecycle import (
+        LIFECYCLE_HOLDING,
+        normalize_lifecycle_mode,
+    )
+    from apps.copilot.modules.strategic.service import upsert_primary_strategic_tag
+
     confirmed = str(human_confirmed or "").lower() in ("1", "true", "yes", "on")
     redis_client = _sync_redis()
     try:
@@ -2762,15 +2829,33 @@ async def api_promote_executing(
             symbol=symbol,
             human_confirmed=confirmed,
             redis_client=redis_client,
+            lifecycle_mode=lifecycle_mode,
+            opened_at=opened_at or None,
+            cost_price=cost_price,
+            quantity=quantity,
+            position_pct=position_pct,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if board_id and phase_id and symbol:
+        await upsert_primary_strategic_tag(
+            session,
+            symbol,
+            board_id=int(board_id),
+            phase_id=int(phase_id),
+            role_tag=(role_tag or "").strip() or None,
+            tagged_from="planning",
+            add_to_watchlist=str(add_to_watchlist or "").lower() in ("1", "true", "on", "yes"),
+        )
     await session.commit()
     if request.headers.get("hx-request"):
         syms = ", ".join(result.get("promoted_symbols") or []) or "—"
+        mode = normalize_lifecycle_mode(result.get("lifecycle_mode"))
+        mode_label = "已建仓" if mode == LIFECYCLE_HOLDING else "待建仓"
         return HTMLResponse(
             f"<div class='p-3 rounded-lg bg-green-50 text-green-700 text-sm'>"
-            f"✓ 已人工确认晋级执行：{syms}。切到 🚀 执行中 Tab 查看仓位指导。</div>"
+            f"✓ 已人工确认晋级执行：{syms}（{mode_label}）。"
+            f"切到 🚀 执行中 Tab 查看仓位指导。</div>"
         )
     return result
 

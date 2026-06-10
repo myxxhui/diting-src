@@ -93,6 +93,38 @@ async def pin_t2_to_executing(
         "pinned_symbols": pinned,
         "skipped": skipped,
         "executing_url": "/planning?view=executing",
+        "message": f"已固定 T2 摘要：{', '.join(pinned)} · 自动同步已阻塞",
+    }
+
+
+async def unpin_t2_from_executing(
+    session: AsyncSession,
+    symbol: str,
+) -> dict[str, Any]:
+    """解除固定 · 恢复该标的自动同步最近一次 Opus T2 摘要。"""
+    from apps.copilot.db.models import ExecutingT2ExecutingPin
+
+    sym = _canonical_symbol(symbol)
+    if not sym:
+        raise ValueError("缺少 symbol")
+    row = await session.scalar(
+        select(ExecutingT2ExecutingPin).where(ExecutingT2ExecutingPin.symbol == sym)
+    )
+    if row is None:
+        code = sym.split(".")[0]
+        row = await session.scalar(
+            select(ExecutingT2ExecutingPin).where(
+                ExecutingT2ExecutingPin.symbol.like(f"{code}.%")
+            )
+        )
+    if row is None:
+        raise ValueError("该标的未固定 T2 摘要")
+    await session.delete(row)
+    await session.flush()
+    return {
+        "symbol": sym,
+        "unpinned": True,
+        "message": f"已解除固定 · {sym} 将自动同步最近一次 Opus 分析",
     }
 
 

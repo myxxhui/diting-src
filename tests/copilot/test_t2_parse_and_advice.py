@@ -60,5 +60,43 @@ def test_extract_symbol_advice():
     adv = extract_symbol_advice(payload, "300502.SZ", request_id="abc")
     assert adv
     assert adv["action_label"] == "持有"
-    assert "新易盛" in adv["summary"]
+    assert adv["summary"] == "JL4缺失"
+    assert "新易盛观望" not in adv["summary"]
     assert adv["core_eval"] == "JL1-JL3健康"
+    assert adv["operation_hint"] == "维持100股"
+
+
+def test_extract_symbol_advice_rejects_portfolio_only():
+    payload = {
+        "opus_audit": {
+            "Execution_Command": {
+                "action": "hold",
+                "one_sentence_summary": "组合整体持有，工业富联与新易盛均观望",
+                "targets": [],
+            },
+            "Reasoning_Engine": {"cross_validation_logic": "组合级推理链"},
+            "symbol_audits": {},
+        }
+    }
+    assert extract_symbol_advice(payload, "300502.SZ") is None
+
+
+def test_extract_symbol_advice_no_portfolio_cross_fallback():
+    payload = {
+        "opus_audit": {
+            "Execution_Command": {
+                "action": "hold",
+                "one_sentence_summary": "组合广意",
+                "targets": [{"symbol": "601138.SH", "advice": "hold", "rationale": "FII逻辑完好"}],
+            },
+            "Reasoning_Engine": {"cross_validation_logic": "五龙组合推理"},
+            "symbol_audits": {
+                "601138.SH": {"near_term_advice": "hold"},
+            },
+        }
+    }
+    adv = extract_symbol_advice(payload, "601138.SH")
+    assert adv
+    assert adv["summary"] == "FII逻辑完好"
+    assert adv["core_eval"] == ""
+    assert "五龙组合" not in (adv.get("core_eval") or "")

@@ -619,14 +619,14 @@ def render_opus_assistant_bubble(
         pin_btn = (
             f"<button type='button' class='opus-msg-menu-item' data-opus-action='pin-executing' "
             f"data-request-id='{rid}'>"
-            f"<span class='opus-msg-menu-icon'>📌</span>同步到执行区"
-            f"<span class='opus-msg-menu-hint'>按上方已选标的</span></button>"
+            f"<span class='opus-msg-menu-icon'>📌</span>固定为 T2 摘要"
+            f"<span class='opus-msg-menu-hint'>阻塞自动同步</span></button>"
         )
     else:
         pin_btn = (
             "<span class='opus-msg-menu-item is-disabled' "
             "title='需分析成功，且在上方勾选标的后可用'>"
-            "<span class='opus-msg-menu-icon'>📌</span>同步到执行区"
+            "<span class='opus-msg-menu-icon'>📌</span>固定为 T2 摘要"
             "<span class='opus-msg-menu-hint'>需先选标的</span></span>"
         )
     copy_btn = (

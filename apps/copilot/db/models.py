@@ -1283,3 +1283,159 @@ class ProbeResult(Base):
     )
 
     probe_task: Mapped["ProbeTask"] = relationship(back_populates="result")
+
+
+# ─── M12 战略板块与滚动路线图（step_18 · 30_ 规约）────────────────────────────
+
+
+class StrategicBoard(Base):
+    """5～10 年生态战略板块。
+
+    [Ref: 30_战略板块与滚动路线图_前端与数据契约.md]
+    """
+
+    __tablename__ = "strategic_boards"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    horizon_start: Mapped[int] = mapped_column(Integer, nullable=False)
+    horizon_end: Mapped[int] = mapped_column(Integer, nullable=False)
+    qualitative_md: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    barbell_config_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    color_token: Mapped[str] = mapped_column(String(32), nullable=False, default="indigo")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    phases: Mapped[list["StrategicPhase"]] = relationship(
+        back_populates="board", cascade="all, delete-orphan", order_by="StrategicPhase.sort_order"
+    )
+
+
+class StrategicPhase(Base):
+    """战略板块内时序阶段（波次）。"""
+
+    __tablename__ = "strategic_phases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    board_id: Mapped[int] = mapped_column(
+        ForeignKey("strategic_boards.id"), nullable=False, index=True
+    )
+    wave_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    start_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    situation_md: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    playbook_md: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cso_barbell_pct_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    board: Mapped["StrategicBoard"] = relationship(back_populates="phases")
+    watch_symbols: Mapped[list["StrategicPhaseSymbol"]] = relationship(
+        back_populates="phase", cascade="all, delete-orphan"
+    )
+    probes: Mapped[list["StrategicPhaseProbe"]] = relationship(
+        back_populates="phase", cascade="all, delete-orphan"
+    )
+
+
+class StrategicPhaseSymbol(Base):
+    """阶段核心猎物池。"""
+
+    __tablename__ = "strategic_phase_symbols"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    phase_id: Mapped[int] = mapped_column(
+        ForeignKey("strategic_phases.id"), nullable=False, index=True
+    )
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    role_tag: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    watch_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="manual")
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+    phase: Mapped["StrategicPhase"] = relationship(back_populates="watch_symbols")
+
+    __table_args__ = (
+        UniqueConstraint("phase_id", "symbol", name="uq_phase_symbol"),
+    )
+
+
+class StrategicPhaseProbe(Base):
+    """阶段级 JL1/JL2 监控配置。"""
+
+    __tablename__ = "strategic_phase_probes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    phase_id: Mapped[int] = mapped_column(
+        ForeignKey("strategic_phases.id"), nullable=False, index=True
+    )
+    probe_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    layer: Mapped[str] = mapped_column(String(8), nullable=False)  # JL1 | JL2
+    red_flag_rule_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    cadence: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    phase: Mapped["StrategicPhase"] = relationship(back_populates="probes")
+
+    __table_args__ = (
+        UniqueConstraint("phase_id", "probe_key", name="uq_phase_probe_key"),
+    )
+
+
+class SymbolStrategicTag(Base):
+    """标的 ↔ 战略板块/阶段归属（横切漏斗）。"""
+
+    __tablename__ = "symbol_strategic_tags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    board_id: Mapped[int] = mapped_column(
+        ForeignKey("strategic_boards.id"), nullable=False, index=True
+    )
+    phase_id: Mapped[int] = mapped_column(
+        ForeignKey("strategic_phases.id"), nullable=False, index=True
+    )
+    role_tag: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    tagged_from: Mapped[str] = mapped_column(String(32), nullable=False, default="manual")
+    tagged_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class StrategicTagAudit(Base):
+    """战略标签变更审计。"""
+
+    __tablename__ = "strategic_tag_audit"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    old_phase_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    new_phase_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    reason_md: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    operator: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class StrategicPhaseReview(Base):
+    """阶段复盘记录。"""
+
+    __tablename__ = "strategic_phase_reviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    phase_id: Mapped[int] = mapped_column(
+        ForeignKey("strategic_phases.id"), nullable=False, index=True
+    )
+    review_md: Mapped[str] = mapped_column(Text, nullable=False)
+    trigger_summary_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )

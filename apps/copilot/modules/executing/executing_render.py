@@ -14,7 +14,7 @@ from apps.copilot.modules.executing.indicator_nodes import (
     SOURCE_INTRADAY_TICK,
     raw_metrics_for_display,
 )
-from apps.copilot.modules.executing.profile import PROBE_KEYS
+from apps.copilot.modules.executing.profile import L3_KEYS, PROBE_KEYS
 from apps.copilot.modules.executing.probe_card_timing import ProbeCardTiming, render_card_timing_bar
 from apps.copilot.modules.executing.probe_labels import probe_indicator_name, probe_label
 
@@ -103,6 +103,13 @@ PROBE_THEMES: dict[str, dict[str, str]] = {
         "border": "border border-gray-200 border-l-[4px] border-l-violet-500",
         "badge": "bg-violet-50 text-violet-700",
         "formula_accent": "border-l-violet-500",
+    },
+    "fii_twse_cloud": {
+        "category": "l3_fundamental",
+        "accent_hex": "#2563eb",
+        "border": "border border-gray-200 border-l-[4px] border-l-blue-600",
+        "badge": "bg-blue-50 text-blue-800",
+        "formula_accent": "border-l-blue-600",
     },
 }
 _DEFAULT_THEME = {
@@ -1314,15 +1321,42 @@ def render_generic_probe_card(
     )
 
 
-def render_layer_b_prerequisite_banner() -> str:
-    """未填建仓日：禁止展示历史/旧版缓存指标（no-mock）。"""
+def render_layer_b_collect_gate_banner() -> str:
+    """未入采集宇宙：须先加入数据获取列表。"""
     return """
 <article class="bg-white border border-amber-200 rounded-xl shadow-sm px-5 py-4 mb-4">
   <p class="text-sm font-semibold text-gray-900">层 B 未启用</p>
-  <p class="text-sm text-gray-600 mt-2 leading-relaxed">请先在层 A 填写<strong class="text-gray-900">建仓时间</strong>并点「保存标的基础数据」。
-  ATR 止盈须以建仓日为峰值起点；未配置前<strong class="text-gray-900">不展示</strong>任何指标数值（禁止沿用旧缓存冒充持仓监控）。</p>
+  <p class="text-sm text-gray-600 mt-2 leading-relaxed">请先点「加入数据获取列表」纳入 <code class="text-[11px] bg-gray-100 px-1 rounded">executing_collect_symbols</code>，
+  Cron 才会对该标的采集 JL4 盘面指标。未入表前<strong class="text-gray-900">不展示</strong>任何指标数值（no-mock）。</p>
 </article>
 """
+
+
+def render_layer_b_pending_build_banner() -> str:
+    """待建仓 · 已入采集列表：开放不依赖成本/建仓日的 JL4。"""
+    return """
+<article class="bg-white border border-sky-200 rounded-xl shadow-sm px-5 py-4 mb-4">
+  <p class="text-sm font-semibold text-gray-900">层 B · 待建仓预监控</p>
+  <p class="text-sm text-gray-600 mt-2 leading-relaxed">当前为<strong class="text-gray-900">待建仓</strong>状态：已开放量价背离、主力流向、两融分位等
+  <strong class="text-gray-900">不依赖成本价与建仓日</strong>的 JL4 指标采集与跟踪。
+  <strong class="text-gray-900">ATR 动态止盈（#1）</strong>须填写建仓日后方可计算；未配置前禁止展示 ATR 缓存。</p>
+</article>
+"""
+
+
+def render_qmt_atr_pending_placeholder() -> str:
+    """待建仓占位：#1 须建仓日。"""
+    return """
+<article class="bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-3 mb-3 opacity-90">
+  <p class="text-sm font-medium text-gray-700">ATR 动态止盈 <span class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5 ml-1">待建仓</span></p>
+  <p class="text-xs text-gray-500 mt-1">须在层 A 填写建仓时间并保存后，方可计算建仓后峰值窗与回撤倍数。</p>
+</article>
+"""
+
+
+def render_layer_b_prerequisite_banner() -> str:
+    """兼容旧调用：等同采集门闸。"""
+    return render_layer_b_collect_gate_banner()
 
 
 def render_degraded_probes(hints: list[str]) -> str:
@@ -1345,6 +1379,188 @@ def _quote_intraday_watermark(sync: dict[str, Any] | None, symbol: str) -> str |
         if w.get("job_id") == "quote-intraday" and w.get("symbol") in (sym, "*"):
             return w.get("last_success_at_cst") or w.get("last_success_at")
     return None
+
+
+def _format_mom_cell(mom: Any) -> str:
+    if mom is None or mom == "":
+        return "—"
+    try:
+        v = float(mom)
+    except (TypeError, ValueError):
+        return _esc(mom)
+    cls = "text-red-600" if v > 0 else "text-emerald-600" if v < 0 else "text-gray-600"
+    return f'<span class="font-semibold tabular-nums {cls}">{v:+.1f}%</span>'
+
+
+def _render_fii_monthly_table(
+    rows: list[dict[str, Any]],
+    *,
+    value_key: str,
+    value_label: str,
+    billion_key: str | None = None,
+) -> str:
+    if not rows:
+        return '<p class="text-xs text-gray-400">暂无序列</p>'
+    body = []
+    for r in rows:
+        period = _esc(r.get("period", ""))
+        mom = _format_mom_cell(r.get("mom_pct"))
+        val = r.get(value_key)
+        if billion_key and r.get(billion_key) is not None:
+            val_txt = f'{r[billion_key]} 亿'
+        elif val is not None:
+            val_txt = _esc(val)
+        else:
+            val_txt = "—"
+        body.append(
+            f"<tr class=\"border-t border-gray-100\">"
+            f"<td class=\"py-1.5 pr-3 text-gray-600 font-mono text-[11px]\">{period}</td>"
+            f"<td class=\"py-1.5 pr-3 text-gray-800 text-[11px]\">{_esc(val_txt)}</td>"
+            f"<td class=\"py-1.5 text-right text-[11px]\">{mom}</td>"
+            f"</tr>"
+        )
+    return (
+        f'<table class="w-full text-left mt-2">'
+        f'<thead><tr class="text-[10px] text-gray-400 uppercase tracking-wide">'
+        f'<th class="pb-1 font-medium">月份</th>'
+        f'<th class="pb-1 font-medium">{_esc(value_label)}</th>'
+        f'<th class="pb-1 font-medium text-right">MoM</th></tr></thead>'
+        f"<tbody>{''.join(body)}</tbody></table>"
+    )
+
+
+def _render_fii_signal_badge(status: str, label: str, summary: str) -> str:
+    palette = {
+        "green": ("bg-emerald-50 border-emerald-200 text-emerald-800", "🟢"),
+        "yellow": ("bg-amber-50 border-amber-200 text-amber-900", "🟡"),
+        "red": ("bg-red-50 border-red-200 text-red-800", "🔴"),
+    }
+    shell, icon = palette.get(status, palette["yellow"])
+    return (
+        f'<div class="flex items-start gap-3 p-3 rounded-lg border {shell}">'
+        f'<span class="text-lg leading-none mt-0.5">{icon}</span>'
+        f'<div class="min-w-0"><p class="text-sm font-semibold">{_esc(label)}</p>'
+        f'<p class="text-xs mt-0.5 opacity-90">{_esc(summary)}</p></div></div>'
+    )
+
+
+def _render_fii_strategy_panel(cs: dict[str, Any]) -> str:
+    if not cs:
+        return ""
+    g1 = cs.get("goal1_time_lag") or {}
+    g2 = cs.get("goal2_noise_isolation") or {}
+    g3 = cs.get("goal3_trend_trigger") or {}
+    help_html = cs.get("help_html") or ""
+
+    signal_html = _render_fii_signal_badge(
+        str(g3.get("status") or "yellow"),
+        str(g3.get("label") or "观察区"),
+        str(g3.get("summary") or ""),
+    )
+    reasons = g3.get("reasons") or []
+    reasons_html = ""
+    if reasons:
+        items = "".join(f"<li>{_esc(r)}</li>" for r in reasons)
+        reasons_html = f'<ul class="text-[11px] text-gray-600 mt-2 list-disc pl-4 space-y-0.5">{items}</ul>'
+
+    table1 = _render_fii_monthly_table(
+        g1.get("monthly_series") or [],
+        value_key="total_billion_ntd",
+        value_label="合并营收(亿NTD)",
+        billion_key="total_billion_ntd",
+    )
+
+    cloud_mom = g2.get("cloud_lo_mom_pct")
+    consumer_mom = g2.get("consumer_mom_proxy_pct")
+    cloud_terms = "、".join(g2.get("cloud_ir_terms") or []) or "—"
+    consumer_terms = "、".join(g2.get("consumer_ir_terms") or []) or "—"
+    g2_tags = (
+        f'<div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">'
+        f'<div class="rounded-md bg-blue-50/80 px-3 py-2 border border-blue-100">'
+        f'<p class="text-[10px] text-blue-700 font-medium">云端网路 · 推导下限</p>'
+        f'<p class="text-lg font-bold text-blue-900 tabular-nums">{g2.get("cloud_lo_billion", "—")} 亿</p>'
+        f'<p class="text-[11px] text-blue-800">MoM {_format_mom_cell(cloud_mom)} · IR：{_esc(cloud_terms)}</p>'
+        f"</div>"
+        f'<div class="rounded-md bg-slate-50 px-3 py-2 border border-slate-200">'
+        f'<p class="text-[10px] text-slate-600 font-medium">消费智能 · 代理对照</p>'
+        f'<p class="text-lg font-bold text-slate-800 tabular-nums">MoM {_format_mom_cell(consumer_mom)}</p>'
+        f'<p class="text-[10px] text-slate-500">{_esc(g2.get("consumer_mom_note") or "")}</p>'
+        f'<p class="text-[11px] text-slate-600">IR：{_esc(consumer_terms)}</p>'
+        f"</div></div>"
+    )
+
+    help_block = ""
+    if help_html:
+        help_block = f"""
+<details class="group inline-block relative">
+  <summary class="list-none cursor-pointer w-5 h-5 rounded-full bg-gray-100 text-gray-500 text-xs font-bold flex items-center justify-center hover:bg-gray-200" title="指标说明">?</summary>
+  <div class="absolute z-20 right-0 mt-1 w-72 sm:w-96 p-3 rounded-lg border border-gray-200 bg-white shadow-lg text-[11px] text-gray-600 leading-relaxed">{help_html}</div>
+</details>"""
+
+    return f"""
+<div class="mt-4 space-y-4 border-t border-gray-100 pt-4">
+  <div class="flex items-start justify-between gap-2">
+    <p class="text-xs font-semibold text-gray-700">三目标实战面板 · 601138 影子定价锚</p>
+    {help_block}
+  </div>
+  {signal_html}
+  {reasons_html}
+  <section>
+    <h5 class="text-[11px] font-semibold text-gray-800">{_esc(g1.get("title", "目标一"))}</h5>
+    <p class="text-[10px] text-gray-500">{_esc(g1.get("subtitle", ""))}</p>
+    {table1}
+  </section>
+  <section>
+    <h5 class="text-[11px] font-semibold text-gray-800">{_esc(g2.get("title", "目标二"))}</h5>
+    <p class="text-[10px] text-gray-500">{_esc(g2.get("subtitle", ""))}</p>
+    {g2_tags}
+  </section>
+  <section>
+    <h5 class="text-[11px] font-semibold text-gray-800">{_esc(g3.get("title", "目标三"))}</h5>
+    <p class="text-[10px] text-gray-500">Bool 开关 · 供 QMT/PTrade 策略订阅（绿=进攻 / 红=防守 / 黄=观察）</p>
+  </section>
+</div>"""
+
+
+def render_fii_twse_cloud_card(
+    node: dict[str, Any],
+    *,
+    card_timing: ProbeCardTiming | None = None,
+) -> str:
+    """JL3 #1 · 母公司云端营收 · 三目标战略卡片 + T1 白盒抽屉。"""
+    t1_json = node.get("t1_json") if isinstance(node.get("t1_json"), dict) else None
+    rm = raw_metrics_for_display(node)
+    cs = rm.get("card_strategy") if isinstance(rm.get("card_strategy"), dict) else {}
+    strategy_html = _render_fii_strategy_panel(cs)
+
+    g3 = cs.get("goal3_trend_trigger") or {}
+    signal_status = str(g3.get("status") or "yellow")
+    value_color = {
+        "green": "text-emerald-700",
+        "yellow": "text-amber-700",
+        "red": "text-red-700",
+    }.get(signal_status, "text-gray-900")
+
+    period = ""
+    if rm.get("report_year") and rm.get("report_month"):
+        period = f"{rm['report_year']}-{int(rm['report_month']):02d} · 鸿海2317 → 601138"
+
+    return _render_probe_card(
+        probe_key="fii_twse_cloud",
+        title=node.get("indicator_name") or probe_indicator_name("fii_twse_cloud"),
+        short_label=probe_label("fii_twse_cloud"),
+        value_html=_esc(node.get("value_detail") or node.get("value") or "—"),
+        value_color=value_color,
+        subtitle=period or None,
+        card_timing=card_timing,
+        fact_statement=str(node.get("fact_statement") or ""),
+        calculation_logic=str(node.get("calculation_logic") or ""),
+        source=str(node.get("source") or ""),
+        metric_items=[],
+        alert_html=strategy_html,
+        t1_json=t1_json,
+        status_ok=signal_status != "red",
+    )
 
 
 def render_probe_domain(
@@ -1416,6 +1632,42 @@ def render_probe_domain(
     return f"""
 <section class="{_SECTION}">
   <h4 class="text-sm font-semibold text-gray-900 pb-2 mb-1 border-b border-gray-200">{_esc(title)}</h4>
+  <div class="flex flex-col gap-6 mt-4">{body}</div>
+</section>
+"""
+
+
+def render_l3_probe_domain(
+    domain: dict[str, Any],
+    *,
+    title: str = "层 B · JL3 基本面（601138）",
+    empty_hint: str = "尚无 JL3 T1 数据 · 等待 l3-fii-twse-monthly Cron 或「立即跑今日体检」",
+    timing_map: dict[str, ProbeCardTiming] | None = None,
+) -> str:
+    """JL3 蓝域指标卡片（Profile l3_probes）。"""
+    domain = domain or {}
+    timing_map = timing_map or {}
+    if not domain:
+        return f"""
+<section class="{_SECTION}">
+  <h4 class="text-sm font-semibold text-gray-900 pb-2 mb-3 border-b border-gray-200">{_esc(title)}</h4>
+  <p class="text-sm text-gray-500">{_esc(empty_hint)}</p>
+</section>
+"""
+    cards: list[str] = []
+    for k in L3_KEYS:
+        node = domain.get(k)
+        if not isinstance(node, dict):
+            continue
+        card_timing = timing_map.get(k)
+        if k == "fii_twse_cloud":
+            cards.append(render_fii_twse_cloud_card(node, card_timing=card_timing))
+        else:
+            cards.append(render_generic_probe_card(k, node, card_timing=card_timing))
+    body = "".join(cards) or f'<p class="text-sm text-gray-500">{_esc(empty_hint)}</p>'
+    return f"""
+<section class="{_SECTION}">
+  <h4 class="text-sm font-semibold text-blue-900 pb-2 mb-1 border-b border-blue-200">{_esc(title)}</h4>
   <div class="flex flex-col gap-6 mt-4">{body}</div>
 </section>
 """

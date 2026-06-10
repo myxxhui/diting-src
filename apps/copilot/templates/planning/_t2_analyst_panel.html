@@ -92,7 +92,8 @@
               hx-post="/api/executing/analyst/chat"
               hx-target="#t2-analyst-messages"
               hx-swap="innerHTML"
-              hx-indicator="#t2-analyst-spinner">
+              hx-indicator="#t2-analyst-spinner"
+              hx-disabled-elt="find button[type=submit]">
           <input type="hidden" name="session_id" id="t2-analyst-session-id" value="">
           <div class="opus-composer-box">
             <textarea name="message" id="t2-analyst-input" rows="1" maxlength="4000"

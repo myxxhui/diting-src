@@ -1,0 +1,95 @@
+{# 滚动路线图 · 三栏战略指挥台 [Ref: 30_ §4] #}
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+  <div class="px-5 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <div class="flex items-center gap-2">
+        <span class="text-lg">🗓️</span>
+        <h2 class="text-base font-semibold text-gray-900">滚动路线图 · 战略指挥台</h2>
+      </div>
+      <p class="text-sm text-gray-500 mt-0.5">宏观 5～10 年板块 + 战术甘特双层 · JL1/JL2 板块监控</p>
+    </div>
+    <button type="button"
+            class="text-sm px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm"
+            onclick="document.getElementById('strategic-wizard-modal').classList.remove('hidden')">
+      + 新建板块
+    </button>
+  </div>
+
+  <div class="flex flex-col xl:flex-row min-h-[28rem]">
+    <aside class="xl:w-60 shrink-0 border-b xl:border-b-0 xl:border-r border-gray-100 bg-gray-50/50">
+      <div class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">战略板块</div>
+      <div id="strategic-board-list"
+           hx-get="/api/strategic/boards{% if strategic_board_id %}?board_id={{ strategic_board_id }}{% endif %}"
+           hx-trigger="load once"
+           hx-swap="innerHTML">
+        {{ strategic_board_list_html|default('')|safe }}
+      </div>
+    </aside>
+
+    <main class="flex-1 min-w-0 p-4 overflow-y-auto max-h-[70vh]" id="strategic-command-main">
+      {{ strategic_main_html|default('')|safe }}
+    </main>
+
+    <aside class="xl:w-80 shrink-0 border-t xl:border-t-0 xl:border-l border-gray-100 bg-white p-4 overflow-y-auto max-h-[70vh]"
+           id="strategic-phase-panel">
+      {% if strategic_panel_html %}
+        {{ strategic_panel_html|safe }}
+      {% else %}
+        <p class="text-sm text-gray-400 text-center py-8">选择阶段查看 JL 监控与猎物池</p>
+      {% endif %}
+    </aside>
+  </div>
+
+  <div class="px-5 py-4 border-t border-gray-100 bg-gray-50/30">
+    <h3 class="text-sm font-semibold text-gray-700 mb-2">下一波待规划（战术滚动）</h3>
+    <div hx-get="/api/roadmap/next-waves" hx-trigger="load" hx-swap="innerHTML" class="text-sm text-gray-600">
+      加载中…
+    </div>
+  </div>
+</div>
+
+<div id="strategic-wizard-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+  <div class="bg-white rounded-xl shadow-xl max-w-lg w-full p-5 max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-base font-bold text-gray-900">新建战略板块</h3>
+      <button type="button" class="text-gray-400 hover:text-gray-600 text-xl leading-none"
+              onclick="document.getElementById('strategic-wizard-modal').classList.add('hidden')">×</button>
+    </div>
+    <form hx-post="/api/strategic/boards" hx-target="body" hx-swap="beforeend"
+          class="space-y-3 text-sm"
+          onsubmit="document.getElementById('strategic-wizard-modal').classList.add('hidden')">
+      <div>
+        <label class="block text-xs font-medium text-gray-700 mb-1">板块名称</label>
+        <input name="name" type="text" class="w-full border border-gray-200 rounded-lg px-3 py-2"
+               placeholder="例：液冷基建 3-5 年" />
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-gray-700 mb-1">起始年</label>
+          <input name="horizon_start" type="number" value="2026"
+                 class="w-full border border-gray-200 rounded-lg px-3 py-2" required />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-700 mb-1">结束年</label>
+          <input name="horizon_end" type="number" value="2030"
+                 class="w-full border border-gray-200 rounded-lg px-3 py-2" required />
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-700 mb-1">战略定性（可选）</label>
+        <textarea name="qualitative_md" rows="2" class="w-full border border-gray-200 rounded-lg px-3 py-2"
+                  placeholder="一句话战略定性…"></textarea>
+      </div>
+      <div class="flex flex-wrap gap-2 pt-2">
+        <button type="submit" name="load_template" value=""
+                class="flex-1 min-w-[120px] px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
+          创建空白板块
+        </button>
+        <button type="submit" name="load_template" value="1"
+                class="flex-1 min-w-[120px] px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
+          加载 AI 四波次样板
+        </button>
+      </div>
+    </form>
+  </div>
+</div>

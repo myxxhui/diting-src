@@ -26,6 +26,7 @@ from apps.copilot.modules.executing.pipeline_status import build_sync_status
 from apps.copilot.modules.executing.positions import (
     delete_position,
     list_positions,
+    overlay_intraday_qmt_price,
     profit_context,
     upsert_position,
 )
@@ -209,6 +210,17 @@ async def api_get_position(symbol: str, session: AsyncSession = Depends(get_db))
     return ctx
 
 
+@router.get("/api/executing/positions/{symbol}/mark-strip", response_class=HTMLResponse)
+async def api_position_mark_strip(symbol: str, session: AsyncSession = Depends(get_db)):
+    """层 A 现价条 · HTMX 轮询（与热数据 Redis 同源）。"""
+    sym = symbol.zfill(6)[-6:]
+    redis = _redis_for_panel()
+    ctx = await profit_context(session, sym, redis)
+    if not ctx.get("has_position"):
+        return HTMLResponse("", status_code=404)
+    return HTMLResponse(_render_mark_price_strip(sym, ctx))
+
+
 @router.post("/api/executing/positions/{symbol}/save")
 async def api_save_position_form(
     symbol: str,
@@ -300,6 +312,17 @@ async def api_collect(symbol: str, session: AsyncSession = Depends(get_db)):
     return result
 
 
+@router.post("/api/executing/{symbol}/enroll-collect", response_class=HTMLResponse)
+async def api_enroll_collect(symbol: str, session: AsyncSession = Depends(get_db)):
+    """待建仓标的入采集宇宙 · 开放层 B 独立 JL4（不要求成本/建仓日）。"""
+    from apps.copilot.modules.executing.universe import enroll_executing_collect
+
+    sym = symbol.zfill(6)[-6:]
+    await enroll_executing_collect(session, sym)
+    await session.commit()
+    return await api_executing_detail_html(sym, session=session)
+
+
 @router.get("/api/executing/{symbol}/detail", response_class=HTMLResponse)
 async def api_executing_detail_html(
     symbol: str,
@@ -327,6 +350,30 @@ async def api_executing_detail_html(
         )
 
 
+def _render_mark_price_strip(sym: str, ctx: dict[str, Any]) -> str:
+    from apps.copilot.modules.executing.money_unit import format_price_display
+
+    mark_disp = format_price_display(ctx.get("mark_price"))
+    cost_disp = format_price_display(ctx.get("cost_price"))
+    as_of = ctx.get("mark_price_as_of")
+    as_of_html = (
+        f" · 行情 {_esc(str(as_of)[:19])}"
+        if as_of and not ctx.get("price_stale")
+        else ""
+    )
+    stale_html = ' · <span class="text-amber-600">行情 stale</span>' if ctx.get("price_stale") else ""
+    return f"""
+<div id="executing-mark-{sym}" class="col-span-2 md:col-span-3 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5"
+     hx-get="/api/executing/positions/{sym}/mark-strip" hx-trigger="every 60s" hx-swap="outerHTML">
+  现价 <strong class="text-gray-900">{_esc(mark_disp)}</strong>
+  · 成本 <strong class="text-gray-900">{_esc(cost_disp)}</strong>
+  · 浮盈 <strong class="text-emerald-500">{_esc(ctx.get('unrealized_pnl_pct','—'))}%</strong>
+  · 仓位 <strong class="text-gray-900">{_esc(ctx.get('position_pct','—'))}%</strong>
+  {as_of_html}{stale_html}
+</div>
+"""
+
+
 async def _render_executing_detail_html(
     sym: str,
     session: AsyncSession,
@@ -348,24 +395,46 @@ async def _render_executing_detail_html(
     audit = audit_row.audit_json if audit_row else {}
 
     base = await load_symbol_base(session, sym)
+    from apps.copilot.modules.executing.position_lifecycle import (
+        LIFECYCLE_HOLDING,
+        LIFECYCLE_PENDING_BUILD,
+        filter_l4_for_lifecycle,
+        is_collect_enrolled,
+        resolve_lifecycle_status,
+    )
+
+    lifecycle = resolve_lifecycle_status(base)
+    in_collect = is_collect_enrolled(base)
     opened_val = ctx.get("opened_at") or base.get("opened_at") or ""
     if opened_val and "T" in str(opened_val):
         opened_val = str(opened_val)[:10]
     notes_val = base.get("notes") or ""
-
-    from apps.copilot.modules.executing.money_unit import (
-        EXECUTING_MONEY_UNIT,
-        format_price_display,
+    lifecycle_badge = (
+        '<span class="text-xs px-2 py-0.5 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 font-medium ml-2">持仓中</span>'
+        if lifecycle == LIFECYCLE_HOLDING
+        else '<span class="text-xs px-2 py-0.5 rounded-md border border-sky-200 bg-sky-50 text-sky-700 font-medium ml-2">待建仓</span>'
     )
 
+    from apps.copilot.modules.executing.money_unit import EXECUTING_MONEY_UNIT
+
     money_hint = f"货币单位：<strong>{_esc(EXECUTING_MONEY_UNIT)}</strong>"
-    mark_disp = format_price_display(ctx.get("mark_price"))
-    cost_disp = format_price_display(ctx.get("cost_price"))
+    mark_strip = _render_mark_price_strip(sym, ctx) if lifecycle == LIFECYCLE_HOLDING else ""
+    enroll_btn = ""
+    if not in_collect:
+        enroll_btn = f"""
+  <form hx-post="/api/executing/{sym}/enroll-collect" hx-target="#executing-detail-{sym}" hx-swap="outerHTML" class="mb-3">
+    <button type="submit" class="text-sm px-3 py-1.5 rounded-lg bg-sky-600 text-white hover:bg-sky-700 font-medium">
+      加入数据获取列表
+    </button>
+    <span class="text-xs text-gray-500 ml-2">入表后 Cron 采集 JL4 · 待建仓亦可跟踪盘面指标</span>
+  </form>
+"""
     pos_form = f"""
 <div class="executing-position-card bg-white border border-gray-200 rounded-xl shadow-sm p-6 mb-4">
-  <h3 class="text-base font-semibold text-gray-900 mb-1">层 A · 标的基础数据 · {_esc(sym)}</h3>
+  <h3 class="text-base font-semibold text-gray-900 mb-1">层 A · 标的基础数据 · {_esc(sym)}{lifecycle_badge}</h3>
+  {enroll_btn}
   <p class="text-xs text-gray-400 mb-1">保存后同步写入 <code class="text-[11px] bg-gray-100 px-1 rounded">user_positions</code> 与 <code class="text-[11px] bg-gray-100 px-1 rounded">executing_collect_symbols</code></p>
-  <p class="text-xs text-gray-500 mb-4">{money_hint} · 价格字段均为此单位</p>
+  <p class="text-xs text-gray-500 mb-4">{money_hint} · 价格字段均为此单位 · 现价随热数据 Cron 刷新（约 60s 自动更新）</p>
   <form hx-post="/api/executing/positions/{sym}/save" hx-target="#executing-detail-{sym}" hx-swap="outerHTML"
         class="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
     <label class="flex flex-col gap-1 text-gray-700">名称
@@ -386,18 +455,12 @@ async def _render_executing_detail_html(
     </label>
     <label class="flex flex-col gap-1 text-gray-700">建仓时间
       <input name="opened_at" type="date" class="border border-gray-200 rounded-lg px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
-        value="{_esc(opened_val)}" required>
+        value="{_esc(opened_val)}" placeholder="持仓后填写 · 待建仓可留空">
     </label>
     <label class="flex flex-col gap-1 md:col-span-1 text-gray-700">备注
       <input name="notes" class="border border-gray-200 rounded-lg px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400" value="{_esc(notes_val)}">
     </label>
-    <div class="col-span-2 md:col-span-3 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5">
-      现价 <strong class="text-gray-900">{_esc(mark_disp)}</strong>
-      · 成本 <strong class="text-gray-900">{_esc(cost_disp)}</strong>
-      · 浮盈 <strong class="text-emerald-500">{_esc(ctx.get('unrealized_pnl_pct','—'))}%</strong>
-      · 仓位 <strong class="text-gray-900">{_esc(ctx.get('position_pct','—'))}%</strong>
-      {'· <span class="text-amber-600">行情 stale</span>' if ctx.get('price_stale') else ''}
-    </div>
+    {mark_strip}
     <button type="submit" class="col-span-2 md:col-span-3 bg-blue-600 text-white rounded-lg py-2.5 hover:bg-blue-700 font-medium transition-colors">
       保存标的基础数据
     </button>
@@ -409,8 +472,11 @@ async def _render_executing_detail_html(
         _quote_intraday_watermark,
         render_degraded_probes,
         render_hot_data_timeline,
-        render_layer_b_prerequisite_banner,
+        render_layer_b_collect_gate_banner,
+        render_layer_b_pending_build_banner,
+        render_l3_probe_domain,
         render_probe_domain,
+        render_qmt_atr_pending_placeholder,
     )
     from apps.copilot.modules.executing.probe_card_timing import build_probe_card_timing_map
     from apps.copilot.modules.executing.t1_assembler import (
@@ -418,16 +484,21 @@ async def _render_executing_detail_html(
         load_cached_stock_signal,
     )
 
-    has_entry = bool(str(opened_val or "").strip())
+    has_holding = lifecycle == LIFECYCLE_HOLDING
+    layer_b_enabled = in_collect
     degraded_hints: list[str] = []
     l3: dict = {}
     l4: dict = {}
     event_probe_states: dict[str, dict] = {}
     layer_b_banner = ""
+    qmt_pending_html = ""
     cache_note = ""
-    if not has_entry:
-        layer_b_banner = render_layer_b_prerequisite_banner()
-    else:
+    if not layer_b_enabled:
+        layer_b_banner = render_layer_b_collect_gate_banner()
+    elif not has_holding:
+        layer_b_banner = render_layer_b_pending_build_banner()
+        qmt_pending_html = render_qmt_atr_pending_placeholder()
+    if layer_b_enabled:
         if live:
             signal = await assemble_stock_signal(session, sym, redis_client=redis_client)
             cache_note = (
@@ -444,6 +515,14 @@ async def _render_executing_detail_html(
         indicators = signal.get("indicators") or {}
         l3 = {k: v for k, v in indicators.items() if k in L3_KEYS}
         l4 = {k: v for k, v in indicators.items() if k in L4_KEYS}
+        l4 = filter_l4_for_lifecycle(l4, lifecycle)
+        if has_holding and isinstance(l4.get("qmt_atr_trailing"), dict):
+            l4["qmt_atr_trailing"] = overlay_intraday_qmt_price(
+                l4["qmt_atr_trailing"],
+                mark_price=ctx.get("mark_price"),
+                mark_as_of=ctx.get("mark_price_as_of"),
+                stale=bool(ctx.get("price_stale")),
+            )
         degraded_hints = list(signal.get("degraded_probes") or [])
         if "block_trade_discount" not in l4:
             from apps.copilot.modules.executing.block_trade_discount import (
@@ -515,18 +594,20 @@ async def _render_executing_detail_html(
             sync=sync,
             quote_job_at=quote_wm,
         )
-        if has_entry
+        if layer_b_enabled
         else {}
     )
     hot_timeline = (
         render_hot_data_timeline(qmt_node, quote_job_at=quote_wm)
-        if has_entry
+        if has_holding
         else ""
     )
     layer_b_html = (
         f"{layer_b_banner}"
+        f"{qmt_pending_html}"
         f"{render_degraded_probes(degraded_hints)}"
         f"{hot_timeline}"
+        f'{render_l3_probe_domain(l3, timing_map=timing_map)}'
         f'{render_probe_domain(l4, title="层 B · T1 指标（#15~#25）", accent="orange", empty_hint="暂无可用指标 · 点「立即跑今日体检」或等待 Cron 采集", symbol=sym, sync=sync, event_probe_states=event_probe_states, timing_map=timing_map)}'
     )
 
@@ -678,7 +759,8 @@ def _render_analyst_chat_panel(payload: dict[str, Any]) -> str:
                 else ""
             )
             bubbles.append(
-                f"<div class='flex justify-end'><div class='max-w-[88%] rounded-2xl rounded-tr-sm "
+                f"<div class='flex justify-end t2-analyst-user' data-role='user'>"
+                f"<div class='max-w-[88%] rounded-2xl rounded-tr-sm "
                 f"bg-violet-600 text-white px-4 py-2.5 text-sm leading-relaxed shadow-sm'>"
                 f"<p class='whitespace-pre-wrap'>{content}</p>{tag}</div></div>"
             )
@@ -833,14 +915,31 @@ async def api_pin_t2_to_executing(
         logger.exception("pin T2 to executing failed")
         return JSONResponse({"ok": False, "error": str(exc)[:200]}, status_code=500)
 
-    syms = ", ".join(result.get("pinned_symbols") or [])
-    return JSONResponse(
-        {
-            "ok": True,
-            **result,
-            "message": f"已同步到执行区：{syms}",
-        }
+    return JSONResponse({"ok": True, **result})
+
+
+@router.post("/api/executing/{symbol}/unpin-t2-summary", response_class=HTMLResponse)
+async def api_unpin_t2_summary(symbol: str, session: AsyncSession = Depends(get_db)):
+    """解除固定 T2 摘要 · 恢复自动同步最近一次 Opus 分析。"""
+    from apps.copilot.modules.executing.t2_advice_summary import (
+        load_executing_t2_summaries_for_symbols,
+        render_executing_t2_banner,
     )
+    from apps.copilot.modules.executing.t2_executing_pin import unpin_t2_from_executing
+
+    sym = symbol.zfill(6)[-6:]
+    try:
+        await unpin_t2_from_executing(session, sym)
+        await session.commit()
+    except ValueError as exc:
+        await session.rollback()
+        return HTMLResponse(
+            f"<div id='executing-t2-banner-{sym}' class='executing-t2-banner px-5 py-2 text-xs text-rose-700'>"
+            f"{_esc(str(exc))}</div>",
+            status_code=400,
+        )
+    summaries = await load_executing_t2_summaries_for_symbols(session, [sym])
+    return HTMLResponse(render_executing_t2_banner(sym, summaries.get(sym)))
 
 
 @router.post("/api/executing/analyst/chat", response_class=HTMLResponse)

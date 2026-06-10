@@ -26,6 +26,38 @@ async def load_executing_collect_symbols(session: AsyncSession) -> list[str]:
     return [str(s).zfill(6)[-6:] for s in rows]
 
 
+async def enroll_executing_collect(
+    session: AsyncSession,
+    symbol: str,
+    *,
+    profile: str = "601138",
+    name: str | None = None,
+    funnel_stage: str | None = "executing",
+) -> ExecutingCollectSymbol:
+    """仅入采集宇宙 · 不要求层 A 持仓完备（待建仓可开层 B 独立 JL4）。"""
+    sym = symbol.zfill(6)[-6:]
+    coll = await session.get(ExecutingCollectSymbol, sym)
+    if coll is None:
+        coll = ExecutingCollectSymbol(
+            symbol=sym,
+            profile=profile,
+            enabled=True,
+            funnel_stage=funnel_stage,
+            name=name or sym,
+        )
+        session.add(coll)
+    else:
+        coll.enabled = True
+        if profile:
+            coll.profile = profile
+        if funnel_stage:
+            coll.funnel_stage = funnel_stage
+        if name:
+            coll.name = name
+    await session.flush()
+    return coll
+
+
 async def upsert_executing_collect(
     session: AsyncSession,
     symbol: str,

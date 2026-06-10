@@ -5,14 +5,36 @@
 
 {# ── 页头区块 ─────────────────────────────────────── #}
 <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-5">
-  <div class="flex items-center gap-3">
-    <span class="text-2xl">📡</span>
-    <div>
-      <h1 class="text-xl font-bold text-gray-900 leading-tight">行情解析与规划工作台</h1>
-      <p class="text-sm text-gray-500 mt-0.5">Campaign 作战计划 · 6 维分析档案 · 三支柱监控 · 4 个工作区</p>
+  <div class="flex items-center justify-between gap-3 flex-wrap">
+    <div class="flex items-center gap-3">
+      <span class="text-2xl">📡</span>
+      <div>
+        <h1 class="text-xl font-bold text-gray-900 leading-tight">行情解析与规划工作台</h1>
+        <p class="text-sm text-gray-500 mt-0.5">四区漏斗 · 战略板块标签 · 6 维档案 · 三支柱监控</p>
+      </div>
     </div>
+    <button type="button"
+            class="text-sm px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100"
+            hx-get="/api/strategic/overview"
+            hx-target="#strategic-overview-drawer"
+            hx-swap="innerHTML"
+            onclick="document.getElementById('strategic-overview-drawer').classList.remove('hidden')">
+      战略总览 ⊞
+    </button>
   </div>
 </div>
+
+<div id="strategic-overview-drawer"
+     class="hidden fixed inset-y-0 right-0 z-40 w-full max-w-sm bg-white shadow-xl border-l border-gray-200 overflow-y-auto">
+  <div class="p-4 border-b border-gray-100 flex justify-between items-center">
+    <h2 class="font-semibold text-gray-900">战略总览</h2>
+    <button type="button" class="text-gray-400 text-xl"
+            onclick="document.getElementById('strategic-overview-drawer').classList.add('hidden')">×</button>
+  </div>
+  <div class="p-2 text-sm text-gray-500">加载中…</div>
+</div>
+
+<div id="strategic-promote-modal-root"></div>
 
 {# ── 四 Tab 导航（HTMX 局部切换 · 不整页刷新） ─────── #}
 <div class="flex gap-2 mb-5 flex-wrap">
@@ -81,13 +103,39 @@
       if (view === 'executing' && typeof window.executingBootPanel === 'function') {
         window.executingBootPanel();
       }
+      if (view === 'planning' && typeof window.planningBootPanel === 'function') {
+        window.planningBootPanel();
+      }
       if (typeof htmx !== 'undefined') {
         var panel = document.getElementById('workbench-panel');
         if (panel) htmx.process(panel);
       }
     };
 
-    /** 执行区：展开折叠卡时若详情未加载则补拉（兜底） */
+    /** 执行区 T2 摘要 · 解除固定后恢复自动同步 */
+    document.body.addEventListener('click', function (ev) {
+      var btn = ev.target.closest && ev.target.closest('.executing-t2-unpin-btn');
+      if (!btn) return;
+      ev.preventDefault();
+      var sym = btn.getAttribute('data-symbol');
+      if (!sym) return;
+      btn.disabled = true;
+      fetch('/api/executing/' + encodeURIComponent(sym) + '/unpin-t2-summary', { method: 'POST' })
+        .then(function (r) { return r.text().then(function (html) { return { ok: r.ok, html: html }; }); })
+        .then(function (res) {
+          var banner = document.getElementById('executing-t2-banner-' + sym);
+          if (banner && res.html) {
+            var wrap = document.createElement('div');
+            wrap.innerHTML = res.html.trim();
+            var next = wrap.firstElementChild;
+            if (next) banner.replaceWith(next);
+          }
+          btn.disabled = false;
+        })
+        .catch(function () { btn.disabled = false; });
+    });
+
+    /** 执行区：折叠卡默认收起 · 展开时补拉详情（兜底） */
     window.executingBootPanel = function () {
       document.querySelectorAll('.executing-symbol-card').forEach(function (details) {
         details.open = false;
@@ -96,12 +144,24 @@
         details.addEventListener('toggle', function () {
           if (!details.open) return;
           var slot = details.querySelector('.executing-detail-slot');
-          if (!slot || slot.id && slot.id.indexOf('executing-detail-') === 0) return;
+          if (!slot || (slot.id && slot.id.indexOf('executing-detail-') === 0)) return;
           if (typeof htmx !== 'undefined') {
-            htmx.trigger(slot, 'load');
+            htmx.trigger(slot, 'revealed');
           }
         });
       });
+    };
+
+    /** 规划区：标的卡默认折叠 */
+    window.planningBootPanel = function () {
+      document.querySelectorAll('.planning-symbol-card').forEach(function (details) {
+        details.open = false;
+      });
+      if (typeof htmx !== 'undefined') {
+        document.querySelectorAll('.planning-sub-panel [hx-trigger]').forEach(function (el) {
+          htmx.process(el);
+        });
+      }
     };
 
     document.body.addEventListener('htmx:beforeRequest', function (ev) {
@@ -129,6 +189,9 @@
       var view = panel && panel.getAttribute('data-view');
       if (view === 'executing' && typeof window.executingBootPanel === 'function') {
         window.executingBootPanel();
+      }
+      if (view === 'planning' && typeof window.planningBootPanel === 'function') {
+        window.planningBootPanel();
       }
     });
 

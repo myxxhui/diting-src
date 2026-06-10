@@ -25,11 +25,12 @@ from apps.copilot.modules.executing.t1_build import (
 )
 from apps.copilot.modules.executing.money_unit import attach_money_unit, round_price
 from apps.copilot.modules.executing.workspace_settings import get_workspace_settings
-from apps.copilot.modules.executing.profile import PROBE_KEYS
+from apps.copilot.modules.executing.profile import PROBE_KEYS, load_profile, profile_l3_keys
 from apps.copilot.modules.executing.probe_registry import (
     OPTIONAL_SILENT_PROBE_KEYS,
     collect_t1_live_for_key,
 )
+from apps.copilot.modules.executing.l3_probe_registry import collect_t1_live_l3_for_key
 from apps.copilot.modules.executing.probes._base import T1LiveContext
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,8 @@ async def _gather_stock_indicators(
     """Scatter-Gather：registry 并发算子 + 绝对超时。"""
     degraded: list[str] = []
     sym = symbol.zfill(6)[-6:]
+    prof = load_profile(sym)
+    l3_keys = profile_l3_keys(prof)
     ctx = T1LiveContext(
         session=session,
         symbol=sym,
@@ -57,10 +60,14 @@ async def _gather_stock_indicators(
         redis_client=redis_client,
     )
 
-    async def _wrap_for_key(probe_key: str):
+    async def _wrap_l4(probe_key: str):
         return await collect_t1_live_for_key(probe_key, ctx)
 
-    tasks = [(probe_key, _wrap_for_key(probe_key)) for probe_key in PROBE_KEYS]
+    async def _wrap_l3(probe_key: str):
+        return await collect_t1_live_l3_for_key(probe_key, ctx)
+
+    tasks = [(probe_key, _wrap_l3(probe_key)) for probe_key in l3_keys]
+    tasks += [(probe_key, _wrap_l4(probe_key)) for probe_key in PROBE_KEYS]
 
     async def _run_all() -> list[Any]:
         coros = [t[1] for t in tasks]
@@ -85,7 +92,7 @@ async def _gather_stock_indicators(
         ind_key, node = result
         indicators[ind_key] = node
 
-    for probe_key in PROBE_KEYS:
+    for probe_key in l3_keys + list(PROBE_KEYS):
         if probe_key not in indicators and probe_key not in OPTIONAL_SILENT_PROBE_KEYS:
             degraded.append(_degraded_line(probe_key, raw_by_key.get(probe_key)))
 

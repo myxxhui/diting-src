@@ -18,6 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libharfbuzz0b \
     libpangoft2-1.0-0 \
     fonts-noto-cjk \
+    tesseract-ocr \
+    tesseract-ocr-chi-tra \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -30,6 +32,10 @@ RUN mkdir -p apps/common apps/copilot scripts \
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip setuptools wheel \
     && pip install -e ".[copilot,pdf-verify]"
+
+# Playwright Chromium（鸿海 IR / MOPS 渲染页 · fii_twse_cloud）
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN playwright install --with-deps chromium
 
 # ── 代码层（editable 已指向 /app，仅 COPY 即可生效）────────────────────────
 COPY apps ./apps

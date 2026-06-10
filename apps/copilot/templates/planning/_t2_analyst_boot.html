@@ -166,6 +166,8 @@
       var form = document.getElementById('t2-analyst-form');
       var msgBox = document.getElementById('t2-analyst-messages');
       if (!form || !msgBox) return;
+      if (window._t2AnalystBootRunning) return;
+      window._t2AnalystBootRunning = true;
       window.t2LoadTemplates();
       window.opusBindModelSelect('t2-analyst-model');
       window.t2BindCharCounters();
@@ -176,20 +178,23 @@
         var id = window.t2AnalystSyncSid();
         window.t2UpsertSession(id, '当前话题');
         window.t2RenderSessionList();
-        if (typeof htmx === 'undefined') return;
+        if (typeof htmx === 'undefined') {
+          window._t2AnalystBootRunning = false;
+          return;
+        }
         htmx.process(form);
         var jobId = localStorage.getItem(window.T2_ANALYST_JOB_KEY);
         if (jobId) {
           htmx.ajax('GET', '/api/executing/analyst/chat/job/' + jobId, {
             target: '#t2-analyst-messages',
             swap: 'innerHTML'
-          });
+          }).finally(function () { window._t2AnalystBootRunning = false; });
           return;
         }
         htmx.ajax('GET', '/api/executing/analyst/chat/' + id, {
           target: '#t2-analyst-messages',
           swap: 'innerHTML'
-        });
+        }).finally(function () { window._t2AnalystBootRunning = false; });
       };
       window.t2SyncSessionsFromServer().finally(bootSid);
     };
@@ -378,8 +383,10 @@
         var outer = form && form.querySelector('#t2-analyst-session-id');
         if (outer) outer.value = newSid;
         var firstUser = msgBox.querySelector('.t2-analyst-user, [data-role="user"]');
-        var title = firstUser ? (firstUser.textContent || '').trim().slice(0, 48) : '分析对话';
-        window.t2UpsertSession(newSid, title);
+        if (firstUser) {
+          var title = (firstUser.textContent || '').trim().slice(0, 48);
+          if (title) window.t2UpsertSession(newSid, title);
+        }
       }
       msgBox.scrollTop = msgBox.scrollHeight;
       if (input) {
@@ -464,7 +471,7 @@
           .then(function (res) {
             pinBtn.disabled = false;
             if (res.ok && res.j.ok) {
-              window.t2ShowPinToast(bubble, res.j.message || '已同步到执行区', true);
+              window.t2ShowPinToast(bubble, res.j.message || '已固定 T2 摘要 · 自动同步已阻塞', true);
             } else {
               window.t2ShowPinToast(bubble, (res.j && res.j.error) || '同步失败', false);
             }

@@ -37,13 +37,16 @@ def _sym(symbol: str) -> str:
 
 def fetch_today_draft_bar(symbol: str) -> DailyBarRow | None:
     """腾讯 fqkline 最近几根；末行若为当日则作为未收盘日 K 草稿。"""
+    from apps.copilot.db.datetime_util import shanghai_today
+
     sym = _sym(symbol)
     rows, _ = fetch_tencent_daily_bars(sym, days=3, min_bars=1)
     if not rows:
         return None
     last = rows[-1]
-    if last.trade_date != date.today():
-        logger.debug("无当日 fqkline 草稿 symbol=%s last=%s", sym, last.trade_date)
+    today = shanghai_today()
+    if last.trade_date != today:
+        logger.debug("无当日 fqkline 草稿 symbol=%s last=%s today=%s", sym, last.trade_date, today)
         return None
     return last
 

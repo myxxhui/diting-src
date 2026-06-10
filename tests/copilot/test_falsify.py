@@ -207,9 +207,57 @@ def test_promote_executing_with_confirm(client):
     assert r.status_code == 200
     body = r.json()
     assert body["funnel_stage"] == "executing"
+    assert body["lifecycle_mode"] == "pending_build"
     assert len(body["promoted_symbols"]) >= 1
     assert body["human_confirmation_required"] is True
     assert "readiness" in body
+
+
+def test_promote_executing_pending_build_default(client):
+    client.post("/api/campaigns/import-portfolio")
+    cid = client.get("/api/campaigns").json()[0]["id"]
+    r = client.post(
+        f"/api/campaigns/{cid}/promote-executing",
+        data={"human_confirmed": "true", "symbol": "601138"},
+    )
+    assert r.status_code == 200
+    assert r.json()["lifecycle_mode"] == "pending_build"
+
+
+def test_promote_executing_holding_requires_fields(client):
+    client.post("/api/campaigns/import-portfolio")
+    cid = client.get("/api/campaigns").json()[0]["id"]
+    r = client.post(
+        f"/api/campaigns/{cid}/promote-executing",
+        data={
+            "human_confirmed": "true",
+            "symbol": "601138",
+            "lifecycle_mode": "holding",
+        },
+    )
+    assert r.status_code == 400
+    assert "holding_fields_required" in r.json()["detail"]
+
+
+def test_promote_executing_holding_with_position(client):
+    client.post("/api/campaigns/import-portfolio")
+    cid = client.get("/api/campaigns").json()[0]["id"]
+    r = client.post(
+        f"/api/campaigns/{cid}/promote-executing",
+        data={
+            "human_confirmed": "true",
+            "symbol": "601138",
+            "lifecycle_mode": "holding",
+            "opened_at": "2026-04-10",
+            "cost_price": "56.82",
+            "quantity": "1500",
+            "position_pct": "29.7",
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["lifecycle_mode"] == "holding"
+    assert "601138" in body["promoted_symbols"]
 
 
 def test_cognitive_snapshot_api(client):

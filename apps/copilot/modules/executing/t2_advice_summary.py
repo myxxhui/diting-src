@@ -72,7 +72,7 @@ def extract_symbol_advice(
     request_id: str | None = None,
     model_id: str | None = None,
 ) -> dict[str, Any] | None:
-    """从单次 T2 payload 提取单标的摘要。"""
+    """从单次 T2 payload 提取单标的摘要（禁止回落到组合级广意字段）。"""
     audit = structured_audit_from_payload(payload)
     if not audit.get("Execution_Command") and not audit.get("symbol_audits"):
         return None
@@ -82,7 +82,6 @@ def extract_symbol_advice(
     sym_audit = sym_audits.get(matched or "") or {}
 
     cmd = audit.get("Execution_Command") or {}
-    action = sym_audit.get("near_term_advice") or cmd.get("action") or "—"
     target = next(
         (
             t
@@ -91,16 +90,25 @@ def extract_symbol_advice(
         ),
         None,
     )
-    if target and target.get("advice"):
-        action = target.get("advice")
 
-    summary = (cmd.get("one_sentence_summary") or "").strip()
-    core = (sym_audit.get("cross_validation") or "").strip()
-    if not core:
-        core = ((audit.get("Reasoning_Engine") or {}).get("cross_validation_logic") or "").strip()
+    if not sym_audit and not target:
+        return None
+
+    action = sym_audit.get("near_term_advice") or (target or {}).get("advice") or "—"
     honesty = (sym_audit.get("holding_honesty") or "").strip()
-    if target and target.get("rationale") and not summary:
-        summary = str(target.get("rationale"))
+    core = (sym_audit.get("cross_validation") or "").strip()
+    rationale = str((target or {}).get("rationale") or "").strip()
+
+    # 摘要仅取本标的：targets.rationale → holding_honesty；禁止组合 one_sentence_summary
+    if rationale:
+        summary = rationale
+    elif honesty:
+        summary = honesty
+    else:
+        summary = ""
+
+    if not summary and not core and not honesty and not action:
+        return None
 
     return {
         "request_id": request_id,
@@ -110,8 +118,31 @@ def extract_symbol_advice(
         "action_label": _ACTION_LABELS.get(str(action).lower(), str(action)),
         "summary": summary[:280],
         "core_eval": core[:320],
-        "operation_hint": honesty[:320] or summary[:200],
+        "operation_hint": honesty[:320],
     }
+
+
+async def load_executing_t2_summaries_for_symbols(
+    session: AsyncSession,
+    symbols: list[str],
+) -> dict[str, dict[str, Any]]:
+    """执行区标的卡 T2 摘要：默认自动取最近一次成功分析；用户 pin 后阻塞自动同步。"""
+    from apps.copilot.modules.executing.t2_executing_pin import (
+        load_pinned_t2_summaries_for_symbols,
+    )
+
+    latest = await load_latest_t2_summaries_for_symbols(session, symbols)
+    pinned = await load_pinned_t2_summaries_for_symbols(session, symbols)
+    out: dict[str, dict[str, Any]] = {}
+    for sym, advice in latest.items():
+        row = dict(advice)
+        row.setdefault("source", "latest")
+        out[sym] = row
+    for sym, advice in pinned.items():
+        row = dict(advice)
+        row["source"] = "pinned"
+        out[sym] = row
+    return out
 
 
 async def load_latest_t2_summaries_for_symbols(
@@ -161,13 +192,23 @@ async def load_latest_t2_summaries_for_symbols(
     return found
 
 
-def render_executing_t2_banner(sym: str, advice: dict[str, Any] | None) -> str:
-    """执行区标的卡顶端 · T2 分析摘要条。"""
+def render_executing_t2_banner(
+    sym: str,
+    advice: dict[str, Any] | None,
+    *,
+    embedded: bool = False,
+) -> str:
+    """执行区标的卡 · T2 分析摘要条（embedded=折叠卡内嵌，无圆角顶边）。"""
+    shell = (
+        "rounded-none border-x-0 border-t-0 border-b border-gray-200 bg-gray-50/80"
+        if embedded
+        else "rounded-t-xl border border-b-0 border-gray-200 bg-gray-50/80"
+    )
     if not advice:
         return (
-            f"<div class='rounded-t-xl border border-b-0 border-gray-200 bg-gray-50/80 px-5 py-2.5 "
-            f"text-[11px] text-gray-500' data-symbol='{_esc(sym)}'>"
-            f"暂无同步到执行区的 T2 分析 · 在 <a href='/opus' class='underline text-indigo-600'>Opus 分析</a> 回复菜单中选择「同步到执行区」</div>"
+            f"<div class='{shell} px-4 py-2.5 text-[11px] text-gray-500' data-symbol='{_esc(sym)}'>"
+            f"暂无 T2 持仓分析 · 在 <a href='/opus' class='underline text-indigo-600'>Opus 分析</a> 运行深度分析后自动同步；"
+            f"也可在回复菜单「固定为 T2 摘要」手动阻塞自动更新</div>"
         )
 
     ts = advice.get("analyzed_at")
@@ -179,6 +220,9 @@ def render_executing_t2_banner(sym: str, advice: dict[str, Any] | None) -> str:
         else ""
     )
     model = advice.get("model_id") or "—"
+    source = advice.get("source") or ("pinned" if advice.get("pinned") else "latest")
+    is_pinned = source == "pinned"
+    source_label = "已固定 · 自动同步已阻塞" if is_pinned else "最近一次 · 自动同步"
     action_label = _esc(advice.get("action_label") or advice.get("action") or "—")
     summary = _esc(advice.get("summary") or "")
     core = _esc(advice.get("core_eval") or "")
@@ -187,17 +231,38 @@ def render_executing_t2_banner(sym: str, advice: dict[str, Any] | None) -> str:
     core_block = f"<p class='text-xs text-indigo-900/90 mt-1 leading-relaxed'>{core}</p>" if core else ""
     op_block = (
         f"<p class='text-[11px] text-indigo-800/80 mt-1 leading-relaxed'>"
-        f"<span class='text-indigo-500'>操作建议 · </span>{op}</p>"
+        f"<span class='text-indigo-500'>持仓诚实 · </span>{op}</p>"
         if op and op != summary
         else ""
     )
 
+    unpin_btn = ""
+    if is_pinned:
+        unpin_btn = (
+            f"<button type='button' class='text-[10px] text-amber-800 underline hover:text-amber-950 "
+            f"executing-t2-unpin-btn' data-symbol='{_esc(sym)}' "
+            f"title='解除固定后恢复自动同步最近一次 Opus 分析'>解除固定</button>"
+        )
+
+    if embedded:
+        shell = (
+            "rounded-none border-x-0 border-t-0 border-b "
+            f"{'border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50' if is_pinned else 'border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50'}"
+        )
+    else:
+        shell = (
+            "rounded-t-xl border border-b-0 "
+            f"{'border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50' if is_pinned else 'border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50'}"
+        )
     return (
-        f"<div class='rounded-t-xl border border-b-0 border-indigo-200 bg-gradient-to-r from-indigo-50 "
-        f"to-violet-50 px-5 py-3' data-symbol='{_esc(sym)}' data-t2-request='{_esc(rid)}'>"
-        f"<div class='flex flex-wrap items-center justify-between gap-2 text-[10px] text-indigo-600'>"
-        f"<span>执行区 T2 · {_esc(ts_s)} · 模型 {_esc(model)}</span>"
-        f"<span>{audit_link}</span></div>"
+        f"<div id='executing-t2-banner-{_esc(sym)}' "
+        f"class='executing-t2-banner {shell} "
+        f"px-4 py-3' data-symbol='{_esc(sym)}' data-t2-request='{_esc(rid)}' "
+        f"data-t2-source='{_esc(source)}'>"
+        f"<div class='flex flex-wrap items-center justify-between gap-2 text-[10px] "
+        f"{'text-amber-800' if is_pinned else 'text-indigo-600'}'>"
+        f"<span>执行区 T2 · {_esc(source_label)} · {_esc(ts_s)} · 模型 {_esc(model)}</span>"
+        f"<span class='flex items-center gap-2'>{unpin_btn}{audit_link}</span></div>"
         f"<div class='flex flex-wrap items-center gap-2 mt-1'>"
         f"<span class='text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-600 text-white'>"
         f"{action_label}</span>"

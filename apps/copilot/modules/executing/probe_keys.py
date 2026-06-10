@@ -23,5 +23,11 @@ OPTIONAL_EVENT_PROBE_KEYS: frozenset[str] = frozenset(
     {"block_trade_discount", "etf_redemption_impact"}
 )
 
-L3_KEYS: tuple[str, ...] = ()
+L3_KEYS: tuple[str, ...] = ("fii_twse_cloud",)
 L4_KEYS: tuple[str, ...] = PROBE_KEYS
+
+# JL4 持仓依赖：仅 #1 须 user_positions.opened_at（峰值窗）；其余 #2~#11 待建仓即可采集跟踪
+JL4_POSITION_DEPENDENT_KEYS: frozenset[str] = frozenset({"qmt_atr_trailing"})
+JL4_POSITION_INDEPENDENT_KEYS: tuple[str, ...] = tuple(
+    k for k in PROBE_KEYS if k not in JL4_POSITION_DEPENDENT_KEYS
+)

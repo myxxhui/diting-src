@@ -185,7 +185,7 @@ async def hide_symbol_ui(
     *,
     name: str = "",
 ) -> Optional[CampaignSymbol]:
-    """前端移除：立即隐藏，后端保留 7 天。"""
+    """前端移除：即时隐藏，后端保留 7 天。"""
     sym = symbol.zfill(6)[-6:]
     row = await get_funnel_symbol(session, sym)
     if row is None:

@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
@@ -87,12 +89,36 @@ def test_probe_labels_chinese_short():
     assert len(PROBE_LABELS) == 25
 
 
-def test_layer_b_prerequisite_banner_no_mock():
-    from apps.copilot.modules.executing.executing_render import render_layer_b_prerequisite_banner
+def test_layer_b_collect_gate_banner_no_mock():
+    from apps.copilot.modules.executing.executing_render import render_layer_b_collect_gate_banner
 
-    html = render_layer_b_prerequisite_banner()
-    assert "建仓时间" in html
+    html = render_layer_b_collect_gate_banner()
+    assert "数据获取列表" in html
     assert "不展示" in html
+
+
+def test_position_lifecycle_pending_vs_holding():
+    from apps.copilot.modules.executing.position_lifecycle import (
+        LIFECYCLE_HOLDING,
+        LIFECYCLE_PENDING_BUILD,
+        filter_l4_for_lifecycle,
+        resolve_lifecycle_status,
+    )
+
+    assert resolve_lifecycle_status({}) == LIFECYCLE_PENDING_BUILD
+    assert (
+        resolve_lifecycle_status(
+            {"opened_at": "2026-04-10", "cost_price": 50.0, "quantity": 100}
+        )
+        == LIFECYCLE_HOLDING
+    )
+    l4 = {
+        "qmt_atr_trailing": {"value": 3.0},
+        "smart_money_flow": {"value": 0.5},
+    }
+    filtered = filter_l4_for_lifecycle(l4, LIFECYCLE_PENDING_BUILD)
+    assert "qmt_atr_trailing" not in filtered
+    assert "smart_money_flow" in filtered
 
 
 def test_render_qmt_atr_trailing_shows_audit_fields():
@@ -437,6 +463,38 @@ async def test_load_cached_stock_signal(db_ready):
 
 
 @pytest.mark.asyncio
+async def test_executing_detail_pending_build_shows_independent_jl4(db_ready):
+    from apps.copilot.modules.executing.storage import upsert_t1_snapshot
+    from apps.copilot.modules.executing.universe import enroll_executing_collect
+
+    async with AsyncSessionLocal() as session:
+        await enroll_executing_collect(session, "300502")
+        await upsert_t1_snapshot(
+            session,
+            "300502",
+            "smart_money_flow",
+            {"value": 0.5, "fact_statement": "主力净流入", "source": "unit"},
+        )
+        await upsert_t1_snapshot(
+            session,
+            "300502",
+            "qmt_atr_trailing",
+            {"value": 9.9, "fact_statement": "不应展示", "source": "unit"},
+        )
+        await session.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/api/executing/300502/detail")
+    assert r.status_code == 200
+    assert "待建仓" in r.text
+    assert "待建仓预监控" in r.text
+    assert "主力净流入" in r.text or "smart_money_flow" in r.text
+    assert "9.9" not in r.text
+    assert "ATR 动态止盈" in r.text
+
+
+@pytest.mark.asyncio
 async def test_executing_detail_uses_snapshot_cache(db_ready):
     from apps.copilot.modules.executing.storage import upsert_t1_snapshot
     from apps.copilot.modules.executing.universe import upsert_executing_collect
@@ -471,3 +529,61 @@ async def test_executing_detail_uses_snapshot_cache(db_ready):
     assert "executing-detail-601138" in r.text
     assert "PG 快照缓存" in r.text
     assert "smart_money_flow" in r.text or "主力净流入" in r.text
+
+
+def test_fetch_mark_price_prefers_quote_then_draft():
+    from apps.copilot.modules.executing.positions import fetch_mark_price
+
+    class FakeRedis:
+        def __init__(self, data: dict[str, str]):
+            self._data = data
+
+        def get(self, key: str):
+            return self._data.get(key)
+
+    quote_redis = FakeRedis(
+        {
+            "executing:quote:300502": json.dumps(
+                {"close": 770.5, "is_stale": False, "collected_at": "2026-06-10 14:00:00"}
+            )
+        }
+    )
+    price, stale, as_of = fetch_mark_price("300502", quote_redis)
+    assert price == 770.5
+    assert stale is False
+    assert as_of == "2026-06-10 14:00:00"
+
+    draft_redis = FakeRedis(
+        {
+            "executing:draft_bar:300502": json.dumps(
+                {
+                    "close": 775.2,
+                    "trade_date": "2026-06-10",
+                    "collected_at": "2026-06-10 13:45:00",
+                    "mode": "intraday_overwrite",
+                }
+            )
+        }
+    )
+    price2, stale2, as_of2 = fetch_mark_price("300502", draft_redis)
+    assert price2 == 775.2
+    assert stale2 is False
+    assert "13:45" in (as_of2 or "")
+
+
+def test_overlay_intraday_qmt_price_sets_tick_time():
+    from apps.copilot.modules.executing.positions import overlay_intraday_qmt_price
+
+    node = {
+        "raw_metrics": {"current_price": 700.0, "peak_price": 800.0},
+        "source": "PG EOD",
+    }
+    out = overlay_intraday_qmt_price(
+        node,
+        mark_price=769.75,
+        mark_as_of="2026-06-10 13:40:04",
+        stale=False,
+    )
+    assert out is not None
+    assert out["raw_metrics"]["current_price"] == 769.75
+    assert out["raw_metrics"]["last_tick_time"] == "2026-06-10 13:40:04"

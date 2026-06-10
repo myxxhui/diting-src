@@ -21,6 +21,7 @@ from apps.copilot.db.models import (
 )
 from apps.copilot.modules.executing.collectors.daily_bars import DailyBarRow
 from apps.copilot.modules.executing.probe_keys import PROBE_KEYS
+from apps.copilot.modules.executing.profile import load_profile, profile_l3_keys
 from apps.copilot.modules.executing.profile import load_profile
 
 
@@ -173,6 +174,7 @@ async def save_t0_batch(
     n = 0
     prof = load_profile(symbol)
     probes_cfg = prof.get("probes") or {}
+    l3_cfg = prof.get("l3_probes") or {}
     now = utc_now_naive()
 
     for it in items:
@@ -193,7 +195,7 @@ async def save_t0_batch(
             )
         )
         n += 1
-        cfg = probes_cfg.get(key) or {}
+        cfg = probes_cfg.get(key) or l3_cfg.get(key) or {}
         stale_days = int(cfg.get("stale_days", 1))
         ps = await session.get(ExecutingT0ProbeState, {"symbol": symbol, "probe_key": key})
         if ps is None:
@@ -213,9 +215,11 @@ async def save_t0_batch(
 
 
 async def latest_raw_map(session: AsyncSession, symbol: str) -> dict[str, dict[str, Any]]:
-    """每 probe 取最新一条 raw。"""
+    """每 probe 取最新一条 raw（L4 + Profile JL3）。"""
     out: dict[str, dict[str, Any]] = {}
-    for key in PROBE_KEYS:
+    prof = load_profile(symbol)
+    keys = list(PROBE_KEYS) + list(profile_l3_keys(prof))
+    for key in keys:
         row = (
             await session.scalars(
                 select(ExecutingT0Raw)
@@ -296,6 +300,46 @@ async def load_all_t1_snapshots(
             if row.source and not node.get("source"):
                 node["source"] = row.source
             out[str(row.probe_key)] = node
+    return out
+
+
+async def load_fii_cloud_lo_history(
+    session: AsyncSession,
+    symbol: str,
+    *,
+    limit: int = 6,
+) -> list[dict[str, Any]]:
+    """从 T0 落库回溯云端推导下限序列（月频 Cron 逐月累积）。"""
+    from sqlalchemy import select
+
+    sym = symbol.zfill(6)[-6:]
+    rows = (
+        await session.scalars(
+            select(ExecutingT0Raw)
+            .where(
+                ExecutingT0Raw.symbol == sym,
+                ExecutingT0Raw.probe_key == "fii_twse_cloud",
+            )
+            .order_by(ExecutingT0Raw.collected_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[int, int]] = set()
+    for row in reversed(rows):
+        wrap = row.payload_json if isinstance(row.payload_json, dict) else {}
+        if not wrap.get("ok"):
+            continue
+        p = wrap.get("payload") or {}
+        y, m = p.get("report_year"), p.get("report_month")
+        lo = p.get("cloud_revenue_lower_ntd")
+        if y is None or m is None or lo is None:
+            continue
+        key = (int(y), int(m))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"year": key[0], "month": key[1], "cloud_revenue_lower_ntd": int(lo)})
     return out
 
 

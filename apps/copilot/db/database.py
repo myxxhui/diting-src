@@ -105,3 +105,6 @@ async def init_db() -> None:
     await migrate_step42(engine)
     await migrate_step43(engine)
     await migrate_step44(engine)
+    from apps.copilot.db.migrate_step45 import migrate_step45
+
+    await migrate_step45(engine)

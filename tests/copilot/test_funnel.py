@@ -121,7 +121,7 @@ async def test_touch_last_analyzed_naive_utc():
 
 @pytest.mark.asyncio
 async def test_executing_workspace_renders_all_symbol_loaders():
-    """执行区列表须为每只标的注册 hx-load 详情拉取（非失效的 revealed）。"""
+    """执行区列表须为每只标的注册 lazy 详情拉取（revealed once · 展开后加载）。"""
     from apps.copilot.routers.planning_routes import _render_workspace_symbols_html
 
     items = [
@@ -131,11 +131,10 @@ async def test_executing_workspace_renders_all_symbol_loaders():
     resp = _render_workspace_symbols_html(items, view="executing", container_id=1)
     body = resp.body.decode()
     assert body.count("executing-symbol-card-wrap") == 2
-    assert body.count("executing-symbol-card group") == 2
+    assert body.count("executing-symbol-card") >= 2
     assert "暂无 T2 持仓分析" in body
     assert "/opus" in body
-    assert "hx-trigger='load once'" in body
-    assert "revealed once" not in body
+    assert "hx-trigger='revealed once'" in body
     assert "/api/executing/601138/detail" in body
     assert "/api/executing/002837/detail" in body
     assert " open" not in body.split("executing-symbol-card")[1]

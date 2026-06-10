@@ -19,12 +19,37 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 logger = logging.getLogger("radar_t0.job")
 
 
-async def _main_async(job_id: str | None, *, status: bool, force: bool) -> int:
+async def _main_async(
+    job_id: str | None,
+    *,
+    status: bool,
+    force: bool,
+    enqueue: bool,
+) -> int:
     from apps.copilot.db.database import AsyncSessionLocal, init_db
     from apps.copilot.modules.radar.t0.jobs.runner import run_job
     from apps.copilot.modules.radar.t0.jobs.status import build_pipeline_status
 
     await init_db()
+
+    if enqueue:
+        if not job_id:
+            logger.error("缺少 job_id")
+            return 2
+        from apps.copilot.services.queue.enqueue import close_arq_pool, enqueue_radar_job
+
+        try:
+            arq_job_id = await enqueue_radar_job(job_id, source="cron")
+            print(
+                json.dumps(
+                    {"job_id": job_id, "status": "enqueued", "arq_job_id": arq_job_id},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        finally:
+            await close_arq_pool()
 
     if status:
         async with AsyncSessionLocal() as session:
@@ -61,8 +86,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("job_id", nargs="?", help="§2.8.2 job_id，如 bars-reconcile-daily")
     parser.add_argument("--status", action="store_true", help="输出 radar-pipeline-status")
     parser.add_argument("--force", action="store_true", help="bootstrap 强制补跑")
+    parser.add_argument(
+        "--enqueue",
+        action="store_true",
+        help="仅入队 ARQ（CronJob 轻量模式 · [Ref: 29_ §2]）",
+    )
     args = parser.parse_args(argv)
-    return asyncio.run(_main_async(args.job_id, status=args.status, force=args.force))
+    return asyncio.run(
+        _main_async(
+            args.job_id,
+            status=args.status,
+            force=args.force,
+            enqueue=args.enqueue,
+        )
+    )
 
 
 if __name__ == "__main__":

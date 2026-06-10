@@ -257,17 +257,34 @@ async def promote_campaign_to_executing(
     symbol: str | None = None,
     human_confirmed: bool,
     redis_client: Any = None,
+    lifecycle_mode: str | None = None,
+    opened_at: str | None = None,
+    cost_price: float | None = None,
+    quantity: float | None = None,
+    position_pct: float | None = None,
 ) -> dict[str, Any]:
     """规划区人工确认晋级执行：**把标的**从 planning 推进到 executing（advisory）。
 
     标的级漏斗：晋级作用于单只标的的 funnel_stage，而非整个 campaign。
     未指定 symbol 时晋级该容器下全部 planning/roadmap 标的（批量）。
     """
+    from apps.copilot.modules.executing.position_lifecycle import (
+        LIFECYCLE_HOLDING,
+        LIFECYCLE_PENDING_BUILD,
+        normalize_lifecycle_mode,
+        validate_holding_fields,
+    )
+    from apps.copilot.modules.executing.symbol_base import save_symbol_base_data
+
     if not human_confirmed:
         raise ValueError("human_confirmation_required")
     if redis_client is None:
         redis_client = wait_for_sync_redis()
     await refresh_falsify_verdicts(session, campaign_id, redis_client)
+
+    mode = normalize_lifecycle_mode(lifecycle_mode)
+    if symbol is None and mode == LIFECYCLE_HOLDING:
+        raise ValueError("holding_requires_single_symbol")
 
     promoted: list[str] = []
     if symbol:
@@ -276,7 +293,25 @@ async def promote_campaign_to_executing(
         if row is None:
             raise ValueError("symbol not found in funnel")
         promoted.append(sym)
+        if mode == LIFECYCLE_HOLDING:
+            payload = {
+                "symbol": sym,
+                "name": row.name or sym,
+                "opened_at": opened_at,
+                "cost_price": cost_price,
+                "quantity": quantity,
+                "position_pct": position_pct,
+                "source": "ui",
+            }
+            validate_holding_fields(payload)
+            await save_symbol_base_data(
+                session,
+                payload,
+                enabled=True,
+                funnel_stage="executing",
+            )
     else:
+        mode = LIFECYCLE_PENDING_BUILD
         rows = await list_funnel_symbols(
             session, stages=("roadmap", "planning")
         )
@@ -291,6 +326,7 @@ async def promote_campaign_to_executing(
         "campaign_id": campaign_id,
         "promoted_symbols": promoted,
         "funnel_stage": "executing",
+        "lifecycle_mode": mode,
         "readiness": readiness,
         "human_confirmation_required": True,
         "execute_mode": "advisory",

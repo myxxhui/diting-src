@@ -45,6 +45,10 @@ copilot = [
     "pdfplumber>=0.11",
     "feedparser>=6.0",
     "jieba>=0.42",
+    "arq>=0.26",
+    "opensearch-py>=2.4",
+    "pytesseract>=0.3",
+    "playwright>=1.40",
 ]
 dev = [
     "pytest>=7.0",

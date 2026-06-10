@@ -281,6 +281,12 @@ async def run_job(
         result = await run_etf_redemption_morning(session, symbols, redis)
         return result
 
+    if job_id == "l3-fii-twse-monthly":
+        from apps.copilot.modules.executing.orchestrator import run_fii_twse_cloud_monthly
+
+        result = await run_fii_twse_cloud_monthly(session, symbols)
+        return result
+
     if job_id in ("l4-micro-eod", "l3-news-daily", "collect-once"):
         out = []
         for sym in symbols:
