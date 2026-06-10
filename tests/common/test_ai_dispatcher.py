@@ -12,6 +12,8 @@ from apps.common.ai_dispatcher import (
     BudgetExceededError,
     Route,
     anthropic_read_timeout_sec,
+    anthropic_use_streaming,
+    is_transient_anthropic_error,
 )
 
 
@@ -31,7 +33,30 @@ MESSAGES = [{"role": "user", "content": "只回复 OK"}]
 # ---------------------------------------------------------------------------
 
 def test_anthropic_read_timeout_t2_16k():
-    assert anthropic_read_timeout_sec(scene="radar_assess", max_tokens=16_384) == 600.0
+    assert anthropic_read_timeout_sec(scene="radar_assess", max_tokens=16_384) == 900.0
+
+
+def test_anthropic_use_streaming_t2_large():
+    assert anthropic_use_streaming(scene="radar_assess", max_tokens=4096) is True
+    assert anthropic_use_streaming(scene="radar_assess", max_tokens=2048) is False
+    assert anthropic_use_streaming(scene="critic", max_tokens=8192) is False
+
+
+def test_anthropic_use_streaming_disabled_via_proxy(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_HTTPS_PROXY", "http://127.0.0.1:3128")
+    assert anthropic_use_streaming(scene="radar_assess", max_tokens=16_384) is False
+    monkeypatch.setenv("ANTHROPIC_FORCE_STREAMING", "1")
+    assert anthropic_use_streaming(scene="radar_assess", max_tokens=16_384) is True
+
+
+def test_is_transient_anthropic_error_chunked():
+    assert is_transient_anthropic_error(
+        RuntimeError(
+            "peer closed connection without sending complete message body "
+            "(incomplete chunked read)"
+        )
+    )
+    assert not is_transient_anthropic_error(RuntimeError("401 invalid x-api-key"))
 
 
 def test_call_mock_no_key():

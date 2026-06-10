@@ -56,12 +56,48 @@ def anthropic_omit_temperature(model: str) -> bool:
 
 
 def anthropic_read_timeout_sec(*, scene: Scene, max_tokens: int) -> float:
-    """T2 大 payload 读超时放宽（16k 输出约需 3～5 分钟）。"""
+    """T2 大 payload 读超时放宽（16k 输出 + 流式仍须留足余量）。"""
+    if scene == "radar_assess" and max_tokens >= 16_384:
+        return 900.0
     if scene == "radar_assess" and max_tokens >= 8192:
         return 600.0
     if scene == "radar_assess" and max_tokens >= 4096:
         return 300.0
     return 120.0
+
+
+def anthropic_use_streaming(*, scene: Scene, max_tokens: int) -> bool:
+    """长输出走流式；经 HTTP 代理时默认关闭（3proxy 对 SSE chunked 易 incomplete chunked read）。"""
+    if anthropic_https_proxy_url():
+        return os.getenv("ANTHROPIC_FORCE_STREAMING", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+    return scene == "radar_assess" and max_tokens >= 4096
+
+
+def is_transient_anthropic_error(exc: BaseException) -> bool:
+    """经 HTTPS 代理的长 Opus 请求常见瞬态断连（可重试或降级 non-stream）。"""
+    msg = str(exc).lower()
+    needles = (
+        "timed out",
+        "timeout",
+        "interrupted",
+        "connection reset",
+        "connection error",
+        "temporarily unavailable",
+        "peer closed",
+        "incomplete chunked",
+        "chunked read",
+        "server disconnected",
+        "without sending a response",
+        "remote protocol error",
+        "broken pipe",
+        "connection aborted",
+        "read error",
+    )
+    return any(n in msg for n in needles)
 
 
 Scene = Literal[
@@ -158,43 +194,9 @@ class AIDispatcher:
         self._daily_spent: float = 0.0
         self._daily_date: str = ""
         self._anthropic_client: Any = None
-
+        self._anthropic_http_client: Any = None
         if self._anthropic_key:
-            try:
-                import anthropic  # noqa: PLC0415
-
-                http_client: Any = None
-                proxy = anthropic_https_proxy_url()
-                read_timeout = float(
-                    os.getenv(
-                        "ANTHROPIC_READ_TIMEOUT_SEC",
-                        str(
-                            anthropic_read_timeout_sec(
-                                scene="radar_assess", max_tokens=32_768
-                            )
-                        ),
-                    )
-                )
-                client_kw: dict[str, Any] = {
-                    "api_key": self._anthropic_key,
-                    "base_url": self._anthropic_base,
-                    "timeout": read_timeout,
-                }
-                if proxy:
-                    import httpx  # noqa: PLC0415
-
-                    http_client = httpx.Client(
-                        proxy=proxy,
-                        timeout=httpx.Timeout(read_timeout, connect=30.0),
-                    )
-                    client_kw["http_client"] = http_client
-                    logger.info(
-                        "[AIDispatcher] Anthropic 客户端使用 ANTHROPIC_HTTPS_PROXY · read_timeout=%ss",
-                        int(read_timeout),
-                    )
-                self._anthropic_client = anthropic.Anthropic(**client_kw)
-            except ImportError:
-                logger.warning("anthropic SDK 未安装；remote 路由将不可用（pip install anthropic）")
+            self._init_anthropic_client()
 
     @classmethod
     def default(cls) -> "AIDispatcher":
@@ -202,6 +204,138 @@ class AIDispatcher:
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
+
+    def _default_read_timeout_sec(self) -> float:
+        return float(
+            os.getenv(
+                "ANTHROPIC_READ_TIMEOUT_SEC",
+                str(
+                    anthropic_read_timeout_sec(
+                        scene="radar_assess", max_tokens=32_768
+                    )
+                ),
+            )
+        )
+
+    def _init_anthropic_client(self) -> None:
+        if not self._anthropic_key:
+            return
+        try:
+            import anthropic  # noqa: PLC0415
+
+            read_timeout = self._default_read_timeout_sec()
+            client_kw: dict[str, Any] = {
+                "api_key": self._anthropic_key,
+                "base_url": self._anthropic_base,
+                "timeout": read_timeout,
+            }
+            proxy = anthropic_https_proxy_url()
+            if proxy:
+                import httpx  # noqa: PLC0415
+
+                self._anthropic_http_client = httpx.Client(
+                    proxy=proxy,
+                    timeout=httpx.Timeout(read_timeout, connect=30.0),
+                    http2=False,
+                )
+                client_kw["http_client"] = self._anthropic_http_client
+                logger.info(
+                    "[AIDispatcher] Anthropic 客户端使用 ANTHROPIC_HTTPS_PROXY · read_timeout=%ss · http2=off",
+                    int(read_timeout),
+                )
+            self._anthropic_client = anthropic.Anthropic(**client_kw)
+        except ImportError:
+            logger.warning("anthropic SDK 未安装；remote 路由将不可用（pip install anthropic）")
+
+    def _reset_anthropic_transport(self) -> None:
+        """瞬态断连后丢弃 httpx 连接池，下次调用重建。"""
+        self._anthropic_client = None
+        if self._anthropic_http_client is not None:
+            try:
+                self._anthropic_http_client.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._anthropic_http_client = None
+        self._init_anthropic_client()
+
+    def _remote_stream_once(
+        self,
+        create_kw: dict[str, Any],
+        *,
+        read_timeout: float,
+        model: str,
+    ) -> dict[str, Any]:
+        if not self._anthropic_client:
+            raise RuntimeError("Anthropic client unavailable")
+        text_parts: list[str] = []
+        with self._anthropic_client.messages.stream(
+            **create_kw, timeout=read_timeout
+        ) as stream:
+            for chunk in stream.text_stream:
+                text_parts.append(chunk)
+            final = stream.get_final_message()
+        text = "".join(text_parts)
+        raw = final.model_dump() if hasattr(final, "model_dump") else {}
+        if raw and "stop_reason" not in raw and hasattr(final, "stop_reason"):
+            raw["stop_reason"] = final.stop_reason
+        raw["_streaming"] = True
+        usage = final.usage
+        return {
+            "text": text,
+            "model": model,
+            "tokens_in": usage.input_tokens,
+            "tokens_out": usage.output_tokens,
+            "raw": raw,
+        }
+
+    def _make_ephemeral_anthropic_client(self, read_timeout: float) -> tuple[Any, Any | None]:
+        """T2 长连接：每次独立 httpx 连接，避免单例连接池复用半开 CONNECT 隧道。"""
+        import anthropic  # noqa: PLC0415
+
+        client_kw: dict[str, Any] = {
+            "api_key": self._anthropic_key,
+            "base_url": self._anthropic_base,
+            "timeout": read_timeout,
+        }
+        http_client: Any = None
+        proxy = anthropic_https_proxy_url()
+        if proxy:
+            import httpx  # noqa: PLC0415
+
+            http_client = httpx.Client(
+                proxy=proxy,
+                timeout=httpx.Timeout(read_timeout, connect=30.0),
+                http2=False,
+            )
+            client_kw["http_client"] = http_client
+        return anthropic.Anthropic(**client_kw), http_client
+
+    def _remote_create_once(
+        self,
+        create_kw: dict[str, Any],
+        *,
+        read_timeout: float,
+        model: str,
+        client: Any | None = None,
+    ) -> dict[str, Any]:
+        anthropic_client = client or self._anthropic_client
+        if not anthropic_client:
+            raise RuntimeError("Anthropic client unavailable")
+        resp = anthropic_client.messages.create(
+            **create_kw, timeout=read_timeout
+        )
+        text = resp.content[0].text if resp.content else ""
+        raw = resp.model_dump() if hasattr(resp, "model_dump") else {}
+        if raw and "stop_reason" not in raw and hasattr(resp, "stop_reason"):
+            raw["stop_reason"] = resp.stop_reason
+        raw["_streaming"] = False
+        return {
+            "text": text,
+            "model": model,
+            "tokens_in": resp.usage.input_tokens,
+            "tokens_out": resp.usage.output_tokens,
+            "raw": raw,
+        }
 
     # -------------------------------------------------------------------------
     # 公共 API
@@ -321,6 +455,22 @@ class AIDispatcher:
     def _record_spend(self, cost: float) -> None:
         self._daily_spent += cost
 
+    @staticmethod
+    def _format_deepseek_error(exc: BaseException) -> str:
+        """将 DeepSeek HTTP/API 异常转为用户可读中文（勿一律写成「未配置 key」）。"""
+        msg = str(exc)
+        low = msg.lower()
+        if "402" in msg or "insufficient balance" in low or "payment required" in low:
+            return "DeepSeek 账户余额不足（402 Payment Required），请登录 platform.deepseek.com 充值后重试"
+        if "401" in msg or "invalid api key" in low or "authentication" in low:
+            return "DeepSeek API Key 无效或已过期（401），请检查 DEEPSEEK_API_KEY"
+        if "429" in msg or "rate limit" in low:
+            return "DeepSeek 请求过于频繁（429），请稍后重试"
+        return f"DeepSeek API 调用失败：{msg[:240]}"
+
+    def _deepseek_no_mock_scenes(self) -> frozenset[Scene]:
+        return frozenset({"radar_distill", "radar_assess", "radar_chat"})
+
     def _call_deepseek(
         self,
         messages: list[dict[str, str]],
@@ -332,14 +482,15 @@ class AIDispatcher:
     ) -> dict:
         key = os.getenv("DEEPSEEK_API_KEY", "").strip()
         if not key:
-            if scene == "radar_distill":
-                raise RuntimeError("未配置 DEEPSEEK_API_KEY；T1 DeepSeek 压缩不可用")
+            if scene in self._deepseek_no_mock_scenes():
+                raise RuntimeError("未配置 DEEPSEEK_API_KEY；DeepSeek 路由不可用")
             return self._call_mock(messages)
 
         base = (os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").rstrip("/")
-        model = (model_override or "").strip()
-        if model.startswith("deepseek:"):
-            model = model.split(":", 1)[1]
+        from apps.copilot.modules.radar.deepseek_models import resolve_deepseek_api
+
+        api_model, enable_thinking = resolve_deepseek_api(model_override)
+        model = api_model
         if not model:
             model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip() or "deepseek-chat"
 
@@ -347,12 +498,16 @@ class AIDispatcher:
             import httpx  # noqa: PLC0415
 
             client_kw: dict[str, Any] = {"timeout": httpx.Timeout(120.0, connect=30.0)}
-            payload = {
+            payload: dict[str, Any] = {
                 "model": model,
                 "messages": messages,
                 "max_tokens": max_tokens,
-                "temperature": temperature,
             }
+            if enable_thinking:
+                payload["thinking"] = {"type": "enabled"}
+                payload["reasoning_effort"] = "high"
+            else:
+                payload["temperature"] = temperature
             with httpx.Client(**client_kw) as client:
                 r = client.post(
                     f"{base}/v1/chat/completions",
@@ -365,7 +520,11 @@ class AIDispatcher:
                 r.raise_for_status()
                 data = r.json()
             choice = (data.get("choices") or [{}])[0]
-            text = (choice.get("message") or {}).get("content") or ""
+            msg = choice.get("message") or {}
+            text = (msg.get("content") or "").strip()
+            reasoning = (msg.get("reasoning_content") or "").strip()
+            if not text and reasoning:
+                text = reasoning
             usage = data.get("usage") or {}
             return {
                 "text": text,
@@ -376,8 +535,8 @@ class AIDispatcher:
             }
         except Exception as exc:
             logger.warning("[AIDispatcher] DeepSeek 调用失败: %s", exc)
-            if scene == "radar_distill":
-                raise RuntimeError(f"DeepSeek API 不可达：{exc}") from exc
+            if scene in self._deepseek_no_mock_scenes():
+                raise RuntimeError(self._format_deepseek_error(exc)) from exc
             return self._call_mock(messages)
 
     def _call_remote(
@@ -415,21 +574,51 @@ class AIDispatcher:
             create_kw["system"] = system
         if not anthropic_omit_temperature(model):
             create_kw["temperature"] = temperature
+        read_timeout = anthropic_read_timeout_sec(scene=scene, max_tokens=max_tokens)
+        use_stream = anthropic_use_streaming(scene=scene, max_tokens=max_tokens)
+        use_ephemeral = scene == "radar_assess" and bool(anthropic_https_proxy_url())
         try:
-            resp = self._anthropic_client.messages.create(**create_kw)
-            text = resp.content[0].text if resp.content else ""
-            raw: dict[str, Any] = (
-                resp.model_dump() if hasattr(resp, "model_dump") else {}
-            )
-            if raw and "stop_reason" not in raw and hasattr(resp, "stop_reason"):
-                raw["stop_reason"] = resp.stop_reason
-            return {
-                "text": text,
-                "model": model,
-                "tokens_in": resp.usage.input_tokens,
-                "tokens_out": resp.usage.output_tokens,
-                "raw": raw,
-            }
+            if use_stream and not use_ephemeral:
+                return self._remote_stream_once(
+                    create_kw, read_timeout=read_timeout, model=model
+                )
+
+            def _create_with_client(client: Any | None) -> dict[str, Any]:
+                return self._remote_create_once(
+                    create_kw,
+                    read_timeout=read_timeout,
+                    model=model,
+                    client=client,
+                )
+
+            if use_ephemeral:
+                last_exc: Exception | None = None
+                for attempt in range(2):
+                    ep_client, ep_http = self._make_ephemeral_anthropic_client(read_timeout)
+                    try:
+                        out = _create_with_client(ep_client)
+                        out.setdefault("raw", {})["_ephemeral_client"] = True
+                        return out
+                    except Exception as exc:
+                        last_exc = exc
+                        if attempt == 0 and is_transient_anthropic_error(exc):
+                            logger.warning(
+                                "[AIDispatcher] T2 经代理 non-stream 瞬态失败，换新连接重试: %s",
+                                exc,
+                            )
+                            time.sleep(2.0)
+                            continue
+                        raise
+                    finally:
+                        if ep_http is not None:
+                            try:
+                                ep_http.close()
+                            except Exception:  # noqa: BLE001
+                                pass
+                if last_exc:
+                    raise last_exc
+
+            return _create_with_client(None)
         except Exception as exc:
             logger.warning("[AIDispatcher] remote 调用失败: %s", exc)
             if scene == "radar_assess":

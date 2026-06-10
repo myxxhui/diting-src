@@ -1,7 +1,11 @@
 """T2 持仓分析 HTML 渲染单测。"""
 from __future__ import annotations
 
-from apps.copilot.modules.executing.t2_analyst_render import render_t2_assistant_card
+from apps.copilot.modules.executing.t2_analyst_render import (
+    extract_t2_prose_text,
+    render_t2_assistant_card,
+    render_t2_chat_prose,
+)
 
 
 def _sample_payload_ok() -> dict:
@@ -80,6 +84,22 @@ def _sample_payload_ok() -> dict:
     }
 
 
+def test_render_chat_prose_simple():
+    html = render_t2_chat_prose(_sample_payload_ok(), {"status": "ok"})
+    assert "t2-analyst-result" in html
+    assert "英维克优先减仓" in html
+    assert "【基本面】" in html
+    assert "组合结论" not in html
+    assert "JL1 宏观" not in html
+    assert "<details" not in html
+
+
+def test_extract_t2_prose_text():
+    prose = extract_t2_prose_text(_sample_payload_ok())
+    assert "英维克优先减仓" in prose
+    assert "【逐标的】" in prose
+
+
 def test_render_success_three_symbols():
     html = render_t2_assistant_card(_sample_payload_ok(), {"status": "ok", "request_id": "abc123"})
     assert "组合结论" in html
@@ -100,6 +120,18 @@ def test_render_success_three_symbols():
     assert "（无数据）" in html
     assert "<details" in html
     assert "点击展开" in html
+
+
+def test_render_error_prose():
+    payload = {
+        "preview_only": True,
+        "opus_error": "Connection error",
+        "symbols": ["601138.SH"],
+    }
+    html = render_t2_chat_prose(payload, {"status": "error", "error": "Connection error"})
+    assert "分析未完成" in html
+    assert "Connection error" in html
+    assert "JSON" not in html
 
 
 def test_render_error():

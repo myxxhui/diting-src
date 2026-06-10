@@ -1,227 +1,118 @@
-{# 执行中工作区 · T2 持仓分析（Opus） [Ref: 28_ §5] #}
-<div id="t2-analyst-panel" class="border border-violet-200 rounded-xl p-4 mb-4 bg-violet-50/50">
-  <div class="flex flex-wrap items-start justify-between gap-2 mb-3">
-    <div>
-      <h3 class="font-semibold text-violet-900">T2 持仓分析工作台</h3>
-      <p class="text-xs text-violet-700 mt-0.5">组装 envelope → 调用 Opus 审计 · 全程 advisory</p>
-      {% if token_limits %}
-      <p class="text-[10px] text-violet-600/80 mt-1">
-        Token 上限：输入 ≤ {{ "{:,}".format(token_limits.max_input_chars) }} 字符 ·
-        输出 ≤ {{ "{:,}".format(token_limits.max_output_tokens) }} tokens
-        （绝对上限 {{ "{:,}".format(token_limits.absolute_max_output_tokens) }}）
-      </p>
-      {% endif %}
-    </div>
-    <div class="flex items-center gap-2">
-      <span class="text-[11px] px-2 py-1 rounded bg-violet-100 text-violet-800">JL1–3 checklist · JL4 本地 T1</span>
-      <a href="/audit#t2-analyst-audit" class="text-[11px] px-2 py-1 rounded border border-violet-200 text-violet-700 hover:bg-violet-100 no-underline">审计记录</a>
+{# Opus 持仓 T2 分析 · ChatGPT 式布局 [Ref: 28_ §5 · /opus] #}
+<div id="t2-analyst-panel" class="opus-chat-shell w-full h-full"
+     {% if token_limits %}
+     data-max-input-chars="{{ token_limits.max_input_chars }}"
+     data-max-output-tokens="{{ token_limits.max_output_tokens }}"
+     {% endif %}>
+
+  <aside class="opus-sidebar" id="t2-analyst-sidebar" aria-label="分析话题">
+    <div class="opus-sidebar-head">
+      <span class="opus-sidebar-title text-xs font-semibold text-gray-600">话题</span>
       <button type="button" id="t2-analyst-new-btn"
-              class="text-[11px] px-2 py-1 rounded border border-violet-200 text-violet-700 hover:bg-violet-100">
-        新对话
-      </button>
+              class="text-[11px] px-2 py-1 rounded-lg bg-violet-600 text-white hover:bg-violet-700 border-0"
+              title="新话题">＋ 新</button>
     </div>
-  </div>
+    <div class="opus-sidebar-list" id="t2-analyst-session-list"></div>
+  </aside>
 
-  <form id="t2-analyst-form"
-        hx-post="/api/executing/analyst/chat"
-        hx-target="#t2-analyst-messages"
-        hx-swap="innerHTML"
-        hx-indicator="#t2-analyst-spinner"
-        class="space-y-3 text-sm">
-    <input type="hidden" name="session_id" id="t2-analyst-session-id" value="">
-
-    <fieldset>
-      <legend class="text-xs font-medium text-gray-600 mb-2">选择标的（可多选 · 基础数据来自持仓库）</legend>
-      {% if symbols|default([]) %}
-      <div class="flex flex-wrap gap-2">
-        {% for s in symbols %}
-        <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white hover:border-violet-300 cursor-pointer has-[:checked]:border-violet-400 has-[:checked]:bg-violet-50/60">
-          <input type="checkbox" name="symbols" value="{{ s.symbol }}" class="rounded text-violet-600" checked>
-          <span class="font-medium text-gray-900">{{ s.symbol }}</span>
-          <span class="text-gray-500">{{ s.name or '' }}</span>
-          <span class="text-xs text-gray-500">
-            仓{{ s.position_pct or '—' }}% · 成本{{ s.cost_price or '—' }} · 现价{{ s.mark_price or '—' }}
-            · {{ s.quantity or 0 }}股
-            {% if s.unrealized_pnl_pct is not none %} · 浮盈{{ s.unrealized_pnl_pct }}%{% endif %}
-          </span>
-        </label>
-        {% endfor %}
-      </div>
-      {% else %}
-      <p class="text-amber-700 text-xs">暂无执行区标的 · 请先从规划区晋级或配置 executing_collect_symbols</p>
-      {% endif %}
-    </fieldset>
-
-    <div class="flex flex-wrap gap-4 items-end">
-      <label class="flex flex-col gap-1 text-xs text-gray-600">
-        Opus 模型
-        <select name="model_id" id="t2-analyst-model" class="border border-gray-200 rounded-lg px-3 py-2 w-48 bg-white">
-          {% for mid, label in chat_models|default([]) %}
-          <option value="{{ mid }}" {% if mid == default_model %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label class="inline-flex items-center gap-2 text-xs text-gray-700 pb-2 cursor-pointer">
-        <input type="checkbox" name="include_t1_jl4" value="1" checked class="rounded text-violet-600">
-        附带 JL4 本地 T1（11 项 indicators）
-      </label>
-      <label class="inline-flex items-center gap-2 text-xs text-gray-700 pb-2 cursor-pointer">
-        <input type="checkbox" name="include_jl13_data" value="1" checked class="rounded text-violet-600">
-        附带 JL1–3 公开市场数据补充要求
-      </label>
-    </div>
-
-    <div id="t2-analyst-messages"
-         class="rounded-xl bg-white/80 border border-violet-100 min-h-[140px]"
-         hx-get="/api/executing/analyst/chat/placeholder" hx-trigger="load" hx-swap="innerHTML">
-      <div class="text-sm text-gray-400 text-center py-8">加载对话…</div>
-    </div>
-
-    <div class="rounded-xl border border-violet-100 bg-white/90 p-3 space-y-3">
-      <div>
-        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <label class="text-xs font-medium text-gray-600">默认问题模板（组合审计）</label>
-          <button type="button" id="t2-analyst-use-template"
-                  class="text-[11px] px-2 py-1 rounded bg-violet-600 text-white hover:bg-violet-700">
-            填入问题框
-          </button>
+  <div class="opus-main-column">
+    <header class="opus-toolbar">
+      <details class="opus-toolbar-details">
+        <summary>标的与选项</summary>
+        <div class="pt-1 pb-1">
+          <fieldset class="border-0 p-0 m-0">
+            {% if symbols|default([]) %}
+            <div class="flex flex-wrap gap-1 max-h-16 overflow-y-auto">
+              {% for s in symbols %}
+              <label class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-gray-200 bg-white hover:border-violet-300 cursor-pointer text-[10px] has-[:checked]:border-violet-400 has-[:checked]:bg-violet-50/60">
+                <input type="checkbox" name="symbols" value="{{ s.symbol }}" form="t2-analyst-form" class="rounded text-violet-600 scale-90" checked>
+                <span class="font-medium">{{ s.symbol }}</span>
+                <span class="text-gray-500 truncate max-w-[5rem]">{{ s.name or '' }}</span>
+              </label>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-amber-700 text-[10px] m-0">暂无执行区标的</p>
+            {% endif %}
+          </fieldset>
+          <div class="opus-toolbar-inline mt-1">
+            <label class="flex items-center gap-1">
+              模型
+              <select name="model_id" id="t2-analyst-model" form="t2-analyst-form"
+                      class="border border-gray-200 rounded px-1.5 py-0.5 text-[10px] bg-white">
+                {% for mid, label in chat_models|default([]) %}
+                <option value="{{ mid }}" {% if mid == default_model %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="inline-flex items-center gap-1 cursor-pointer">
+              <input type="checkbox" name="include_t1_jl4" value="1" form="t2-analyst-form" checked class="rounded text-violet-600 scale-90">
+              JL4 T1
+            </label>
+            <label class="inline-flex items-center gap-1 cursor-pointer">
+              <input type="checkbox" name="include_jl13_data" value="1" form="t2-analyst-form" checked class="rounded text-violet-600 scale-90">
+              JL1–3
+            </label>
+            {% if token_limits %}
+            <span class="text-[9px] text-violet-600/70">
+              输入 ≤ {{ "{:,}".format(token_limits.max_input_chars) }} 字 · 输出 ≤ {{ "{:,}".format(token_limits.max_output_tokens) }} tok
+            </span>
+            {% endif %}
+            <a href="/audit#t2-analyst-audit" class="text-violet-700 hover:underline ml-auto">审计</a>
+          </div>
         </div>
-        <p id="t2-analyst-template-preview"
-           class="text-xs text-gray-600 leading-relaxed max-h-24 overflow-y-auto whitespace-pre-wrap">{{ default_prompt_template }}</p>
+      </details>
+    </header>
+
+    <div id="t2-analyst-messages" class="opus-messages-scroll">
+      <div class="text-sm text-gray-400 text-center py-12">加载对话…</div>
+    </div>
+
+    <div class="opus-bottom-dock">
+      <div class="opus-templates-inline">
+        <details class="opus-tpl-chip" id="t2-tpl-jl13-wrap">
+          <summary>JL1–3 模板</summary>
+          <div class="opus-tpl-body">
+            <textarea id="t2-analyst-jl13-input" name="jl13_data_prompt" form="t2-analyst-form"
+                      maxlength="2000" rows="2">{{ default_jl13_data_template }}</textarea>
+            <p class="opus-tpl-hint">自动保存 · 回车收起 · <span id="t2-analyst-jl13-count" class="tabular-nums">0 / 2000</span></p>
+          </div>
+        </details>
+        <details class="opus-tpl-chip" id="t2-tpl-audit-wrap">
+          <summary>组合审计模板（空输入时使用）</summary>
+          <div class="opus-tpl-body">
+            <textarea id="t2-analyst-audit-template" rows="3" maxlength="4000">{{ default_prompt_template }}</textarea>
+            <p class="opus-tpl-hint">自动保存 · 回车收起</p>
+          </div>
+        </details>
       </div>
-      <div class="border-t border-violet-100 pt-3">
-        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <label class="text-xs font-medium text-gray-600">JL1–3 数据需求模板（Opus 补全公开市场事实）</label>
-          <button type="button" id="t2-analyst-use-jl13-template"
-                  class="text-[11px] px-2 py-1 rounded border border-violet-300 text-violet-700 hover:bg-violet-50">
-            填入下方编辑区
-          </button>
+
+      <footer class="opus-composer">
+        <form id="t2-analyst-form"
+              hx-post="/api/executing/analyst/chat"
+              hx-target="#t2-analyst-messages"
+              hx-swap="innerHTML"
+              hx-indicator="#t2-analyst-spinner">
+          <input type="hidden" name="session_id" id="t2-analyst-session-id" value="">
+          <div class="opus-composer-box">
+            <textarea name="message" id="t2-analyst-input" rows="1" maxlength="4000"
+                      placeholder="输入分析问题… Enter 发送 · 留空用组合审计模板"></textarea>
+            <button type="submit" class="opus-composer-send" title="发送分析" aria-label="发送">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4l17.45-7.48a1 1 0 000-1.84L3.4 3.6a1 1 0 00-1.52 1.08l2.2 6.38H11a1 1 0 010 2H3.08l2.2 6.38a1 1 0 001.32 1.56z"/></svg>
+            </button>
+          </div>
+          <div class="opus-composer-foot">
+            <span id="t2-analyst-input-count" class="tabular-nums">0 / 4000</span>
+          </div>
+        </form>
+        <div id="t2-analyst-spinner" class="htmx-indicator flex items-center gap-2 text-xs text-violet-600 mt-1 justify-center">
+          <svg class="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+          </svg>
+          Opus 分析中…（通常 1～3 分钟）
         </div>
-        <p id="t2-analyst-jl13-preview"
-           class="text-xs text-gray-600 leading-relaxed max-h-20 overflow-y-auto whitespace-pre-wrap">{{ default_jl13_data_template }}</p>
-        <textarea name="jl13_data_prompt" id="t2-analyst-jl13-input" rows="3" maxlength="2000"
-                  class="w-full mt-2 border border-gray-200 rounded-lg px-3 py-2 text-xs resize-none
-                         focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400">{{ default_jl13_data_template }}</textarea>
-        <p class="text-[10px] text-gray-400 mt-1">可编辑；勾选「附带 JL1–3」后随分析一并提交</p>
-      </div>
+      </footer>
     </div>
-
-    <div>
-      <label class="block text-xs font-medium text-gray-600 mb-1">关键词 / 提示词问题</label>
-      <textarea name="message" id="t2-analyst-input" rows="4" maxlength="4000"
-                class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm resize-none
-                       focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400">{{ default_prompt_template }}</textarea>
-      <p class="text-[11px] text-gray-400 mt-1">回车提交分析 · 完整数据集写入<a href="/audit#t2-analyst-audit" class="text-violet-600 underline">审计</a></p>
-    </div>
-  </form>
-
-  <div id="t2-analyst-spinner" class="htmx-indicator flex items-center gap-2 text-xs text-violet-600 mt-2">
-    <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
-    </svg>
-    Opus 分析中…（三只标的完整审计通常 1～3 分钟，请稍候）
   </div>
 </div>
-
-<script>
-(function () {
-  var KEY = 't2_analyst_sid';
-  var form = document.getElementById('t2-analyst-form');
-  var input = document.getElementById('t2-analyst-input');
-  var msgBox = document.getElementById('t2-analyst-messages');
-  var tplBtn = document.getElementById('t2-analyst-use-template');
-  var tplPreview = document.getElementById('t2-analyst-template-preview');
-  var jl13Btn = document.getElementById('t2-analyst-use-jl13-template');
-  var jl13Preview = document.getElementById('t2-analyst-jl13-preview');
-  var jl13Input = document.getElementById('t2-analyst-jl13-input');
-  if (!form || !input) return;
-
-  function sid() {
-    var s = localStorage.getItem(KEY);
-    if (!s) {
-      s = (typeof crypto !== 'undefined' && crypto.randomUUID)
-        ? crypto.randomUUID().replace(/-/g, '').slice(0, 16)
-        : String(Date.now());
-      localStorage.setItem(KEY, s);
-    }
-    return s;
-  }
-
-  function syncSid() {
-    var id = sid();
-    var el = document.getElementById('t2-analyst-session-id');
-    if (el) el.value = id;
-    if (msgBox) msgBox.setAttribute('hx-get', '/api/executing/analyst/chat/' + id);
-    return id;
-  }
-
-  syncSid();
-
-  if (tplBtn && tplPreview) {
-    tplBtn.addEventListener('click', function () {
-      input.value = tplPreview.textContent || '';
-      input.focus();
-    });
-  }
-
-  if (jl13Btn && jl13Preview && jl13Input) {
-    jl13Btn.addEventListener('click', function () {
-      jl13Input.value = jl13Preview.textContent || '';
-      jl13Input.focus();
-    });
-  }
-
-  input.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      var checked = form.querySelectorAll('input[name="symbols"]:checked');
-      if (!input.value.trim()) return;
-      if (!checked.length) {
-        alert('请至少选择一个标的');
-        return;
-      }
-      if (typeof htmx !== 'undefined') htmx.trigger(form, 'submit');
-    }
-  });
-
-  document.body.addEventListener('htmx:afterSwap', function (ev) {
-    if (ev.detail.target && ev.detail.target.id === 't2-analyst-messages') {
-      var inner = msgBox && msgBox.querySelector('#executing-analyst-chat-inner');
-      var newSid = inner && inner.getAttribute('data-session-id');
-      if (newSid) {
-        localStorage.setItem(KEY, newSid);
-        var outer = form.querySelector('#t2-analyst-session-id');
-        if (outer) outer.value = newSid;
-      }
-      if (msgBox) msgBox.scrollTop = msgBox.scrollHeight;
-      input.value = '';
-      input.focus();
-    }
-  });
-
-  var newBtn = document.getElementById('t2-analyst-new-btn');
-  if (newBtn) {
-    newBtn.addEventListener('click', function () {
-      var oldEl = form.querySelector('#t2-analyst-session-id');
-      var oldId = oldEl ? oldEl.value : sid();
-      if (typeof htmx !== 'undefined') {
-        htmx.ajax('POST', '/api/executing/analyst/chat/new', {
-          target: '#t2-analyst-messages',
-          swap: 'innerHTML',
-          values: { session_id: oldId }
-        }).then(function () {
-          localStorage.removeItem(KEY);
-          var newId = syncSid();
-          if (msgBox) msgBox.setAttribute('hx-get', '/api/executing/analyst/chat/' + newId);
-        });
-      }
-    });
-  }
-
-  if (typeof htmx !== 'undefined' && msgBox) {
-    htmx.process(msgBox);
-    htmx.trigger(msgBox, 'load');
-  }
-})();
-</script>

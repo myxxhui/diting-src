@@ -10,6 +10,12 @@ import os
 from pathlib import Path
 from typing import Any
 
+from apps.copilot.modules.copilot_ui_settings import (
+    SETTING_WORKBENCH_PREFS,
+    get_cached,
+    set_cached,
+)
+
 logger = logging.getLogger(__name__)
 
 PREFS_FILENAME = "workbench_prefs.json"
@@ -67,8 +73,14 @@ def _env_defaults() -> dict[str, Any]:
 
 
 def load_prefs() -> dict[str, Any]:
-    """合并 env 默认 + 磁盘覆盖（PUT 后即时生效）。"""
+    """合并 env 默认 + PG 缓存 + 磁盘覆盖（PUT 后即时生效）。"""
     base = _env_defaults()
+    cached = get_cached(SETTING_WORKBENCH_PREFS)
+    if isinstance(cached, dict):
+        for k, v in cached.items():
+            if k != "version" and v is not None:
+                base[k] = v
+        return base
     path = _prefs_path()
     if not path.is_file():
         return base
@@ -84,17 +96,7 @@ def load_prefs() -> dict[str, Any]:
     return base
 
 
-def reset_prefs() -> dict[str, Any]:
-    path = _prefs_path()
-    if path.is_file():
-        try:
-            path.unlink()
-        except OSError as exc:
-            logger.warning("删除 workbench_prefs 失败: %s", exc)
-    return _env_defaults()
-
-
-def save_prefs(payload: dict[str, Any]) -> dict[str, Any]:
+def _merge_allowed_prefs(current: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     allowed = {
         "enable_t0_default",
         "enable_t1_default",
@@ -108,14 +110,56 @@ def save_prefs(payload: dict[str, Any]) -> dict[str, Any]:
         "collect_auto_t1",
         "fuzzy_suggest",
     }
-    current = load_prefs()
     for k in allowed:
         if k in payload:
             current[k] = payload[k]
+    return current
+
+
+def reset_prefs() -> dict[str, Any]:
+    path = _prefs_path()
+    if path.is_file():
+        try:
+            path.unlink()
+        except OSError as exc:
+            logger.warning("删除 workbench_prefs 失败: %s", exc)
+    set_cached(SETTING_WORKBENCH_PREFS, _env_defaults())
+    return _env_defaults()
+
+
+def save_prefs(payload: dict[str, Any]) -> dict[str, Any]:
+    current = _merge_allowed_prefs(load_prefs(), payload)
+    set_cached(SETTING_WORKBENCH_PREFS, current)
     path = _prefs_path()
     path.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("workbench_prefs 已写入 %s", path)
     return current
+
+
+async def save_prefs_async(session, payload: dict[str, Any]) -> dict[str, Any]:
+    """PG 权威写入 + 磁盘备份 + 内存缓存。"""
+    from apps.copilot.modules.copilot_ui_settings import save_setting_row
+
+    current = _merge_allowed_prefs(load_prefs(), payload)
+    await save_setting_row(session, SETTING_WORKBENCH_PREFS, current)
+    path = _prefs_path()
+    path.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+    return current
+
+
+async def reset_prefs_async(session) -> dict[str, Any]:
+    from apps.copilot.modules.copilot_ui_settings import delete_setting_row
+
+    path = _prefs_path()
+    if path.is_file():
+        try:
+            path.unlink()
+        except OSError as exc:
+            logger.warning("删除 workbench_prefs 失败: %s", exc)
+    await delete_setting_row(session, SETTING_WORKBENCH_PREFS)
+    defaults = _env_defaults()
+    set_cached(SETTING_WORKBENCH_PREFS, defaults)
+    return defaults
 
 
 def effective_float(key: str, env_name: str, fallback: float) -> float:

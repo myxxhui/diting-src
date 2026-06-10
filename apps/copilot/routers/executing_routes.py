@@ -4,8 +4,10 @@
 """
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
+import time
 from typing import Any
 
 from pathlib import Path
@@ -542,7 +544,7 @@ async def api_analyst_panel_html(
     request: Request,
     session: AsyncSession = Depends(get_db),
 ):
-    """T2 持仓分析工作台。"""
+    """Opus 持仓 T2 分析面板 HTML（/opus 页加载）。"""
     from apps.copilot.modules.executing.t2_analyst import (
         DEFAULT_JL13_DATA_TEMPLATE,
         DEFAULT_PROMPT_TEMPLATE,
@@ -598,6 +600,55 @@ def _render_analyst_payload_details(data: dict[str, Any]) -> str:
     )
 
 
+def _render_t2_analyst_job_progress(state: dict[str, Any]) -> str:
+    """T2 后台任务进度（运行中由 HTMX 轮询 GET /api/executing/analyst/chat/job/{id}）。"""
+    job_id = _esc(state.get("job_id") or "")
+    status = state.get("status") or "running"
+    pct = int(state.get("pct") or 0)
+    step_label = _esc(state.get("step_label") or "分析进行中…")
+    syms = _esc(", ".join(state.get("symbols") or []))
+    started = float(state.get("started_at") or time.time())
+    elapsed = int(time.time() - started)
+    err = state.get("error")
+
+    poll_attrs = ""
+    if status == "running" and job_id:
+        poll_attrs = (
+            f" id='t2-analyst-job-progress' data-job-id='{job_id}'"
+            f" hx-get='/api/executing/analyst/chat/job/{job_id}'"
+            f" hx-trigger='every 3s'"
+            f" hx-target='#t2-analyst-messages'"
+            f" hx-swap='innerHTML'"
+            f" hx-indicator='#t2-analyst-spinner'"
+        )
+
+    bar_color = "bg-violet-500"
+    if status == "error":
+        bar_color = "bg-red-400"
+    elif status == "done":
+        bar_color = "bg-emerald-500"
+
+    err_html = ""
+    if status == "error" and err:
+        err_html = (
+            f"<p class='text-sm text-red-700 mt-3'>{_esc(str(err)[:400])}</p>"
+            f"<p class='text-xs text-gray-500 mt-1'>可修改提示词后重新提交 · 审计页可查拼接数据</p>"
+        )
+
+    return (
+        f"<div class='rounded-xl border border-violet-200 bg-white/90 p-4'{poll_attrs}>"
+        f"<div class='flex flex-wrap items-center justify-between gap-2 mb-2'>"
+        f"<p class='text-sm font-medium text-violet-900'>T2 Opus 后台分析中</p>"
+        f"<span class='text-xs text-violet-600'>{syms} · 已运行 {elapsed}s</span></div>"
+        f"<div class='h-2 rounded-full bg-violet-100 overflow-hidden mb-2'>"
+        f"<div class='h-full {bar_color} transition-all duration-500' style='width:{pct}%'></div></div>"
+        f"<p class='text-xs text-gray-600'>{step_label}</p>"
+        f"<p class='text-[11px] text-gray-400 mt-2'>"
+        f"长连接走新加坡出口代理 · 正常约 3～5 分钟 · 可刷新页面，任务在服务端继续</p>"
+        f"{err_html}</div>"
+    )
+
+
 def _render_analyst_chat_panel(payload: dict[str, Any]) -> str:
     """T2 持仓分析对话区 HTML。"""
     from apps.copilot.modules.executing.t2_analyst import new_analyst_session_id
@@ -610,9 +661,8 @@ def _render_analyst_chat_panel(payload: dict[str, Any]) -> str:
     if not messages:
         bubbles.append(
             "<div class='text-center text-sm text-gray-400 py-8'>"
-            "<p class='mb-1'>🔬 T2 持仓分析</p>"
-            "<p class='text-xs'>选择标的 → 输入关键词 → 回车调用 Opus 审计</p>"
-            "<p class='text-xs mt-1'>JL1–3 checklist · JL4 本地 T1 indicators</p>"
+            "<p class='mb-1'>持仓分析</p>"
+            "<p class='text-xs'>选择标的 → 输入问题 → 回车开始分析</p>"
             "</div>"
         )
     for m in messages:
@@ -636,19 +686,23 @@ def _render_analyst_chat_panel(payload: dict[str, Any]) -> str:
             meta = m.get("meta") or {}
             data = meta.get("payload") or meta.get("preview") or {}
             from apps.copilot.modules.executing.t2_analyst_render import (
-                render_t2_assistant_card,
+                render_opus_assistant_bubble,
+                render_t2_chat_prose,
+                _assistant_pin_eligible,
             )
 
-            card = (data.get("assistant_render_html") or "") if data else ""
-            if not card and data:
-                card = render_t2_assistant_card(data, meta)
-            if not card and content:
+            card = ""
+            if data:
+                card = render_t2_chat_prose(data, meta)
+            elif content:
                 card = f"<p class='whitespace-pre-wrap text-sm'>{content}</p>"
-            details = _render_analyst_payload_details(data) if data else ""
+            rid = str(meta.get("request_id") or data.get("request_id") or "")
+            pin_ok = bool(data and _assistant_pin_eligible(data, meta))
+            bubble = render_opus_assistant_bubble(
+                card, request_id=rid, pin_eligible=pin_ok
+            )
             bubbles.append(
-                f"<div class='flex justify-start w-full'><div class='w-full max-w-full rounded-2xl rounded-tl-sm "
-                f"bg-white border border-violet-100 px-4 py-3 text-sm text-gray-800 "
-                f"leading-relaxed shadow-sm'>{card}{details}</div></div>"
+                f"<div class='flex justify-start w-full'>{bubble}</div>"
             )
 
     err_html = ""
@@ -661,7 +715,7 @@ def _render_analyst_chat_panel(payload: dict[str, Any]) -> str:
     return (
         f"<div id='executing-analyst-chat-inner' data-session-id='{sid}'>"
         f"{err_html}"
-        f"<div class='space-y-3 px-1 py-2 min-h-[120px] max-h-[36rem] overflow-y-auto'>"
+        f"<div class='space-y-3 px-1 py-2'>"
         f"{''.join(bubbles)}</div></div>"
     )
 
@@ -700,10 +754,22 @@ async def api_analyst_chat_history(
     request: Request,
     session: AsyncSession = Depends(get_db),
 ):
-    """拉取 T2 持仓分析对话历史（Redis → PG 会话表 → 审计行重建）。"""
+    """拉取 T2 持仓分析对话历史；若该 session 有进行中的后台任务则返回进度面板。"""
     from apps.copilot.modules.executing.t2_analyst import load_analyst_messages
+    from apps.copilot.modules.executing.t2_analyst_progress import active_job_id, load
 
     redis = _redis_for_panel()
+    sid = (session_id or "").strip()
+    if sid and sid != "placeholder":
+        job_id = active_job_id(redis, sid)
+        if job_id:
+            state = load(redis, job_id)
+            if state and state.get("status") == "running":
+                return HTMLResponse(_render_t2_analyst_job_progress(state))
+            if state and state.get("status") == "done":
+                result = state.get("result") or {}
+                return HTMLResponse(_render_analyst_chat_panel(result))
+
     messages = await load_analyst_messages(
         session_id, redis_client=redis, db_session=session
     )
@@ -712,6 +778,16 @@ async def api_analyst_chat_history(
     if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
         return HTMLResponse(_render_analyst_chat_panel(payload))
     return JSONResponse(payload)
+
+
+@router.get("/api/executing/analyst/sessions")
+async def api_analyst_chat_sessions(
+    session: AsyncSession = Depends(get_db),
+    limit: int = 40,
+):
+    from apps.copilot.modules.executing.t2_analyst import list_t2_analyst_sessions
+
+    return {"sessions": await list_t2_analyst_sessions(session, limit=limit)}
 
 
 @router.post("/api/executing/analyst/chat/new", response_class=HTMLResponse)
@@ -735,6 +811,38 @@ async def api_analyst_chat_new(
     return JSONResponse(payload)
 
 
+@router.post("/api/executing/analyst/pin-to-executing")
+async def api_pin_t2_to_executing(
+    request_id: str = Form(""),
+    symbols: list[str] = Form(default=[]),
+    session: AsyncSession = Depends(get_db),
+):
+    """用户手动将某条 T2 分析同步到执行区标的卡（须勾选标的）。"""
+    from apps.copilot.modules.executing.t2_executing_pin import pin_t2_to_executing
+
+    try:
+        result = await pin_t2_to_executing(
+            session, request_id=request_id, symbols=symbols
+        )
+        await session.commit()
+    except ValueError as exc:
+        await session.rollback()
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except Exception as exc:
+        await session.rollback()
+        logger.exception("pin T2 to executing failed")
+        return JSONResponse({"ok": False, "error": str(exc)[:200]}, status_code=500)
+
+    syms = ", ".join(result.get("pinned_symbols") or [])
+    return JSONResponse(
+        {
+            "ok": True,
+            **result,
+            "message": f"已同步到执行区：{syms}",
+        }
+    )
+
+
 @router.post("/api/executing/analyst/chat", response_class=HTMLResponse)
 async def api_analyst_chat(
     request: Request,
@@ -747,8 +855,14 @@ async def api_analyst_chat(
     symbols: list[str] = Form(default=[]),
     session: AsyncSession = Depends(get_db),
 ):
-    """T2 持仓分析多轮对话（组装 envelope + Opus 推理）。"""
-    from apps.copilot.modules.executing.t2_analyst import analyst_chat_turn
+    """T2 持仓分析：Opus 启用时后台任务 + HTMX 轮询；否则同步组装。"""
+    from apps.copilot.modules.executing.t2_analyst import (
+        analyst_chat_turn,
+        new_analyst_session_id,
+        run_t2_analyst_job,
+        t2_opus_enabled,
+    )
+    from apps.copilot.modules.executing.t2_analyst_progress import init_job, new_job_id
 
     if not symbols:
         payload = {
@@ -757,11 +871,37 @@ async def api_analyst_chat(
             "error": "请至少选择一个标的",
         }
         return HTMLResponse(_render_analyst_chat_panel(payload), status_code=400)
+
     redis = _redis_for_panel()
+    sid = (session_id or "").strip() or new_analyst_session_id()
+    if sid == "placeholder":
+        sid = new_analyst_session_id()
+
+    if t2_opus_enabled():
+        job_id = new_job_id()
+        state = init_job(redis, job_id, session_id=sid, symbols=symbols)
+        asyncio.create_task(
+            run_t2_analyst_job(
+                job_id,
+                session_id=sid,
+                symbols=symbols,
+                user_question=message,
+                model_id=model_id or None,
+                include_t1_jl4=include_t1_jl4 == "1",
+                jl13_data_prompt=jl13_data_prompt,
+                include_jl13_data=include_jl13_data == "1",
+                redis_client=redis,
+            )
+        )
+        html_out = _render_t2_analyst_job_progress(state)
+        if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
+            return HTMLResponse(html_out)
+        return JSONResponse({"job_id": job_id, "status": "running", "session_id": sid})
+
     try:
         result = await analyst_chat_turn(
             session,
-            session_id=session_id,
+            session_id=sid,
             symbols=symbols,
             user_question=message,
             model_id=model_id or None,
@@ -772,7 +912,7 @@ async def api_analyst_chat(
         )
     except ValueError as exc:
         payload = {
-            "session_id": session_id,
+            "session_id": sid,
             "messages": [],
             "error": str(exc),
         }
@@ -780,7 +920,7 @@ async def api_analyst_chat(
     except Exception as exc:
         logger.exception("T2 analyst chat failed")
         payload = {
-            "session_id": session_id,
+            "session_id": sid,
             "messages": [],
             "error": f"分析失败：{str(exc)[:300]}",
         }
@@ -789,6 +929,47 @@ async def api_analyst_chat(
     if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
         return HTMLResponse(_render_analyst_chat_panel(result))
     return JSONResponse(result)
+
+
+@router.get("/api/executing/analyst/chat/active/{session_id}", response_class=HTMLResponse)
+async def api_analyst_chat_active(session_id: str):
+    """按 session 恢复进行中的 T2 后台任务（刷新页面后轮询）。"""
+    from apps.copilot.modules.executing.t2_analyst_progress import active_job_id, load
+
+    redis = _redis_for_panel()
+    job_id = active_job_id(redis, session_id)
+    if not job_id:
+        return HTMLResponse("", status_code=204)
+    state = load(redis, job_id)
+    if not state or state.get("status") == "running":
+        return HTMLResponse(_render_t2_analyst_job_progress(state or {"job_id": job_id, "status": "running"}))
+    if state.get("status") == "done":
+        return HTMLResponse(_render_analyst_chat_panel(state.get("result") or {}))
+    return HTMLResponse(_render_t2_analyst_job_progress(state))
+
+
+@router.get("/api/executing/analyst/chat/job/{job_id}", response_class=HTMLResponse)
+async def api_analyst_chat_job(
+    job_id: str,
+    request: Request,
+):
+    """轮询 T2 后台分析任务；完成时返回完整对话区 HTML。"""
+    from apps.copilot.modules.executing.t2_analyst_progress import load
+
+    redis = _redis_for_panel()
+    state = load(redis, job_id)
+    if not state:
+        return HTMLResponse(
+            "<p class='text-sm text-amber-700 p-4'>任务不存在或已过期，请重新提交分析。</p>",
+            status_code=404,
+        )
+    status = state.get("status") or "running"
+    if status == "done":
+        result = state.get("result") or {}
+        return HTMLResponse(_render_analyst_chat_panel(result))
+    if status == "error":
+        return HTMLResponse(_render_t2_analyst_job_progress(state))
+    return HTMLResponse(_render_t2_analyst_job_progress(state))
 
 
 @router.post("/api/executing/analyst/preview-html", response_class=HTMLResponse)
@@ -898,6 +1079,9 @@ def _render_t2_analyst_audit_detail(row: Any) -> str:
 
     payload = row.payload_json or {}
     opus = payload.get("opus_messages") or []
+    audit = structured_audit_from_payload(payload)
+    if audit is not payload.get("opus_audit"):
+        payload = {**payload, "opus_audit": audit}
     system_txt = opus[0].get("content", "") if opus else ""
     user_txt = opus[1].get("content", "") if len(opus) > 1 else ""
     try:
@@ -915,8 +1099,8 @@ def _render_t2_analyst_audit_detail(row: Any) -> str:
     status = "ok" if row.api_connected and payload.get("opus_audit") else (
         "error" if payload.get("opus_error") else "assembly_only"
     )
-    render_html = payload.get("assistant_render_html") or ""
-    if not render_html and payload:
+    render_html = ""
+    if payload:
         render_html = render_t2_assistant_card(
             payload,
             {

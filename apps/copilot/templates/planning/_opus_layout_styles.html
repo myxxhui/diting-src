@@ -1,0 +1,420 @@
+<style>
+  /* Opus 页 · 全视口 ChatGPT 式布局 [Ref: /opus] */
+  body:has(#opus-workspace-root) {
+    overflow: hidden;
+    height: 100vh;
+  }
+  body:has(#opus-workspace-root) main {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    height: calc(100vh - var(--site-nav-h, 52px));
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+  }
+
+  #opus-workspace-root {
+    --site-nav-h: 52px;
+    flex: 1;
+    min-height: 0;
+    height: 100%;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+  }
+
+  /* 顶栏 + Tab 合并为一行 */
+  #opus-workspace-root .opus-header-strip {
+    flex-shrink: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 4px 12px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #fff;
+    min-height: 36px;
+  }
+  #opus-workspace-root .opus-header-strip h1 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: #111827;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  #opus-workspace-root .opus-header-tabs {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  #opus-workspace-root .opus-panel-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #opus-panel-t2,
+  #opus-t2-panel-slot {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+  }
+
+  .opus-chat-shell {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    height: 100%;
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;
+    background: #f9fafb;
+  }
+
+  .opus-sidebar {
+    width: 188px;
+    flex-shrink: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid #e5e7eb;
+    background: #f3f4f6;
+  }
+
+  .opus-sidebar-head {
+    flex-shrink: 0;
+    padding: 6px 8px;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .opus-sidebar-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 4px;
+  }
+
+  .opus-session-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 6px 8px;
+    margin-bottom: 2px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: transparent;
+    cursor: pointer;
+    font-size: 12px;
+    color: #374151;
+    line-height: 1.35;
+  }
+  .opus-session-item:hover { background: #e5e7eb; }
+  .opus-session-item.is-active {
+    background: #ede9fe;
+    border-color: #c4b5fd;
+    color: #5b21b6;
+    font-weight: 600;
+  }
+  .opus-session-item .opus-session-meta {
+    display: block;
+    font-size: 10px;
+    color: #9ca3af;
+    font-weight: 400;
+    margin-top: 2px;
+  }
+
+  /* 主列：Grid 保证中间 messages 占满剩余高度 */
+  .opus-main-column {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "toolbar"
+      "messages"
+      "footer";
+    overflow: hidden;
+    background: #fff;
+  }
+
+  .opus-toolbar {
+    grid-area: toolbar;
+    flex-shrink: 0;
+    padding: 2px 10px;
+    border-bottom: 1px solid #f3f4f6;
+    background: #fff;
+  }
+
+  .opus-toolbar details.opus-toolbar-details {
+    margin: 0;
+    border: none;
+    background: transparent;
+  }
+  .opus-toolbar details.opus-toolbar-details summary {
+    cursor: pointer;
+    padding: 4px 0;
+    font-size: 11px;
+    font-weight: 600;
+    color: #6d28d9;
+    list-style: none;
+    user-select: none;
+  }
+  .opus-toolbar details.opus-toolbar-details summary::-webkit-details-marker { display: none; }
+  .opus-toolbar details.opus-toolbar-details[open] summary {
+    margin-bottom: 4px;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .opus-toolbar-inline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    align-items: center;
+    font-size: 10px;
+    color: #6b7280;
+  }
+
+  .opus-messages-scroll {
+    grid-area: messages;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 10px 14px;
+    background: #fafafa;
+  }
+
+  .opus-bottom-dock {
+    grid-area: footer;
+    flex-shrink: 0;
+    border-top: 1px solid #e5e7eb;
+    background: #fff;
+  }
+
+  .opus-templates-inline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 3px 10px 0;
+    background: #fafafa;
+  }
+
+  details.opus-tpl-chip {
+    flex: 1 1 auto;
+    min-width: 140px;
+    margin: 0;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    background: #fff;
+    font-size: 10px;
+  }
+  details.opus-tpl-chip summary {
+    cursor: pointer;
+    padding: 3px 8px;
+    color: #6b7280;
+    list-style: none;
+    user-select: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  details.opus-tpl-chip summary::-webkit-details-marker { display: none; }
+  details.opus-tpl-chip[open] {
+    flex: 1 1 100%;
+    border-color: #ddd6fe;
+  }
+  details.opus-tpl-chip[open] summary {
+    color: #6d28d9;
+    font-weight: 600;
+    border-bottom: 1px solid #f3f4f6;
+  }
+
+  .opus-tpl-body { padding: 6px 8px 8px; }
+  .opus-tpl-body textarea {
+    width: 100%;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 11px;
+    line-height: 1.4;
+    resize: vertical;
+    min-height: 48px;
+    max-height: 100px;
+    box-sizing: border-box;
+  }
+  .opus-tpl-hint {
+    font-size: 10px;
+    color: #9ca3af;
+    margin-top: 3px;
+  }
+
+  .opus-composer {
+    padding: 6px 10px 8px;
+    background: #fff;
+  }
+
+  .opus-composer-box {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    width: 100%;
+    padding: 2px 2px 2px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 20px;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  }
+  .opus-composer-box:focus-within {
+    border-color: #8b5cf6;
+    box-shadow: 0 0 0 2px rgba(139,92,246,0.12);
+  }
+  .opus-composer-box textarea {
+    flex: 1;
+    border: none;
+    outline: none;
+    resize: none;
+    padding: 6px 0;
+    font-size: 13px;
+    line-height: 1.45;
+    max-height: 96px;
+    min-height: 20px;
+    background: transparent;
+  }
+  .opus-composer-send {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: none;
+    background: #7c3aed;
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .opus-composer-send:hover { background: #6d28d9; }
+  .opus-composer-foot {
+    margin: 2px 0 0;
+    font-size: 10px;
+    color: #9ca3af;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  /* 助手回复 · ⋯ 操作菜单 */
+  .opus-assistant-bubble { position: relative; }
+  .opus-msg-menu { position: relative; }
+  .opus-msg-menu-trigger {
+    list-style: none;
+    cursor: pointer;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #9ca3af;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .opus-msg-menu-trigger::-webkit-details-marker { display: none; }
+  .opus-msg-menu-trigger:hover,
+  .opus-msg-menu[open] .opus-msg-menu-trigger {
+    background: #f3f4f6;
+    border-color: #e5e7eb;
+    color: #6b7280;
+  }
+  .opus-msg-menu-panel {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 40;
+    min-width: 168px;
+    padding: 4px;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+  }
+  .opus-msg-menu-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: #374151;
+    font-size: 12px;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    line-height: 1.3;
+  }
+  .opus-msg-menu-item:hover:not(.is-disabled) {
+    background: #f5f3ff;
+    color: #5b21b6;
+  }
+  .opus-msg-menu-item.is-disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .opus-msg-menu-icon {
+    flex-shrink: 0;
+    width: 1.1em;
+    text-align: center;
+  }
+  .opus-msg-menu-hint {
+    flex: 1 1 100%;
+    font-size: 10px;
+    color: #9ca3af;
+    padding-left: 1.6em;
+    font-weight: 400;
+  }
+  .opus-pin-toast:not(.hidden) {
+    animation: opus-toast-in 0.2s ease;
+  }
+  @keyframes opus-toast-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  #opus-panel-chat.hidden { display: none !important; }
+  #opus-panel-chat:not(.hidden) {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+  }
+
+  @media (max-width: 768px) {
+    .opus-sidebar { width: 48px; }
+    .opus-sidebar-head span.opus-sidebar-title,
+    .opus-session-item .opus-session-title { display: none; }
+    .opus-templates-inline { flex-direction: column; }
+  }
+</style>

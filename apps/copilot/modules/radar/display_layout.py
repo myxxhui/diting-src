@@ -15,6 +15,11 @@ from typing import Any
 
 from apps.copilot.modules.radar.schema import DIM_KEYS, DIMENSIONS, DIM_META
 from apps.copilot.modules.radar.workbench_prefs import radar_cache_root
+from apps.copilot.modules.copilot_ui_settings import (
+    SETTING_DISPLAY_LAYOUT,
+    get_cached,
+    set_cached,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +115,10 @@ def layout_to_jsonable(layout: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_saved_layout() -> dict[str, Any] | None:
-    """读取 PVC/本地已存布局；不存在返回 None。"""
+    """读取 PG 缓存或 PVC/本地已存布局；不存在返回 None。"""
+    cached = get_cached(SETTING_DISPLAY_LAYOUT)
+    if isinstance(cached, dict):
+        return parse_layout_from_header(json.dumps(cached, ensure_ascii=False))
     path = _layout_path()
     if not path.is_file():
         return None
@@ -123,17 +131,41 @@ def load_saved_layout() -> dict[str, Any] | None:
 
 
 def save_saved_layout(payload: dict[str, Any]) -> dict[str, Any]:
-    """校验并写入 display_layout.json。"""
+    """校验并写入 display_layout（内存 + 磁盘）。"""
     to_parse = dict(payload)
     hidden_in = to_parse.get("hidden")
     if isinstance(hidden_in, set):
         to_parse["hidden"] = sorted(hidden_in)
     merged = parse_layout_from_header(json.dumps(to_parse, ensure_ascii=False))
     out = layout_to_jsonable(merged)
+    set_cached(SETTING_DISPLAY_LAYOUT, out)
     path = _layout_path()
     path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("display_layout 已写入 %s", path)
     return out
+
+
+async def save_saved_layout_async(session, payload: dict[str, Any]) -> dict[str, Any]:
+    from apps.copilot.modules.copilot_ui_settings import save_setting_row
+
+    out = save_saved_layout(payload)
+    await save_setting_row(session, SETTING_DISPLAY_LAYOUT, out)
+    return out
+
+
+async def reset_saved_layout_async(session) -> dict[str, Any]:
+    from apps.copilot.modules.copilot_ui_settings import delete_setting_row
+
+    path = _layout_path()
+    if path.is_file():
+        try:
+            path.unlink()
+        except OSError as exc:
+            logger.warning("删除 display_layout 失败: %s", exc)
+    await delete_setting_row(session, SETTING_DISPLAY_LAYOUT)
+    defaults = default_layout()
+    set_cached(SETTING_DISPLAY_LAYOUT, layout_to_jsonable(defaults))
+    return defaults
 
 
 def reset_saved_layout() -> dict[str, Any]:
@@ -143,7 +175,9 @@ def reset_saved_layout() -> dict[str, Any]:
             path.unlink()
         except OSError as exc:
             logger.warning("删除 display_layout 失败: %s", exc)
-    return default_layout()
+    defaults = default_layout()
+    set_cached(SETTING_DISPLAY_LAYOUT, layout_to_jsonable(defaults))
+    return defaults
 
 
 def resolve_layout_for_request(header_raw: str | None) -> dict[str, Any]:

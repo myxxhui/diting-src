@@ -1,0 +1,501 @@
+{# T2 / Opus 会话侧栏 · 模板自动保存 · HTMX boot #}
+<script>
+  (function () {
+    window.T2_ANALYST_SID_KEY = 't2_analyst_sid';
+    window.T2_ANALYST_JOB_KEY = 't2_analyst_job_id';
+    window.T2_SESSIONS_KEY = 'opus_t2_sessions';
+    window.T2_AUDIT_TPL_KEY = 'opus_t2_audit_template';
+    window.T2_JL13_TPL_KEY = 'opus_t2_jl13_template';
+    window.OPUS_MODEL_KEY = 'opus_preferred_model_id';
+
+    window.opusRestoreModelSelect = function (selectId) {
+      var sel = document.getElementById(selectId);
+      if (!sel) return;
+      var saved = localStorage.getItem(window.OPUS_MODEL_KEY);
+      if (!saved) return;
+      for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === saved) {
+          sel.selectedIndex = i;
+          return;
+        }
+      }
+    };
+
+    window.opusSaveModelSelect = function (selectId) {
+      var sel = document.getElementById(selectId);
+      if (sel && sel.value) localStorage.setItem(window.OPUS_MODEL_KEY, sel.value);
+    };
+
+    window.opusBindModelSelect = function (selectId) {
+      var sel = document.getElementById(selectId);
+      if (!sel || sel._opusModelBound) return;
+      sel._opusModelBound = true;
+      window.opusRestoreModelSelect(selectId);
+      sel.addEventListener('change', function () {
+        window.opusSaveModelSelect(selectId);
+      });
+    };
+
+    window.t2AnalystSid = function () {
+      var KEY = window.T2_ANALYST_SID_KEY;
+      var s = localStorage.getItem(KEY);
+      if (!s || s === 'placeholder') {
+        s = (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID().replace(/-/g, '').slice(0, 16)
+          : String(Date.now());
+        localStorage.setItem(KEY, s);
+      }
+      return s;
+    };
+
+    window.t2AnalystSyncSid = function () {
+      var id = window.t2AnalystSid();
+      var el = document.getElementById('t2-analyst-session-id');
+      if (el) el.value = id;
+      return id;
+    };
+
+    window.t2GetSessions = function () {
+      try {
+        var raw = localStorage.getItem(window.T2_SESSIONS_KEY);
+        return raw ? JSON.parse(raw) : [];
+      } catch (e) { return []; }
+    };
+
+    window.t2SaveSessions = function (list) {
+      localStorage.setItem(window.T2_SESSIONS_KEY, JSON.stringify(list.slice(0, 40)));
+    };
+
+    window.t2MergeSessionsFromServer = function (serverList) {
+      var local = window.t2GetSessions();
+      var byId = {};
+      (serverList || []).forEach(function (s) { if (s && s.id) byId[s.id] = s; });
+      local.forEach(function (s) { if (s && s.id && !byId[s.id]) byId[s.id] = s; });
+      var merged = Object.values(byId).sort(function (a, b) {
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
+      });
+      window.t2SaveSessions(merged);
+    };
+
+    window.t2SyncSessionsFromServer = function () {
+      return fetch('/api/executing/analyst/sessions')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          window.t2MergeSessionsFromServer(data.sessions || []);
+          window.t2RenderSessionList();
+        })
+        .catch(function () { window.t2RenderSessionList(); });
+    };
+
+    window.t2UpsertSession = function (id, title) {
+      if (!id || id === 'placeholder') return;
+      var list = window.t2GetSessions();
+      var t = (title || '新分析').slice(0, 48);
+      var now = Date.now();
+      var found = false;
+      list = list.map(function (item) {
+        if (item.id === id) {
+          found = true;
+          return { id: id, title: t || item.title, updatedAt: now };
+        }
+        return item;
+      });
+      if (!found) list.unshift({ id: id, title: t, updatedAt: now });
+      list.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+      window.t2SaveSessions(list);
+      window.t2RenderSessionList();
+    };
+
+    window.t2RenderSessionList = function () {
+      var box = document.getElementById('t2-analyst-session-list');
+      if (!box) return;
+      var active = window.t2AnalystSid();
+      var list = window.t2GetSessions();
+      if (!list.length) {
+        box.innerHTML = '<p class="text-[10px] text-gray-400 px-2 py-3">暂无历史话题</p>';
+        return;
+      }
+      box.innerHTML = list.map(function (item) {
+        var dt = item.updatedAt ? new Date(item.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+        var cls = item.id === active ? 'opus-session-item is-active' : 'opus-session-item';
+        return '<button type="button" class="' + cls + '" data-session-id="' + item.id + '">'
+          + '<span class="opus-session-title">' + (item.title || '未命名') + '</span>'
+          + '<span class="opus-session-meta">' + dt + '</span></button>';
+      }).join('');
+    };
+
+    window.t2SwitchSession = function (id) {
+      if (!id) return;
+      localStorage.setItem(window.T2_ANALYST_SID_KEY, id);
+      localStorage.removeItem(window.T2_ANALYST_JOB_KEY);
+      window.t2AnalystSyncSid();
+      window.t2RenderSessionList();
+      if (typeof htmx !== 'undefined') {
+        htmx.ajax('GET', '/api/executing/analyst/chat/' + id, {
+          target: '#t2-analyst-messages',
+          swap: 'innerHTML'
+        });
+      }
+    };
+
+    window.t2LoadTemplates = function () {
+      var panel = document.getElementById('t2-analyst-panel');
+      var auditEl = document.getElementById('t2-analyst-audit-template');
+      var jl13El = document.getElementById('t2-analyst-jl13-input');
+      if (auditEl) {
+        var saved = localStorage.getItem(window.T2_AUDIT_TPL_KEY);
+        if (saved !== null) auditEl.value = saved;
+      }
+      if (jl13El) {
+        var savedJ = localStorage.getItem(window.T2_JL13_TPL_KEY);
+        if (savedJ !== null) jl13El.value = savedJ;
+      }
+    };
+
+    window.t2SaveAuditTemplate = function () {
+      var el = document.getElementById('t2-analyst-audit-template');
+      if (el) localStorage.setItem(window.T2_AUDIT_TPL_KEY, el.value || '');
+    };
+
+    window.t2SaveJl13Template = function () {
+      var el = document.getElementById('t2-analyst-jl13-input');
+      if (el) localStorage.setItem(window.T2_JL13_TPL_KEY, el.value || '');
+    };
+
+    window.t2AnalystBootPanel = function () {
+      var form = document.getElementById('t2-analyst-form');
+      var msgBox = document.getElementById('t2-analyst-messages');
+      if (!form || !msgBox) return;
+      window.t2LoadTemplates();
+      window.opusBindModelSelect('t2-analyst-model');
+      window.t2BindCharCounters();
+      window.t2BindTemplateAutosave();
+      window.t2BindComposerResize();
+      window.t2BindSymbolCheckboxes();
+      var bootSid = function () {
+        var id = window.t2AnalystSyncSid();
+        window.t2UpsertSession(id, '当前话题');
+        window.t2RenderSessionList();
+        if (typeof htmx === 'undefined') return;
+        htmx.process(form);
+        var jobId = localStorage.getItem(window.T2_ANALYST_JOB_KEY);
+        if (jobId) {
+          htmx.ajax('GET', '/api/executing/analyst/chat/job/' + jobId, {
+            target: '#t2-analyst-messages',
+            swap: 'innerHTML'
+          });
+          return;
+        }
+        htmx.ajax('GET', '/api/executing/analyst/chat/' + id, {
+          target: '#t2-analyst-messages',
+          swap: 'innerHTML'
+        });
+      };
+      window.t2SyncSessionsFromServer().finally(bootSid);
+    };
+
+    window.t2BindCharCounters = function () {
+      function bind(inputId, countId, maxLen) {
+        var input = document.getElementById(inputId);
+        var counter = document.getElementById(countId);
+        if (!input || !counter) return;
+        var sync = function () {
+          var n = (input.value || '').length;
+          counter.textContent = n + ' / ' + maxLen;
+          counter.classList.toggle('text-rose-600', n >= maxLen);
+          counter.classList.toggle('text-gray-400', n < maxLen);
+        };
+        if (!input._t2CounterBound) {
+          input._t2CounterBound = true;
+          input.addEventListener('input', sync);
+        }
+        sync();
+      }
+      bind('t2-analyst-input', 't2-analyst-input-count', 4000);
+      bind('t2-analyst-jl13-input', 't2-analyst-jl13-count', 2000);
+    };
+
+    window.t2BindTemplateAutosave = function () {
+      var audit = document.getElementById('t2-analyst-audit-template');
+      var jl13 = document.getElementById('t2-analyst-jl13-input');
+      if (audit && !audit._tplBound) {
+        audit._tplBound = true;
+        audit.addEventListener('input', window.t2SaveAuditTemplate);
+        audit.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            window.t2SaveAuditTemplate();
+            var wrap = document.getElementById('t2-tpl-audit-wrap');
+            if (wrap) wrap.open = false;
+            audit.blur();
+          }
+        });
+      }
+      if (jl13 && !jl13._tplBound) {
+        jl13._tplBound = true;
+        jl13.addEventListener('input', function () {
+          window.t2SaveJl13Template();
+          window.t2BindCharCounters();
+        });
+        jl13.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            window.t2SaveJl13Template();
+            var wrap = document.getElementById('t2-tpl-jl13-wrap');
+            if (wrap) wrap.open = false;
+            jl13.blur();
+          }
+        });
+      }
+    };
+
+    window.t2BindComposerResize = function () {
+      var ta = document.getElementById('t2-analyst-input');
+      if (!ta || ta._composerBound) return;
+      ta._composerBound = true;
+      var resize = function () {
+        ta.style.height = 'auto';
+        ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
+      };
+      ta.addEventListener('input', resize);
+      resize();
+    };
+
+    window.t2ResolveSubmitMessage = function () {
+      var input = document.getElementById('t2-analyst-input');
+      var audit = document.getElementById('t2-analyst-audit-template');
+      if (!input) return '';
+      var msg = (input.value || '').trim();
+      if (!msg && audit) msg = (audit.value || '').trim();
+      return msg;
+    };
+
+    window.t2GetCheckedSymbols = function () {
+      var panel = document.getElementById('t2-analyst-panel');
+      if (!panel) return [];
+      var out = [];
+      panel.querySelectorAll('input[name="symbols"]:checked').forEach(function (cb) {
+        if (cb.value) out.push(cb.value);
+      });
+      return out;
+    };
+
+    window.t2UpdateSymbolSummary = function () {
+      var panel = document.getElementById('t2-analyst-panel');
+      if (!panel) return;
+      var summary = panel.querySelector('.opus-toolbar-details summary');
+      if (!summary) return;
+      var n = window.t2GetCheckedSymbols().length;
+      var base = '标的与选项';
+      summary.textContent = n ? base + ' · ' + n + ' 只已选' : base + ' · 请勾选标的';
+    };
+
+    window.t2BindSymbolCheckboxes = function () {
+      var panel = document.getElementById('t2-analyst-panel');
+      if (!panel || panel._symBound) return;
+      panel._symBound = true;
+      panel.querySelectorAll('input[name="symbols"]').forEach(function (cb) {
+        cb.addEventListener('change', window.t2UpdateSymbolSummary);
+      });
+      window.t2UpdateSymbolSummary();
+    };
+
+    window.t2AnalystValidateSubmit = function (form) {
+      var panel = document.getElementById('t2-analyst-panel');
+      var maxOut = panel && parseInt(panel.getAttribute('data-max-output-tokens') || '0', 10);
+      var symbols = window.t2GetCheckedSymbols();
+      if (!symbols.length) {
+        alert('请至少选择一个标的（在上方「标的与选项」中勾选）');
+        return false;
+      }
+      if (maxOut > 0 && symbols.length > 4) {
+        if (!confirm('已选 ' + symbols.length + ' 只标的，Opus 输出硬顶 ' + maxOut.toLocaleString()
+            + ' tokens，易触顶截断。建议一次 ≤4 只。仍要提交？')) {
+          return false;
+        }
+      }
+      var msg = window.t2ResolveSubmitMessage();
+      if (!msg) {
+        alert('请输入问题，或在「组合审计模板」中填写默认提示');
+        return false;
+      }
+      var input = document.getElementById('t2-analyst-input');
+      if (input && !input.value.trim()) input.value = msg;
+      var jl13 = document.getElementById('t2-analyst-jl13-input');
+      if (jl13 && jl13.value.length > 2000) {
+        alert('JL1–3 模板超过 2000 字符上限');
+        return false;
+      }
+      if (msg.length > 4000) {
+        alert('问题超过 4000 字符上限');
+        return false;
+      }
+      return true;
+    };
+
+    if (window._t2AnalystBootBound) return;
+    window._t2AnalystBootBound = true;
+
+    document.body.addEventListener('htmx:beforeRequest', function (ev) {
+      var elt = ev.detail && ev.detail.elt;
+      if (elt && elt.id === 't2-analyst-form') {
+        window.t2SaveAuditTemplate();
+        window.t2SaveJl13Template();
+        if (!window.t2AnalystValidateSubmit(elt)) {
+          ev.preventDefault();
+          return;
+        }
+        window.t2AnalystSyncSid();
+        var preview = window.t2ResolveSubmitMessage().slice(0, 48);
+        window.t2UpsertSession(window.t2AnalystSid(), preview || '分析中…');
+      }
+    });
+
+    document.body.addEventListener('htmx:afterSwap', function (ev) {
+      var t = ev.detail && ev.detail.target;
+      if (!t) return;
+      if (t.id === 'opus-t2-panel-slot' || (t.querySelector && t.querySelector('#t2-analyst-panel'))) {
+        window.t2AnalystBootPanel();
+      }
+    });
+
+    document.body.addEventListener('htmx:afterSwap', function (ev) {
+      var t = ev.detail && ev.detail.target;
+      if (!t || t.id !== 't2-analyst-messages') return;
+      var KEY = window.T2_ANALYST_SID_KEY;
+      var JOB_KEY = window.T2_ANALYST_JOB_KEY;
+      var msgBox = t;
+      var form = document.getElementById('t2-analyst-form');
+      var input = document.getElementById('t2-analyst-input');
+      var jobEl = msgBox.querySelector('#t2-analyst-job-progress');
+      var jobId = jobEl && jobEl.getAttribute('data-job-id');
+      if (jobId) localStorage.setItem(JOB_KEY, jobId);
+      else localStorage.removeItem(JOB_KEY);
+      var inner = msgBox.querySelector('#executing-analyst-chat-inner');
+      var newSid = inner && inner.getAttribute('data-session-id');
+      if (newSid && newSid !== 'placeholder') {
+        localStorage.setItem(KEY, newSid);
+        var outer = form && form.querySelector('#t2-analyst-session-id');
+        if (outer) outer.value = newSid;
+        var firstUser = msgBox.querySelector('.t2-analyst-user, [data-role="user"]');
+        var title = firstUser ? (firstUser.textContent || '').trim().slice(0, 48) : '分析对话';
+        window.t2UpsertSession(newSid, title);
+      }
+      msgBox.scrollTop = msgBox.scrollHeight;
+      if (input) {
+        input.value = '';
+        input.style.height = 'auto';
+        input.focus();
+        window.t2BindCharCounters();
+      }
+    });
+
+    document.body.addEventListener('click', function (ev) {
+      var btn = ev.target.closest && ev.target.closest('[data-session-id]');
+      if (btn && btn.closest('#t2-analyst-session-list')) {
+        window.t2SwitchSession(btn.getAttribute('data-session-id'));
+        return;
+      }
+      if (ev.target && ev.target.id === 't2-analyst-new-btn') {
+        var form = document.getElementById('t2-analyst-form');
+        var oldEl = form && form.querySelector('#t2-analyst-session-id');
+        var oldId = (oldEl && oldEl.value) || window.t2AnalystSid();
+        if (typeof htmx !== 'undefined') {
+          htmx.ajax('POST', '/api/executing/analyst/chat/new', {
+            target: '#t2-analyst-messages',
+            swap: 'innerHTML',
+            values: { session_id: oldId }
+          }).then(function () {
+            localStorage.removeItem(window.T2_ANALYST_SID_KEY);
+            localStorage.removeItem(window.T2_ANALYST_JOB_KEY);
+            var nid = window.t2AnalystSyncSid();
+            window.t2UpsertSession(nid, '新话题');
+          });
+        }
+      }
+    });
+
+    document.body.addEventListener('keydown', function (ev) {
+      if (ev.target.id !== 't2-analyst-input') return;
+      if (ev.key !== 'Enter' || ev.shiftKey) return;
+      ev.preventDefault();
+      var form = document.getElementById('t2-analyst-form');
+      if (!form || !window.t2ResolveSubmitMessage()) return;
+      if (!window.t2AnalystValidateSubmit(form)) return;
+      window.t2AnalystSyncSid();
+      if (typeof htmx !== 'undefined') htmx.trigger(form, 'submit');
+    });
+
+    window.t2SelectedSymbols = function () {
+      return window.t2GetCheckedSymbols();
+    };
+
+    window.t2ShowPinToast = function (bubble, msg, ok) {
+      if (!bubble) return;
+      var toast = bubble.querySelector('.opus-pin-toast');
+      if (!toast) return;
+      toast.textContent = msg || '';
+      toast.classList.remove('hidden');
+      toast.classList.toggle('text-emerald-700', ok !== false);
+      toast.classList.toggle('text-rose-600', ok === false);
+      clearTimeout(toast._hideTimer);
+      toast._hideTimer = setTimeout(function () { toast.classList.add('hidden'); }, 5000);
+    };
+
+    document.body.addEventListener('click', function (ev) {
+      var pinBtn = ev.target.closest && ev.target.closest('[data-opus-action="pin-executing"]');
+      if (pinBtn) {
+        ev.preventDefault();
+        var rid = pinBtn.getAttribute('data-request-id');
+        var symbols = window.t2SelectedSymbols();
+        if (!symbols.length) {
+          alert('请先在上方「标的与选项」中勾选要同步的标的');
+          return;
+        }
+        var bubble = pinBtn.closest('.opus-assistant-bubble');
+        var menu = pinBtn.closest('details.opus-msg-menu');
+        if (menu) menu.open = false;
+        pinBtn.disabled = true;
+        var fd = new FormData();
+        fd.append('request_id', rid);
+        symbols.forEach(function (s) { fd.append('symbols', s); });
+        fetch('/api/executing/analyst/pin-to-executing', { method: 'POST', body: fd })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            pinBtn.disabled = false;
+            if (res.ok && res.j.ok) {
+              window.t2ShowPinToast(bubble, res.j.message || '已同步到执行区', true);
+            } else {
+              window.t2ShowPinToast(bubble, (res.j && res.j.error) || '同步失败', false);
+            }
+          })
+          .catch(function () {
+            pinBtn.disabled = false;
+            window.t2ShowPinToast(bubble, '网络错误，请重试', false);
+          });
+        return;
+      }
+      var copyBtn = ev.target.closest && ev.target.closest('[data-opus-action="copy-reply"]');
+      if (copyBtn) {
+        ev.preventDefault();
+        var body = copyBtn.closest('.opus-assistant-bubble');
+        var textEl = body && body.querySelector('.opus-assistant-body');
+        var text = textEl ? (textEl.innerText || '').trim() : '';
+        if (!text) return;
+        var menu = copyBtn.closest('details.opus-msg-menu');
+        if (menu) menu.open = false;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () {
+            window.t2ShowPinToast(body, '已复制到剪贴板', true);
+          });
+        }
+        return;
+      }
+      if (!ev.target.closest('.opus-msg-menu')) {
+        document.querySelectorAll('details.opus-msg-menu[open]').forEach(function (d) {
+          d.open = false;
+        });
+      }
+    });
+  })();
+</script>

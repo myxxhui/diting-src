@@ -130,7 +130,10 @@ async def test_executing_workspace_renders_all_symbol_loaders():
     ]
     resp = _render_workspace_symbols_html(items, view="executing", container_id=1)
     body = resp.body.decode()
-    assert body.count("executing-symbol-card") == 2
+    assert body.count("executing-symbol-card-wrap") == 2
+    assert body.count("executing-symbol-card group") == 2
+    assert "暂无 T2 持仓分析" in body
+    assert "/opus" in body
     assert "hx-trigger='load once'" in body
     assert "revealed once" not in body
     assert "/api/executing/601138/detail" in body

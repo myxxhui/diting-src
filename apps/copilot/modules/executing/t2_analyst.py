@@ -20,11 +20,12 @@ from apps.copilot.modules.executing.t2_preexec_envelope import (
     build_t2_preexec_envelope,
 )
 from apps.copilot.modules.executing.t2_token_limits import (
+    inject_t2_output_budget,
     token_limits_summary,
     t2_max_output_tokens,
     validate_t2_opus_messages,
 )
-from apps.copilot.modules.radar.chat import resolve_opus_model
+from apps.copilot.modules.radar.chat import chat_model_route, resolve_chat_model
 from apps.copilot.modules.radar.schema import estimate_cost_yuan
 
 logger = logging.getLogger(__name__)
@@ -316,6 +317,38 @@ async def warm_t2_analyst_sessions_from_pg(
     return {"sessions": len(rows), "warmed": warmed}
 
 
+async def list_t2_analyst_sessions(
+    db_session: AsyncSession,
+    *,
+    limit: int = 40,
+) -> list[dict[str, Any]]:
+    from apps.copilot.db.models import ExecutingT2AnalystSession
+    from apps.copilot.modules.radar.chat import title_from_messages
+    from sqlalchemy import select
+
+    rows = (
+        await db_session.scalars(
+            select(ExecutingT2AnalystSession)
+            .order_by(ExecutingT2AnalystSession.updated_at.desc())
+            .limit(max(1, min(limit, 200)))
+        )
+    ).all()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        msgs = row.messages_json or []
+        if not msgs:
+            continue
+        ts = int(row.updated_at.timestamp() * 1000) if row.updated_at else 0
+        out.append(
+            {
+                "id": row.session_id,
+                "title": title_from_messages(msgs, default="新分析"),
+                "updatedAt": ts,
+            }
+        )
+    return out
+
+
 async def save_analyst_messages(
     session_id: str,
     messages: list[dict[str, Any]],
@@ -380,7 +413,8 @@ async def assemble_t2_analyst_payload(
 
     envelope = build_t2_preexec_envelope(t1)
     messages = build_executing_opus_messages(envelope)
-    resolved_model = resolve_opus_model(model_id)
+    inject_t2_output_budget(envelope, messages, symbol_count=len(syms))
+    resolved_model = resolve_chat_model(model_id)
 
     composed_question = compose_user_question(
         user_question,
@@ -405,7 +439,8 @@ async def assemble_t2_analyst_payload(
             + composed_question
             + "\n\n## 当前持仓（holding_honesty 须基于此，禁止写「今日首次建仓」）\n"
             + pos_hint
-            + "\n须优先回应 user_question，并严格按 output_contract 输出单个 JSON。"
+            + "\n须优先回应 user_question，并严格按 output_contract 输出单个 JSON；"
+            + "总篇幅不得超过 output_contract.max_output_tokens。"
         )
 
     jl4_counts = {
@@ -434,14 +469,48 @@ async def assemble_t2_analyst_payload(
 
 
 def _parse_opus_audit_json(text: str) -> dict[str, Any]:
-    start = text.find("{")
-    end = text.rfind("}") + 1
-    if start >= 0 and end > start:
+    """解析 Opus T2 输出 JSON；容忍 ``` 围栏与末尾多余字符。"""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return {"raw_text": ""}
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+
+    start = cleaned.find("{")
+    if start < 0:
+        return {"raw_text": text[:4000]}
+
+    decoder = json.JSONDecoder()
+    try:
+        obj, _end = decoder.raw_decode(cleaned, start)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+
+    end = cleaned.rfind("}") + 1
+    if end > start:
+        chunk = cleaned[start:end]
         try:
-            return json.loads(text[start:end])
+            return json.loads(chunk)
         except json.JSONDecodeError:
-            pass
+            for trim in range(1, 6):
+                try:
+                    return json.loads(chunk[:-trim])
+                except json.JSONDecodeError:
+                    continue
     return {"raw_text": text[:4000]}
+
+
+def _is_transient_opus_error(exc: BaseException) -> bool:
+    from apps.common.ai_dispatcher import is_transient_anthropic_error
+
+    return is_transient_anthropic_error(exc)
 
 
 async def invoke_t2_opus_audit(
@@ -450,8 +519,13 @@ async def invoke_t2_opus_audit(
     model_id: str,
 ) -> dict[str, Any]:
     """调用 Opus 完成 T2 持仓审计。"""
+    import time as _time
+
     input_stats = validate_t2_opus_messages(opus_messages)
     max_out = t2_max_output_tokens()
+    t0 = _time.perf_counter()
+
+    route = chat_model_route(model_id)
 
     def _blocking() -> Any:
         from apps.common.ai_dispatcher import AIDispatcher, BudgetExceededError
@@ -462,20 +536,32 @@ async def invoke_t2_opus_audit(
                 opus_messages,
                 max_tokens=max_out,
                 temperature=0.2,
-                force_route="remote",
+                force_route=route,
                 model_override=model_id,
             )
         except BudgetExceededError as exc:
             raise RuntimeError(f"日预算上限：{exc}") from exc
 
-    resp = await asyncio.to_thread(_blocking)
+    try:
+        resp = await asyncio.to_thread(_blocking)
+    except RuntimeError as exc:
+        elapsed = int((_time.perf_counter() - t0) * 1000)
+        raise RuntimeError(f"{exc} [failed_after_ms={elapsed}]") from exc
     if resp.model == "mock" or (resp.raw or {}).get("_dispatcher_mock"):
+        if route == "deepseek":
+            raise RuntimeError(
+                "DeepSeek 调用失败（请检查 DEEPSEEK_API_KEY 有效性或账户余额）"
+            )
         raise RuntimeError(
             "Opus 不可达（请配置 ANTHROPIC_API_KEY / ANTHROPIC_HTTPS_PROXY）"
         )
 
     text = (resp.text or "").strip() or "{}"
     audit = _parse_opus_audit_json(text)
+    parse_ok = bool(
+        isinstance(audit, dict)
+        and (audit.get("Execution_Command") or audit.get("symbol_audits"))
+    )
     cost = estimate_cost_yuan(resp.tokens_in, resp.tokens_out)
     if resp.cost_yuan_est and resp.cost_yuan_est > 0:
         cost = resp.cost_yuan_est
@@ -497,60 +583,33 @@ async def invoke_t2_opus_audit(
             "truncated": truncated,
             "max_output_tokens": max_out,
             "input_chars": input_stats.get("input_chars"),
+            "parse_ok": parse_ok,
         },
-        "raw_text": text[:16_000],
+        "raw_text": text[:64_000],
     }
 
 
 def format_assembly_summary(payload: dict[str, Any]) -> str:
-    """仅拼接 envelope、未调用 Opus 时的摘要。"""
+    """仅拼接 envelope、未调用模型时的摘要。"""
+    reason = payload.get("opus_skip_reason") or "模型未启用或缺少 API Key"
     syms = ", ".join(payload.get("symbols") or [])
-    jl4 = payload.get("jl4_indicator_counts") or {}
-    jl4_line = " · ".join(f"{k} {v}项" for k, v in jl4.items()) or "无"
-    model = payload.get("model_id") or "—"
-    jl4_on = "开" if payload.get("include_t1_jl4") else "关"
-    qa_n = len((payload.get("envelope") or {}).get("qa_index") or [])
-    reason = payload.get("opus_skip_reason") or "T2 Opus 未启用或缺少 API Key"
     return (
-        f"[仅数据拼接 · 未调用 Opus]\n"
-        f"原因: {reason}\n"
-        f"模型: {model} · JL4 T1: {jl4_on}\n"
-        f"标的: {syms or '—'}\n"
-        f"JL4 指标: {jl4_line}\n"
-        f"qa_index: {qa_n} 条\n"
-        f"展开下方 JSON 检查 envelope / opus_messages"
+        f"数据已准备完毕，尚未调用模型分析。\n"
+        f"原因：{reason}\n"
+        f"标的：{syms or '—'}"
     )
 
 
 def format_opus_audit_summary(payload: dict[str, Any]) -> str:
-    """Opus 推理完成后的对话区摘要。"""
+    """模型推理完成后的对话区纯文本摘要（中文）。"""
+    from apps.copilot.modules.executing.t2_analyst_render import extract_t2_prose_text
+
+    prose = extract_t2_prose_text(payload)
+    if prose:
+        return prose
     audit = payload.get("opus_audit") or {}
-    meta = payload.get("opus_meta") or {}
     cmd = audit.get("Execution_Command") or {}
-    action = cmd.get("action") or "—"
-    summary = cmd.get("one_sentence_summary") or ""
-    l3 = (audit.get("Executing_Daily_Audit") or {}).get("L3_Fundamental_Verdict") or ""
-    l4 = (audit.get("Executing_Daily_Audit") or {}).get("L4_Microstructure_Verdict") or ""
-    targets = cmd.get("targets") or []
-    target_lines = []
-    for t in targets[:5]:
-        if isinstance(t, dict):
-            target_lines.append(
-                f"  · {t.get('symbol', '—')} {t.get('advice', '')} {t.get('pct_change', '')}"
-            )
-    targets_txt = "\n".join(target_lines) if target_lines else "  （无 targets）"
-    cost = meta.get("cost_yuan")
-    cost_line = f"¥{float(cost):.4f}" if cost is not None else "—"
-    return (
-        f"[T2 Opus 持仓审计完成]\n"
-        f"组合 action: {action}\n"
-        f"一句话: {summary or '—'}\n"
-        f"L3: {(l3[:120] + '…') if len(l3) > 120 else l3 or '—'}\n"
-        f"L4: {(l4[:120] + '…') if len(l4) > 120 else l4 or '—'}\n"
-        f"targets:\n{targets_txt}\n"
-        f"模型 {meta.get('model') or '—'} · {cost_line} · "
-        f"入{meta.get('tokens_in', 0)}/出{meta.get('tokens_out', 0)} tok"
-    )
+    return (cmd.get("one_sentence_summary") or "").strip() or "分析已完成，详见审计页。"
 
 
 async def persist_t2_analyst_request(
@@ -592,12 +651,18 @@ async def analyst_chat_turn(
     jl13_data_prompt: str = "",
     include_jl13_data: bool = True,
     redis_client: Any = None,
+    progress_cb: Any = None,
 ) -> dict[str, Any]:
     """T2 多轮对话：组装 envelope → 调用 Opus（已启用时）→ 存档。"""
     sid = (session_id or "").strip() or new_analyst_session_id()
+    if sid == "placeholder":
+        sid = new_analyst_session_id()
     question = (user_question or "").strip()
     if not question:
         raise ValueError("请输入关键词或提示词问题")
+
+    if progress_cb:
+        progress_cb("assemble", 15, "组装 JL4 envelope 与公开市场数据…")
 
     payload = await assemble_t2_analyst_payload(
         session,
@@ -615,6 +680,12 @@ async def analyst_chat_turn(
     opus_error: str | None = None
 
     if t2_opus_enabled():
+        if progress_cb:
+            progress_cb(
+                "opus",
+                35,
+                "Opus 审计中（经新加坡出口代理 · 完整审计约 3～5 分钟）…",
+            )
         try:
             opus_result = await invoke_t2_opus_audit(
                 payload["opus_messages"],
@@ -658,9 +729,12 @@ async def analyst_chat_turn(
         "status": status,
         "error": opus_error,
     }
-    from apps.copilot.modules.executing.t2_analyst_render import render_t2_assistant_card
+    from apps.copilot.modules.executing.t2_analyst_render import render_t2_chat_prose
 
-    payload["assistant_render_html"] = render_t2_assistant_card(payload, assistant_meta)
+    payload["assistant_render_html"] = render_t2_chat_prose(payload, assistant_meta)
+
+    if progress_cb:
+        progress_cb("persist", 92, "写入审计与会话历史…")
 
     await persist_t2_analyst_request(
         session, session_id=sid, payload=payload, request_id=request_id
@@ -705,3 +779,46 @@ async def analyst_chat_turn(
         "status": status,
         "error": opus_error,
     }
+
+
+async def run_t2_analyst_job(
+    job_id: str,
+    *,
+    session_id: str,
+    symbols: list[str],
+    user_question: str,
+    model_id: str | None,
+    include_t1_jl4: bool,
+    jl13_data_prompt: str,
+    include_jl13_data: bool,
+    redis_client: Any,
+) -> None:
+    """后台执行 T2 分析（独立 DB 会话 · Redis 进度供 HTMX 轮询）。"""
+    from apps.copilot.db.database import AsyncSessionLocal
+    from apps.copilot.modules.executing.t2_analyst_progress import (
+        fail_job,
+        finish_job,
+        make_progress_callback,
+    )
+
+    cb = make_progress_callback(redis_client, job_id)
+    async with AsyncSessionLocal() as session:
+        try:
+            result = await analyst_chat_turn(
+                session,
+                session_id=session_id,
+                symbols=symbols,
+                user_question=user_question,
+                model_id=model_id,
+                include_t1_jl4=include_t1_jl4,
+                jl13_data_prompt=jl13_data_prompt,
+                include_jl13_data=include_jl13_data,
+                redis_client=redis_client,
+                progress_cb=cb,
+            )
+            await session.commit()
+            finish_job(redis_client, job_id, result)
+        except Exception as exc:  # noqa: BLE001
+            await session.rollback()
+            logger.exception("T2 analyst job %s failed", job_id)
+            fail_job(redis_client, job_id, str(exc)[:500])

@@ -90,6 +90,7 @@
     /** 执行区：展开折叠卡时若详情未加载则补拉（兜底） */
     window.executingBootPanel = function () {
       document.querySelectorAll('.executing-symbol-card').forEach(function (details) {
+        details.open = false;
         if (details._executingBound) return;
         details._executingBound = true;
         details.addEventListener('toggle', function () {

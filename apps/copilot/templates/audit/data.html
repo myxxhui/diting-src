@@ -15,7 +15,7 @@
 
 <div id="t2-analyst-audit" class="bg-white rounded-xl shadow-sm border border-violet-100 p-5 mb-5">
   <h2 class="text-base font-semibold text-violet-900 mb-1">T2 持仓分析 · 推理数据集审计</h2>
-  <p class="text-xs text-gray-500 mb-4">每次在执行中工作台提问，自动保存 envelope、opus_messages 与 opus_audit 完整 payload</p>
+  <p class="text-xs text-gray-500 mb-4">每次在 <a href="/opus" class="text-violet-600 underline">Opus 分析工作台</a> 提交 T2 分析，自动保存 envelope、opus_messages 与 opus_audit 完整 payload</p>
   <div id="t2-analyst-audit-detail"
        hx-get="/api/executing/analyst/audit-detail-html{% if t2_id %}?t2_id={{ t2_id }}{% endif %}"
        hx-trigger="load"

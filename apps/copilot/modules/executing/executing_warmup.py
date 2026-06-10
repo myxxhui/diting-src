@@ -90,9 +90,12 @@ async def warm_executing_all_redis_from_pg(
     *,
     symbols: list[str] | None = None,
     analyst_session_limit: int = 50,
+    radar_chat_session_limit: int = 50,
 ) -> dict[str, Any]:
-    """探针热缓存 + T2 分析对话会话一并预热。"""
+    """探针热缓存 + T2 / 雷达对话会话 + UI 设置一并预热。"""
+    from apps.copilot.modules.copilot_ui_settings import warm_ui_settings_from_pg
     from apps.copilot.modules.executing.t2_analyst import warm_t2_analyst_sessions_from_pg
+    from apps.copilot.modules.radar.chat import warm_radar_chat_sessions_from_pg
 
     probe_stats = await warm_executing_redis_from_pg(
         session, redis_client, symbols=symbols
@@ -100,7 +103,16 @@ async def warm_executing_all_redis_from_pg(
     chat_stats = await warm_t2_analyst_sessions_from_pg(
         session, redis_client, limit=analyst_session_limit
     )
-    return {"probe": probe_stats, "t2_analyst_chat": chat_stats}
+    radar_stats = await warm_radar_chat_sessions_from_pg(
+        session, redis_client, limit=radar_chat_session_limit
+    )
+    ui_stats = await warm_ui_settings_from_pg(session)
+    return {
+        "probe": probe_stats,
+        "t2_analyst_chat": chat_stats,
+        "radar_chat": radar_stats,
+        "ui_settings": ui_stats,
+    }
 
 
 async def count_t1_snapshots(session: AsyncSession, symbol: str) -> int:

@@ -15,8 +15,8 @@ from apps.copilot.modules.executing.t2_token_limits import (
 def test_default_limits(monkeypatch):
     monkeypatch.delenv("EXECUTING_T2_MAX_OUTPUT_TOKENS", raising=False)
     monkeypatch.delenv("EXECUTING_T2_MAX_INPUT_CHARS", raising=False)
-    assert t2_max_output_tokens() == 16384
-    assert t2_max_input_chars() == 180_000
+    assert t2_max_output_tokens() == 32000
+    assert t2_max_input_chars() == 400_000
 
 
 def test_env_override(monkeypatch):
@@ -42,3 +42,19 @@ def test_validate_input_too_large(monkeypatch):
     monkeypatch.setenv("EXECUTING_T2_MAX_INPUT_CHARS", "15000")
     with pytest.raises(ValueError, match="T2 输入过大"):
         validate_t2_opus_messages([{"role": "user", "content": "x" * 20_000}])
+
+
+def test_output_budget_injection(monkeypatch):
+    from apps.copilot.modules.executing.t2_token_limits import inject_t2_output_budget
+
+    monkeypatch.delenv("EXECUTING_T2_MAX_OUTPUT_TOKENS", raising=False)
+    envelope = {"output_contract": {"rules": ["existing"]}}
+    messages = [
+        {"role": "system", "content": "base"},
+        {"role": "user", "content": '{"output_contract": {"rules": []}}'},
+    ]
+    inject_t2_output_budget(envelope, messages, symbol_count=3)
+    assert "max_output_tokens=32,000" in messages[0]["content"]
+    assert envelope["output_contract"]["rules"][0].startswith("总输出 JSON ≤")
+    user_body = __import__("json").loads(messages[1]["content"])
+    assert user_body["output_contract"]["max_output_tokens"] == 32000

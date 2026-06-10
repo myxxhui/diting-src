@@ -73,8 +73,6 @@ from apps.copilot.modules.radar.chat import (
     DEFAULT_CHAT_MODEL,
     RADAR_CHAT_MODELS,
     chat_turn,
-    clear_session,
-    load_messages,
     new_session_id,
 )
 from apps.copilot.modules.radar.persistence import (
@@ -330,7 +328,10 @@ async def opus_chat_page(request: Request):
     return _tpl(request).TemplateResponse(
         request,
         "audit/opus.html",
-        {"chat_models": RADAR_CHAT_MODELS},
+        {
+            "chat_models": RADAR_CHAT_MODELS,
+            "default_model": DEFAULT_CHAT_MODEL,
+        },
     )
 
 
@@ -438,9 +439,22 @@ async def api_list_campaigns(
     if view in ("planning", "executing"):
         symbols = await list_workspace_symbols(session, view=view)
         container = await get_or_create_container(session)
+        t2_summaries: dict = {}
+        if view == "executing":
+            from apps.copilot.modules.executing.t2_executing_pin import (
+                load_pinned_t2_summaries_for_symbols,
+            )
+
+            sym_list = [s.get("symbol", "") for s in symbols if s.get("symbol")]
+            t2_summaries = await load_pinned_t2_summaries_for_symbols(session, sym_list)
         await session.commit()
         if want_html:
-            return _render_workspace_symbols_html(symbols, view=view, container_id=container.id)
+            return _render_workspace_symbols_html(
+                symbols,
+                view=view,
+                container_id=container.id,
+                t2_summaries=t2_summaries,
+            )
         return symbols
     items = await list_campaigns(session, view=view)
     if want_html:
@@ -611,19 +625,30 @@ async def api_get_radar_display_layout():
 
 
 @router.put("/api/radar/display-layout")
-async def api_put_radar_display_layout(request: Request):
+async def api_put_radar_display_layout(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    from apps.copilot.modules.radar.display_layout import save_saved_layout_async
+
     try:
         body = await request.json()
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail="需要 JSON 请求体") from exc
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="无效 JSON")
-    return save_saved_layout(body)
+    result = await save_saved_layout_async(session, body)
+    await session.commit()
+    return result
 
 
 @router.delete("/api/radar/display-layout")
-async def api_delete_radar_display_layout():
-    return layout_to_jsonable(reset_saved_layout())
+async def api_delete_radar_display_layout(session: AsyncSession = Depends(get_db)):
+    from apps.copilot.modules.radar.display_layout import reset_saved_layout_async
+
+    result = await reset_saved_layout_async(session)
+    await session.commit()
+    return layout_to_jsonable(result)
 
 
 @router.get("/api/radar/workbench-prefs")
@@ -635,8 +660,11 @@ async def api_get_radar_workbench_prefs():
 
 
 @router.put("/api/radar/workbench-prefs")
-async def api_put_radar_workbench_prefs(request: Request):
-    from apps.copilot.modules.radar.workbench_prefs import save_prefs
+async def api_put_radar_workbench_prefs(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    from apps.copilot.modules.radar.workbench_prefs import save_prefs_async
 
     try:
         body = await request.json()
@@ -644,14 +672,18 @@ async def api_put_radar_workbench_prefs(request: Request):
         raise HTTPException(status_code=400, detail="需要 JSON 请求体") from exc
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="无效 JSON")
-    return save_prefs(body)
+    result = await save_prefs_async(session, body)
+    await session.commit()
+    return result
 
 
 @router.delete("/api/radar/workbench-prefs")
-async def api_delete_radar_workbench_prefs():
-    from apps.copilot.modules.radar.workbench_prefs import reset_prefs
+async def api_delete_radar_workbench_prefs(session: AsyncSession = Depends(get_db)):
+    from apps.copilot.modules.radar.workbench_prefs import reset_prefs_async
 
-    return reset_prefs()
+    result = await reset_prefs_async(session)
+    await session.commit()
+    return result
 
 
 def _layout_from_request(request: Request) -> dict[str, Any]:
@@ -1038,6 +1070,7 @@ async def api_radar_chat(
             symbol=sym,
             scan_context=scan_ctx,
             model_id=model_id or None,
+            db_session=session,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1051,22 +1084,65 @@ async def api_radar_chat(
 async def api_radar_chat_new(
     request: Request,
     session_id: str = Form(""),
+    session: AsyncSession = Depends(get_db),
 ):
     """清空当前会话，开始新对话。"""
-    clear_session(_sync_redis(), session_id)
+    from apps.copilot.modules.radar.chat import clear_session_async
+
+    await clear_session_async(session_id, redis_client=_sync_redis(), db_session=session)
+    await session.commit()
     payload = {"session_id": new_session_id(), "messages": [], "status": "new"}
     if request.headers.get("hx-request"):
         return HTMLResponse(_render_chat_panel(payload))
     return payload
 
 
+@router.get("/api/radar/chat/sessions")
+async def api_radar_chat_sessions(
+    session: AsyncSession = Depends(get_db),
+    limit: int = 40,
+):
+    from apps.copilot.modules.radar.chat import list_radar_chat_sessions
+
+    return {"sessions": await list_radar_chat_sessions(session, limit=limit)}
+
+
+@router.get("/api/radar/query-history")
+async def api_radar_query_history_get(session: AsyncSession = Depends(get_db)):
+    from apps.copilot.modules.copilot_ui_settings import load_query_history
+
+    return await load_query_history(session)
+
+
+@router.post("/api/radar/query-history")
+async def api_radar_query_history_post(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    from apps.copilot.modules.copilot_ui_settings import remember_query
+
+    try:
+        body = await request.json()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="需要 JSON 请求体") from exc
+    q = (body.get("query") if isinstance(body, dict) else "") or ""
+    result = await remember_query(session, q)
+    await session.commit()
+    return result
+
+
 @router.get("/api/radar/chat/{session_id}")
 async def api_radar_chat_history(
     session_id: str,
     request: Request,
+    session: AsyncSession = Depends(get_db),
 ):
     """拉取会话历史（HTML 片段）。"""
-    messages = load_messages(_sync_redis(), session_id)
+    from apps.copilot.modules.radar.chat import load_messages_async
+
+    messages = await load_messages_async(
+        session_id, redis_client=_sync_redis(), db_session=session
+    )
     payload = {"session_id": session_id, "messages": messages, "status": "ok"}
     if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
         return HTMLResponse(_render_chat_panel(payload))
@@ -1523,9 +1599,12 @@ def _render_radar_candidates_html(items: list, *, flash: str = "") -> HTMLRespon
 
 
 def _render_workspace_symbols_html(
-    items: list, *, view: str, container_id: int
+    items: list, *, view: str, container_id: int, t2_summaries: dict | None = None
 ) -> HTMLResponse:
     """规划/执行区标的卡（标的级漏斗联动渲染）。"""
+    t2_summaries = t2_summaries or {}
+    if view == "executing":
+        from apps.copilot.modules.executing.t2_advice_summary import render_executing_t2_banner
     if not items:
         hint = {
             "planning": "规划区暂无标的 · 从行情雷达晋级，或导入持仓",
@@ -1534,7 +1613,7 @@ def _render_workspace_symbols_html(
         return HTMLResponse(f"<p class='text-sm text-gray-500 py-4 text-center'>{hint}</p>")
 
     cards: list[str] = []
-    for i, s in enumerate(items):
+    for s in items:
         sym = s.get("symbol", "")
         name = s.get("name", sym)
         phase = _phase_chip(s.get("market_phase"))
@@ -1588,10 +1667,13 @@ def _render_workspace_symbols_html(
                 f" · 成本 {cost_txt}"
                 f" · 建仓 {opened}</span>"
             )
-            open_attr = " open" if i == 0 else ""
+            t2_banner = render_executing_t2_banner(sym, t2_summaries.get(sym))
             cards.append(
-                f"<details class='executing-symbol-card group bg-white border border-gray-200 rounded-xl mb-4 "
-                f"shadow-sm hover:shadow-md transition-shadow overflow-hidden'{open_attr} data-symbol='{sym}'>"
+                f"<div class='executing-symbol-card-wrap mb-4' data-symbol='{sym}'>"
+                f"{t2_banner}"
+                f"<details class='executing-symbol-card group bg-white border border-gray-200 rounded-b-xl "
+                f"{'rounded-t-xl border-t-0' if t2_banner else 'rounded-xl'} "
+                f"shadow-sm hover:shadow-md transition-shadow overflow-hidden' data-symbol='{sym}'>"
                 f"<summary class='cursor-pointer list-none px-5 py-4 hover:bg-gray-50 flex flex-wrap "
                 f"items-center gap-2 border-b border-transparent group-open:border-gray-200 "
                 f"[&::-webkit-details-marker]:hidden'>"
@@ -1635,7 +1717,7 @@ def _render_workspace_symbols_html(
                 f"<path class='opacity-75' fill='currentColor' "
                 f"d='M4 12a8 8 0 018-8v8H4z'></path></svg>"
                 f"正在加载 JL1–4 指标缓存…</p></div>"
-                f"</div></details>"
+                f"</div></details></div>"
             )
     if view == "executing":
         return HTMLResponse(

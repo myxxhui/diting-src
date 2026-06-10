@@ -1104,6 +1104,54 @@ class ExecutingT2AnalystRequest(Base):
     )
 
 
+class ExecutingT2ExecutingPin(Base):
+    """用户手动将某次 T2 分析同步到执行区标的卡（每标的仅保留一条 pin）。
+
+    [Ref: 28_ §5 · Opus 分析区手动同步]
+    """
+
+    __tablename__ = "executing_t2_executing_pins"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False, unique=True, index=True)
+    request_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    pinned_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class RadarChatSession(Base):
+    """雷达 Opus 日常对话会话（PG 底库 · Redis 热缓存回填源）。
+
+    [Ref: 28_ · 部署可恢复]
+    """
+
+    __tablename__ = "radar_chat_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True, index=True)
+    messages_json: Mapped[list] = mapped_column(JSON_TYPE, nullable=False, default=list)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False, index=True
+    )
+
+
+class CopilotUiSetting(Base):
+    """Copilot UI 持久化键值（工作台偏好 / 展示布局 / 搜索历史等）。
+
+    [Ref: 28_ · 部署可恢复]
+    """
+
+    __tablename__ = "copilot_ui_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    setting_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    payload_json: Mapped[dict] = mapped_column(JSON_TYPE, nullable=False, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
 class ExecutingDailyAudit(Base):
     """T1 telemetry + T2 audit 日快照。"""
 

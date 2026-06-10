@@ -302,6 +302,20 @@ def test_radar_concept_not_implemented(client):
     assert r.status_code == 501
 
 
+def test_resolve_chat_model_deepseek():
+    from apps.copilot.modules.radar.chat import chat_model_route, resolve_chat_model
+    from apps.copilot.modules.radar.deepseek_models import resolve_deepseek_api
+
+    assert resolve_chat_model("deepseek-chat") == "deepseek:deepseek-chat"
+    assert resolve_chat_model("deepseek-r1") == "deepseek:deepseek-reasoner"
+    assert resolve_chat_model("deepseek:deepseek-v4-pro") == "deepseek:deepseek-v4-pro"
+    assert chat_model_route("deepseek:deepseek-chat") == "deepseek"
+    assert chat_model_route("claude-opus-4-6") == "remote"
+    api_model, thinking = resolve_deepseek_api("deepseek:deepseek-v4-pro")
+    assert api_model == "deepseek-v4-pro"
+    assert thinking is True
+
+
 def test_resolve_opus_model_remaps_invalid_slug():
     from apps.copilot.modules.radar.chat import resolve_opus_model
 

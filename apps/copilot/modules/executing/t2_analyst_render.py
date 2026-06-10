@@ -9,6 +9,8 @@ import json
 import re
 from typing import Any
 
+from apps.copilot.modules.executing.t2_advice_summary import structured_audit_from_payload
+
 
 def _esc(s: Any) -> str:
     return html.escape(str(s) if s is not None else "")
@@ -339,7 +341,7 @@ def _render_truncation_warning(meta: dict[str, Any], payload: dict[str, Any]) ->
         "<p class='text-[11px] text-amber-700 bg-amber-50 border border-amber-200 "
         "rounded px-2 py-1 mt-2'>"
         f"⚠️ 输出已达上限（{ _esc(max_out) } tokens），JSON 可能被截断；"
-        "可提高 EXECUTING_T2_MAX_OUTPUT_TOKENS 后重试</p>"
+        "请减少标的数量或精简问题后重试</p>"
     )
 
 
@@ -411,11 +413,265 @@ def _render_assembly_section(payload: dict[str, Any]) -> str:
 """
 
 
+def _render_truncated_fail_section(payload: dict[str, Any], meta: dict[str, Any]) -> str:
+    """Opus 已响应但输出 token 触顶，JSON 不完整无法渲染组合结论。"""
+    opus_meta = payload.get("opus_meta") or {}
+    audit = payload.get("opus_audit") or {}
+    raw = (
+        payload.get("opus_raw_text")
+        or (audit.get("raw_text") if isinstance(audit, dict) else "")
+        or ""
+    )
+    max_out = opus_meta.get("max_output_tokens") or (payload.get("token_limits") or {}).get(
+        "max_output_tokens"
+    )
+    excerpt = _esc(str(raw)[-1200:]) if raw else "（无缓存文本）"
+    return f"""
+<section class="rounded-lg border border-amber-300 bg-amber-50/80 p-3 mb-3">
+  <h3 class="text-sm font-semibold text-amber-900 mb-2">⚠️ Opus 已返回，但输出被 token 上限截断</h3>
+  <p class="text-xs text-amber-900 leading-relaxed">
+    本次输出 <strong>{_esc(opus_meta.get('tokens_out', '?'))}</strong> tokens，触顶
+    <strong>{_esc(max_out)}</strong>（stop_reason=max_tokens），JSON 不完整，无法解析组合结论。
+    请<strong>减少同时分析的标的数量</strong>或精简 JL1–3 问题后重新提交；Prompt 已要求 Opus 在 { _esc(max_out) } tokens 内闭合 JSON。
+  </p>
+  <p class="text-[11px] text-amber-800 mt-2">响应末尾片段（供人工扫读）：</p>
+  <pre class="text-[10px] bg-white/80 border border-amber-200 rounded p-2 mt-1 max-h-40 overflow-auto whitespace-pre-wrap">{excerpt}</pre>
+  {_render_truncation_warning(opus_meta, payload)}
+</section>
+"""
+
+
+def _render_json_parse_fail_section(payload: dict[str, Any], meta: dict[str, Any]) -> str:
+    """Opus 已响应但 JSON 解析失败（常见：末尾多余字符）。"""
+    opus_meta = payload.get("opus_meta") or {}
+    raw = payload.get("opus_raw_text") or (payload.get("opus_audit") or {}).get("raw_text") or ""
+    reparsed = structured_audit_from_payload(payload)
+    if reparsed.get("Execution_Command") or reparsed.get("symbol_audits"):
+        return ""
+    excerpt = _esc(str(raw)[-800:]) if raw else "（无缓存文本）"
+    return f"""
+<section class="rounded-lg border border-amber-300 bg-amber-50/80 p-3 mb-3">
+  <h3 class="text-sm font-semibold text-amber-900 mb-2">⚠️ Opus 已返回，但 JSON 解析失败</h3>
+  <p class="text-xs text-amber-900 leading-relaxed">
+    模型已输出 { _esc(opus_meta.get('tokens_out', '?')) } tokens，结构不符合 output_contract
+    （常见原因：JSON 末尾多余字符）。请<strong>重新提交</strong>；若重复出现请联系排查。
+  </p>
+  <p class="text-[11px] text-amber-800 mt-2">响应末尾片段：</p>
+  <pre class="text-[10px] bg-white/80 border border-amber-200 rounded p-2 mt-1 max-h-32 overflow-auto whitespace-pre-wrap">{excerpt}</pre>
+</section>
+"""
+
+
+def extract_t2_prose_text(payload: dict[str, Any]) -> str:
+    """从 T2 结构化 audit 提取对话区展示用的中文正文（不含 JSON / JL 表格）。"""
+    audit = structured_audit_from_payload(payload)
+    if not isinstance(audit, dict) or not audit:
+        raw = (payload.get("opus_raw_text") or "").strip()
+        if raw and not raw.startswith("{"):
+            return raw[:8000]
+        return ""
+
+    parts: list[str] = []
+    cmd = audit.get("Execution_Command") or {}
+    daily = audit.get("Executing_Daily_Audit") or {}
+    reasoning = audit.get("Reasoning_Engine") or {}
+
+    summary = (cmd.get("one_sentence_summary") or "").strip()
+    if summary:
+        parts.append(summary)
+
+    action = cmd.get("action")
+    if action:
+        parts.append(f"【操作建议】{_action_label(str(action))}")
+
+    l3 = (daily.get("L3_Fundamental_Verdict") or "").strip()
+    if l3:
+        parts.append(f"【基本面】\n{l3}")
+
+    l4 = (daily.get("L4_Microstructure_Verdict") or "").strip()
+    if l4:
+        parts.append(f"【资金博弈】\n{l4}")
+
+    cross = (reasoning.get("cross_validation_logic") or "").strip()
+    if cross:
+        parts.append(f"【推理链】\n{cross}")
+
+    conflicts = (reasoning.get("signal_conflicts") or "").strip()
+    if conflicts:
+        parts.append(f"【信号冲突】\n{conflicts}")
+
+    stop = (cmd.get("stop_loss_line") or "").strip()
+    if stop:
+        parts.append(f"【止盈止损】{stop}")
+
+    target_lines: list[str] = []
+    for t in cmd.get("targets") or []:
+        if not isinstance(t, dict):
+            continue
+        sym = (t.get("symbol") or "").strip()
+        adv = _action_label(str(t.get("advice") or ""))
+        pct = (t.get("pct_change") or "").strip()
+        rat = (t.get("rationale") or "").strip()
+        line = f"· {sym} {adv}"
+        if pct:
+            line += f" {pct}"
+        if rat:
+            line += f"：{rat}"
+        target_lines.append(line)
+    if target_lines:
+        parts.append("【逐标的】\n" + "\n".join(target_lines))
+
+    return "\n\n".join(parts).strip()
+
+
+def render_t2_chat_prose(payload: dict[str, Any], meta: dict[str, Any] | None = None) -> str:
+    """Opus 分析区 · 仅展示模型中文回复（JSON / 审计详情见 /audit）。"""
+    meta = meta or {}
+    status = meta.get("status") or ""
+    opus_meta = payload.get("opus_meta") or {}
+    audit = structured_audit_from_payload(payload)
+    if audit is not payload.get("opus_audit"):
+        payload = {**payload, "opus_audit": audit}
+    has_structured = bool(
+        isinstance(audit, dict)
+        and (audit.get("Execution_Command") or audit.get("symbol_audits"))
+    )
+    api_ok = bool(payload.get("api_connected") and has_structured)
+    truncated = bool(opus_meta.get("truncated"))
+    parse_failed = bool(
+        payload.get("api_connected") and not has_structured and not truncated
+    )
+
+    if api_ok:
+        prose = extract_t2_prose_text(payload)
+        if prose:
+            return (
+                f"<div class='t2-analyst-result'>"
+                f"<div class='text-sm text-gray-800 leading-relaxed whitespace-pre-wrap'>"
+                f"{_esc(prose)}</div></div>"
+            )
+
+    if truncated and payload.get("api_connected"):
+        return (
+            "<div class='t2-analyst-result rounded-lg border border-amber-200 bg-amber-50/80 "
+            "p-3 text-sm text-amber-900'>"
+            "<p class='font-medium mb-1'>输出被截断</p>"
+            "<p class='text-xs leading-relaxed'>模型回复过长未能完整解析。"
+            "请减少标的数量或缩短问题后重试；完整原始输出可在审计页查看。</p></div>"
+        )
+    if parse_failed:
+        return (
+            "<div class='t2-analyst-result rounded-lg border border-amber-200 bg-amber-50/80 "
+            "p-3 text-sm text-amber-900'>"
+            "<p class='font-medium mb-1'>回复格式异常</p>"
+            "<p class='text-xs leading-relaxed'>模型已返回但未能解析为结构化结论，"
+            "请重试；完整内容可在审计页查看。</p></div>"
+        )
+    if status == "error" or payload.get("opus_error"):
+        err = (meta.get("error") or payload.get("opus_error") or "分析失败").strip()
+        return (
+            f"<div class='t2-analyst-result rounded-lg border border-rose-200 bg-rose-50/80 "
+            f"p-3 text-sm text-rose-900'>"
+            f"<p class='font-medium mb-1'>分析未完成</p>"
+            f"<p class='text-xs leading-relaxed whitespace-pre-wrap'>{_esc(err)}</p></div>"
+        )
+    if payload.get("preview_only"):
+        reason = (payload.get("opus_skip_reason") or "数据已拼接，模型未调用").strip()
+        return (
+            f"<div class='t2-analyst-result rounded-lg border border-amber-200 bg-amber-50/70 "
+            f"p-3 text-sm text-amber-900'>"
+            f"<p class='leading-relaxed whitespace-pre-wrap'>{_esc(reason)}</p></div>"
+        )
+
+    return (
+        "<div class='t2-analyst-result text-sm text-gray-500'>"
+        "暂无分析内容</div>"
+    )
+
+
+def _assistant_pin_eligible(payload: dict[str, Any], meta: dict[str, Any]) -> bool:
+    if not (meta.get("request_id") or payload.get("request_id")):
+        return False
+    if not payload.get("api_connected"):
+        return False
+    audit = structured_audit_from_payload(payload)
+    return bool(
+        isinstance(audit, dict)
+        and (audit.get("Execution_Command") or audit.get("symbol_audits"))
+    )
+
+
+def render_opus_assistant_bubble(
+    card_html: str,
+    *,
+    request_id: str = "",
+    pin_eligible: bool = False,
+) -> str:
+    """助手回复外层：⋯ 菜单（同步执行区 / 审计 / 复制）。"""
+    rid = _esc(request_id)
+    audit = (
+        f"<a href='/audit?t2_id={rid}' class='opus-msg-menu-item' target='_blank' rel='noopener'>"
+        f"<span class='opus-msg-menu-icon'>📋</span>查看审计</a>"
+        if request_id
+        else ""
+    )
+    if pin_eligible and request_id:
+        pin_btn = (
+            f"<button type='button' class='opus-msg-menu-item' data-opus-action='pin-executing' "
+            f"data-request-id='{rid}'>"
+            f"<span class='opus-msg-menu-icon'>📌</span>同步到执行区"
+            f"<span class='opus-msg-menu-hint'>按上方已选标的</span></button>"
+        )
+    else:
+        pin_btn = (
+            "<span class='opus-msg-menu-item is-disabled' "
+            "title='需分析成功，且在上方勾选标的后可用'>"
+            "<span class='opus-msg-menu-icon'>📌</span>同步到执行区"
+            "<span class='opus-msg-menu-hint'>需先选标的</span></span>"
+        )
+    copy_btn = (
+        "<button type='button' class='opus-msg-menu-item' data-opus-action='copy-reply'>"
+        "<span class='opus-msg-menu-icon'>📄</span>复制正文</button>"
+    )
+    exec_link = (
+        "<a href='/planning?view=executing' class='opus-msg-menu-item' target='_blank' "
+        "rel='noopener'><span class='opus-msg-menu-icon'>↗</span>打开执行区</a>"
+    )
+    data_rid = f' data-request-id="{rid}"' if request_id else ""
+    return (
+        f"<div class='opus-assistant-bubble group w-full'{data_rid}>"
+        f"<div class='flex justify-end items-center gap-1 mb-1 pr-1'>"
+        f"<details class='opus-msg-menu'>"
+        f"<summary class='opus-msg-menu-trigger' aria-label='更多操作' title='更多'>"
+        f"<svg width='16' height='16' viewBox='0 0 24 24' fill='currentColor' "
+        f"aria-hidden='true'><circle cx='5' cy='12' r='2'/><circle cx='12' cy='12' r='2'/>"
+        f"<circle cx='19' cy='12' r='2'/></svg></summary>"
+        f"<div class='opus-msg-menu-panel' role='menu'>{pin_btn}{audit}{copy_btn}{exec_link}</div>"
+        f"</details></div>"
+        f"<div class='rounded-2xl rounded-tl-sm bg-white border border-violet-100 px-4 py-3 "
+        f"text-sm text-gray-800 leading-relaxed shadow-sm opus-assistant-body'>{card_html}</div>"
+        f"<p class='opus-pin-toast hidden text-[11px] text-emerald-700 mt-1 pr-1 text-right'></p>"
+        f"</div>"
+    )
+
+
 def render_t2_assistant_card(payload: dict[str, Any], meta: dict[str, Any] | None = None) -> str:
     """生成助手回复结构化 HTML（成功 / 失败 / 仅拼接）。"""
     meta = meta or {}
     status = meta.get("status") or ""
-    api_ok = payload.get("api_connected") and payload.get("opus_audit")
+    opus_meta = payload.get("opus_meta") or {}
+    audit = structured_audit_from_payload(payload)
+    if audit is not payload.get("opus_audit"):
+        payload = {**payload, "opus_audit": audit}
+    has_structured = bool(
+        isinstance(audit, dict)
+        and (audit.get("Execution_Command") or audit.get("symbol_audits"))
+    )
+    api_ok = bool(payload.get("api_connected") and has_structured)
+    truncated = bool(opus_meta.get("truncated"))
+    parse_failed = bool(
+        payload.get("api_connected") and not has_structured and not truncated
+    )
     parts: list[str] = []
 
     if api_ok:
@@ -441,6 +697,10 @@ def render_t2_assistant_card(payload: dict[str, Any], meta: dict[str, Any] | Non
                     )
                 )
             parts.append("</div>")
+    elif truncated and payload.get("api_connected"):
+        parts.append(_render_truncated_fail_section(payload, meta))
+    elif parse_failed:
+        parts.append(_render_json_parse_fail_section(payload, meta))
     elif status == "error" or payload.get("opus_error"):
         parts.append(_render_error_section(payload, meta))
     elif payload.get("preview_only"):

@@ -185,8 +185,8 @@ async def test_analyst_chat_turn_opus_mocked(db_ready, monkeypatch):
                 headers={"HX-Request": "true"},
             )
     assert r.status_code == 200
-    assert "组合结论" in r.text
     assert "t2-analyst-result" in r.text
+    assert "【基本面】" in r.text or "英维克" in r.text
 
 
 @pytest.mark.asyncio
@@ -194,10 +194,12 @@ async def test_t2_analyst_panel_html(db_ready):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.get("/api/executing/analyst-panel-html")
     assert r.status_code == 200
-    assert "T2 持仓分析工作台" in r.text
-    assert "默认问题模板" in r.text
-    assert "JL1–3 数据需求模板" in r.text
+    assert "t2-analyst-panel" in r.text
+    assert "组合审计模板" in r.text
+    assert "JL1–3 模板" in r.text
+    assert "opus-sidebar" in r.text
     assert "include_jl13_data" in r.text
+    assert "deepseek:deepseek-v4-pro" in r.text
 
 
 @pytest.mark.asyncio

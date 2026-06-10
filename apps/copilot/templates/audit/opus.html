@@ -1,111 +1,294 @@
 {% extends "base.html" %}
-{% block title %}Opus 对话 · AI 投资副驾驶{% endblock %}
+{% block title %}Opus 分析 · AI 投资副驾驶{% endblock %}
 {% block content %}
-<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-5">
-  <div class="flex flex-wrap items-start justify-between gap-3">
-    <div>
-      <h1 class="text-xl font-bold text-gray-900 flex items-center gap-2">
-        <span>💬</span> Opus 对话
-      </h1>
-      <p class="text-sm text-gray-500 mt-1">研究 advisory · 非交易指令 · 可附带标的扫描上下文</p>
+{% include "planning/_opus_layout_styles.html" %}
+
+<div id="opus-workspace-root">
+  <div class="opus-header-strip">
+    <h1>
+      <span>🔬</span> Opus 分析
+      <span class="text-[10px] font-normal text-gray-400">· 可手动同步<a href="/planning?view=executing" class="text-violet-600 hover:underline">执行中</a></span>
+    </h1>
+    <div class="opus-header-tabs">
+      <button type="button" id="opus-tab-t2"
+              class="opus-mode-tab px-2.5 py-1 rounded-md text-[11px] font-semibold bg-violet-600 text-white">
+        持仓 T2
+      </button>
+      <button type="button" id="opus-tab-chat"
+              class="opus-mode-tab px-2.5 py-1 rounded-md text-[11px] font-semibold bg-white text-gray-700 border border-gray-200 hover:bg-gray-50">
+        自由研究
+      </button>
     </div>
-    <div class="flex gap-3 text-sm shrink-0">
-      <a href="/audit" class="text-blue-600 hover:underline">数据审计 →</a>
-      <a href="/planning?view=radar" class="text-gray-500 hover:underline">行情雷达</a>
+  </div>
+
+  <div class="opus-panel-wrap">
+    <div id="opus-panel-t2" class="flex flex-1 min-h-0">
+      <div id="opus-t2-panel-slot" class="flex flex-1 min-h-0 w-full"
+           hx-get="/api/executing/analyst-panel-html"
+           hx-trigger="load"
+           hx-swap="innerHTML"
+           hx-on::response-error="this.innerHTML='<p class=\'text-sm text-rose-700 p-4\'>T2 分析加载失败 · 请刷新</p>'">
+        <p class="text-xs text-violet-600 flex items-center gap-2 p-4 m-auto">
+          <svg class="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+          </svg>
+          加载持仓 T2 分析…
+        </p>
+      </div>
+    </div>
+
+    <div id="opus-panel-chat" class="opus-chat-shell hidden flex-1 min-h-0">
+      <aside class="opus-sidebar" id="radar-chat-sidebar" aria-label="对话话题">
+        <div class="opus-sidebar-head">
+          <span class="opus-sidebar-title text-xs font-semibold text-gray-600">话题</span>
+          <button type="button" id="radar-chat-new-btn"
+                  class="text-[11px] px-2 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700 border-0">＋ 新</button>
+        </div>
+        <div class="opus-sidebar-list" id="radar-chat-session-list"></div>
+      </aside>
+
+      <div class="opus-main-column">
+        <header class="opus-toolbar">
+          <details class="opus-toolbar-details">
+            <summary>选项 · 标的与模型</summary>
+            <div class="opus-toolbar-inline py-1">
+              <label class="flex items-center gap-1 text-gray-600">
+                标的
+                <input type="text" id="radar-chat-symbol" maxlength="32"
+                       class="border border-gray-200 rounded px-2 py-0.5 w-24 text-[10px]"
+                       placeholder="002837">
+              </label>
+              <label class="flex items-center gap-1 text-gray-600">
+                模型
+                <select id="radar-chat-model" class="border border-gray-200 rounded px-2 py-0.5 text-[10px]">
+                  {% for mid, label in chat_models|default([]) %}
+                  <option value="{{ mid }}" {% if mid == default_model|default('claude-opus-4-6') %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <span class="text-[10px] text-gray-400">研究 advisory · 非交易指令</span>
+            </div>
+          </details>
+        </header>
+
+        <div id="radar-chat-messages" class="opus-messages-scroll">
+          <div class="text-sm text-gray-400 text-center py-12">切换到本 Tab 后加载对话…</div>
+        </div>
+
+        <div class="opus-bottom-dock">
+        <footer class="opus-composer">
+          <form id="radar-chat-form"
+                hx-post="/api/radar/chat"
+                hx-target="#radar-chat-messages"
+                hx-swap="innerHTML"
+                hx-indicator="#radar-chat-spinner">
+            <input type="hidden" name="session_id" id="radar-chat-session-id" value="">
+            <input type="hidden" name="symbol" id="radar-chat-symbol-hidden" value="">
+            <input type="hidden" name="model_id" id="radar-chat-model-hidden" value="">
+            <div class="opus-composer-box">
+              <textarea name="message" id="radar-chat-input" rows="1" maxlength="4000" required
+                        placeholder="输入问题… Enter 发送 · Shift+Enter 换行"></textarea>
+              <button type="submit" class="opus-composer-send" style="background:#2563eb" title="发送" aria-label="发送">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4l17.45-7.48a1 1 0 000-1.84L3.4 3.6a1 1 0 00-1.52 1.08l2.2 6.38H11a1 1 0 010 2H3.08l2.2 6.38a1 1 0 001.32 1.56z"/></svg>
+              </button>
+            </div>
+          </form>
+          <div id="radar-chat-spinner" class="htmx-indicator flex items-center gap-2 text-xs text-gray-400 mt-2 justify-center">
+            <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+            </svg>
+            Opus 思考中…
+          </div>
+        </footer>
+        </div>
+      </div>
     </div>
   </div>
 </div>
 
-<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex flex-col" style="min-height: calc(100vh - 220px);">
-  <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-3 border-b border-gray-100">
-    <p class="text-xs text-gray-500">默认模型与扫描勾选项可在<a href="/settings#radar-prefs" class="text-blue-600 hover:underline">设置</a>中调整</p>
-    <button type="button" id="radar-chat-new-btn"
-            class="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
-      新对话
-    </button>
-  </div>
-  <div class="flex flex-wrap gap-3 items-end mb-4">
-    <div>
-      <label class="block text-xs font-medium text-gray-500 mb-1">附带标的（可选）</label>
-      <input type="text" name="symbol" id="radar-chat-symbol" maxlength="32"
-             class="border border-gray-200 rounded-lg px-3 py-2 text-sm w-40"
-             placeholder="002837">
-    </div>
-    <div>
-      <label class="block text-xs font-medium text-gray-500 mb-1">模型</label>
-      <select name="model_id" id="radar-chat-model"
-              class="border border-gray-200 rounded-lg px-3 py-2 text-sm w-44">
-        {% for mid, label in chat_models|default([]) %}
-        <option value="{{ mid }}" {% if mid == 'claude-opus-4-6' %}selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <p class="text-[11px] text-gray-400 pb-2">每轮回复下方显示 token 费用（元）</p>
-  </div>
-  <div id="radar-chat-messages"
-       class="flex-1 overflow-y-auto rounded-xl bg-slate-50/90 border border-slate-100 mb-4 px-1"
-       hx-get="/api/radar/chat/placeholder" hx-trigger="load" hx-swap="innerHTML"
-       hx-headers='{"Accept": "text/html"}'>
-    <div class="text-sm text-gray-400 text-center py-12">加载对话…</div>
-  </div>
-  <form id="radar-chat-form" class="flex gap-2 items-end"
-        hx-post="/api/radar/chat"
-        hx-target="#radar-chat-messages"
-        hx-swap="innerHTML"
-        hx-indicator="#radar-chat-spinner">
-    <input type="hidden" name="session_id" id="radar-chat-session-id" value="">
-    <input type="hidden" name="symbol" id="radar-chat-symbol-hidden" value="">
-    <input type="hidden" name="model_id" id="radar-chat-model-hidden" value="">
-    <div class="flex-1">
-      <textarea name="message" id="radar-chat-input" rows="2" maxlength="4000" required
-                class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm resize-none
-                       focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="输入问题… Shift+Enter 换行，Enter 发送"></textarea>
-    </div>
-    <button type="submit"
-            class="shrink-0 px-5 py-3 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700">
-      发送
-    </button>
-  </form>
-  <div id="radar-chat-spinner" class="htmx-indicator flex items-center gap-2 text-xs text-gray-400 mt-2">
-    <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
-    </svg>
-    Opus 思考中…
-  </div>
-</div>
+{% include "planning/_t2_analyst_boot.html" %}
+
 <script>
   (function () {
-    var KEY = 'radar_chat_sid';
-    function sid() {
-      var s = localStorage.getItem(KEY);
+    var TAB_ON = 'opus-mode-tab px-2.5 py-1 rounded-md text-[11px] font-semibold bg-violet-600 text-white';
+    var TAB_OFF = 'opus-mode-tab px-2.5 py-1 rounded-md text-[11px] font-semibold bg-white text-gray-700 border border-gray-200 hover:bg-gray-50';
+    var CHAT_TAB_ON = TAB_ON.replace('violet-600', 'blue-600');
+    var chatBooted = false;
+    var RADAR_SID_KEY = 'radar_chat_sid';
+    var RADAR_SESSIONS_KEY = 'opus_radar_sessions';
+
+    function radarSid() {
+      var s = localStorage.getItem(RADAR_SID_KEY);
       if (!s) {
         s = (typeof crypto !== 'undefined' && crypto.randomUUID)
           ? crypto.randomUUID().replace(/-/g, '').slice(0, 16)
           : String(Date.now());
-        localStorage.setItem(KEY, s);
+        localStorage.setItem(RADAR_SID_KEY, s);
       }
       return s;
     }
-    function syncSid() {
-      var id = sid();
+
+    function getRadarSessions() {
+      try {
+        var raw = localStorage.getItem(RADAR_SESSIONS_KEY);
+        return raw ? JSON.parse(raw) : [];
+      } catch (e) { return []; }
+    }
+
+    function saveRadarSessions(list) {
+      localStorage.setItem(RADAR_SESSIONS_KEY, JSON.stringify(list.slice(0, 40)));
+    }
+
+    function mergeRadarSessionsFromServer(serverList) {
+      var local = getRadarSessions();
+      var byId = {};
+      (serverList || []).forEach(function (s) { if (s && s.id) byId[s.id] = s; });
+      local.forEach(function (s) { if (s && s.id && !byId[s.id]) byId[s.id] = s; });
+      var merged = Object.values(byId).sort(function (a, b) {
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
+      });
+      saveRadarSessions(merged);
+    }
+
+    function syncRadarSessionsFromServer() {
+      return fetch('/api/radar/chat/sessions')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          mergeRadarSessionsFromServer(data.sessions || []);
+          renderRadarSessionList();
+        })
+        .catch(function () { renderRadarSessionList(); });
+    }
+
+    function upsertRadarSession(id, title) {
+      if (!id) return;
+      var list = getRadarSessions();
+      var t = (title || '新对话').slice(0, 48);
+      var now = Date.now();
+      var found = false;
+      list = list.map(function (item) {
+        if (item.id === id) {
+          found = true;
+          return { id: id, title: t || item.title, updatedAt: now };
+        }
+        return item;
+      });
+      if (!found) list.unshift({ id: id, title: t, updatedAt: now });
+      list.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+      saveRadarSessions(list);
+      renderRadarSessionList();
+    }
+
+    function renderRadarSessionList() {
+      var box = document.getElementById('radar-chat-session-list');
+      if (!box) return;
+      var active = radarSid();
+      var list = getRadarSessions();
+      if (!list.length) {
+        box.innerHTML = '<p class="text-[10px] text-gray-400 px-2 py-3">暂无历史话题</p>';
+        return;
+      }
+      box.innerHTML = list.map(function (item) {
+        var dt = item.updatedAt ? new Date(item.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+        var cls = item.id === active ? 'opus-session-item is-active' : 'opus-session-item';
+        return '<button type="button" class="' + cls + '" data-radar-session-id="' + item.id + '">'
+          + '<span class="opus-session-title">' + (item.title || '未命名') + '</span>'
+          + '<span class="opus-session-meta">' + dt + '</span></button>';
+      }).join('');
+    }
+
+    function syncRadarSid() {
+      var id = radarSid();
       var el = document.getElementById('radar-chat-session-id');
       if (el) el.value = id;
-      var box = document.getElementById('radar-chat-messages');
-      if (box) box.setAttribute('hx-get', '/api/radar/chat/' + id);
       return id;
     }
-    syncSid();
+
+    function bindRadarComposer() {
+      var ta = document.getElementById('radar-chat-input');
+      if (!ta || ta._composerBound) return;
+      ta._composerBound = true;
+      ta.addEventListener('input', function () {
+        ta.style.height = 'auto';
+        ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
+      });
+    }
+
+    function showPanel(mode) {
+      var t2Wrap = document.getElementById('opus-panel-t2');
+      var chat = document.getElementById('opus-panel-chat');
+      var btnT2 = document.getElementById('opus-tab-t2');
+      var btnChat = document.getElementById('opus-tab-chat');
+      if (mode === 'chat') {
+        if (t2Wrap) t2Wrap.classList.add('hidden');
+        if (chat) { chat.classList.remove('hidden'); }
+        if (btnT2) btnT2.className = TAB_OFF;
+        if (btnChat) btnChat.className = CHAT_TAB_ON;
+        if (!chatBooted) {
+          chatBooted = true;
+          syncRadarSid();
+          if (typeof window.opusBindModelSelect === 'function') {
+            window.opusBindModelSelect('radar-chat-model');
+          }
+          var bootChat = function () {
+            upsertRadarSession(radarSid(), '当前对话');
+            renderRadarSessionList();
+            bindRadarComposer();
+            if (typeof htmx !== 'undefined') {
+              htmx.ajax('GET', '/api/radar/chat/' + radarSid(), {
+                target: '#radar-chat-messages',
+                swap: 'innerHTML'
+              });
+            }
+          };
+          syncRadarSessionsFromServer().finally(bootChat);
+        }
+      } else {
+        if (t2Wrap) t2Wrap.classList.remove('hidden');
+        if (chat) chat.classList.add('hidden');
+        if (btnT2) btnT2.className = TAB_ON;
+        if (btnChat) btnChat.className = TAB_OFF;
+      }
+    }
+
+    document.getElementById('opus-tab-t2')?.addEventListener('click', function () { showPanel('t2'); });
+    document.getElementById('opus-tab-chat')?.addEventListener('click', function () { showPanel('chat'); });
+
+    var hash = (location.hash || '').replace('#', '');
+    showPanel(hash === 'chat' ? 'chat' : 't2');
+
+    document.body.addEventListener('click', function (ev) {
+      var btn = ev.target.closest && ev.target.closest('[data-radar-session-id]');
+      if (!btn) return;
+      var id = btn.getAttribute('data-radar-session-id');
+      localStorage.setItem(RADAR_SID_KEY, id);
+      syncRadarSid();
+      renderRadarSessionList();
+      if (typeof htmx !== 'undefined') {
+        htmx.ajax('GET', '/api/radar/chat/' + id, {
+          target: '#radar-chat-messages',
+          swap: 'innerHTML'
+        });
+      }
+    });
+
     var symIn = document.getElementById('radar-chat-symbol');
     var symHid = document.getElementById('radar-chat-symbol-hidden');
     var modelSel = document.getElementById('radar-chat-model');
     var modelHid = document.getElementById('radar-chat-model-hidden');
+    if (modelSel && typeof window.opusBindModelSelect === 'function') {
+      window.opusBindModelSelect('radar-chat-model');
+    }
     var form = document.getElementById('radar-chat-form');
-    if (form && symIn && symHid) {
+    if (form) {
       form.addEventListener('submit', function () {
-        symHid.value = (symIn.value || '').trim();
-        if (modelSel && modelHid) modelHid.value = modelSel.value;
+        if (symHid && symIn) symHid.value = (symIn.value || '').trim();
+        if (modelHid && modelSel) modelHid.value = modelSel.value;
+        var input = document.getElementById('radar-chat-input');
+        var preview = input && input.value.trim().slice(0, 48);
+        upsertRadarSession(radarSid(), preview || '对话中…');
       });
     }
     var input = document.getElementById('radar-chat-input');
@@ -114,47 +297,44 @@
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
           if (input.value.trim() && typeof htmx !== 'undefined') {
-            symHid.value = (symIn && symIn.value || '').trim();
+            if (symHid && symIn) symHid.value = (symIn.value || '').trim();
+            if (modelHid && modelSel) modelHid.value = modelSel.value;
             htmx.trigger(form, 'submit');
           }
         }
       });
     }
     document.body.addEventListener('htmx:afterSwap', function (ev) {
-      if (ev.detail.target && ev.detail.target.id === 'radar-chat-messages') {
-        var inner = document.getElementById('radar-chat-session-id');
-        if (inner && inner.value) {
-          localStorage.setItem(KEY, inner.value);
-          var outer = document.querySelector('#radar-chat-form #radar-chat-session-id');
-          if (outer) outer.value = inner.value;
-        }
-        var box = document.getElementById('radar-chat-messages');
-        if (box) box.scrollTop = box.scrollHeight;
-        if (input) { input.value = ''; input.focus(); }
+      if (!ev.detail.target || ev.detail.target.id !== 'radar-chat-messages') return;
+      var inner = document.getElementById('radar-chat-session-id');
+      if (inner && inner.value) {
+        localStorage.setItem(RADAR_SID_KEY, inner.value);
+        var outer = document.querySelector('#radar-chat-form #radar-chat-session-id');
+        if (outer) outer.value = inner.value;
+        upsertRadarSession(inner.value, '对话');
       }
+      var box = document.getElementById('radar-chat-messages');
+      if (box) box.scrollTop = box.scrollHeight;
+      if (input) { input.value = ''; input.style.height = 'auto'; input.focus(); }
+      renderRadarSessionList();
     });
     var newBtn = document.getElementById('radar-chat-new-btn');
     if (newBtn) {
       newBtn.addEventListener('click', function () {
         var oldEl = document.getElementById('radar-chat-session-id');
-        var oldId = oldEl ? oldEl.value : sid();
+        var oldId = oldEl ? oldEl.value : radarSid();
         if (typeof htmx !== 'undefined') {
           htmx.ajax('POST', '/api/radar/chat/new', {
             target: '#radar-chat-messages',
             swap: 'innerHTML',
             values: { session_id: oldId }
           }).then(function () {
-            localStorage.removeItem(KEY);
-            var newId = syncSid();
-            var msgBox = document.getElementById('radar-chat-messages');
-            if (msgBox) msgBox.setAttribute('hx-get', '/api/radar/chat/' + newId);
+            localStorage.removeItem(RADAR_SID_KEY);
+            var nid = syncRadarSid();
+            upsertRadarSession(nid, '新对话');
           });
         }
       });
-    }
-    if (typeof htmx !== 'undefined') {
-      htmx.process(document.getElementById('radar-chat-messages'));
-      htmx.trigger(document.getElementById('radar-chat-messages'), 'load');
     }
   })();
 </script>
