@@ -75,11 +75,24 @@ def collect_fii_gb200_milestone_t0(
     """巨潮公告/业绩会实录+互动易 · 侧翼备料影子 · DeepSea T0 传感器层。"""
     sym = symbol.zfill(6)[-6:]
     event = fetch_gb200_official_event(sym)
-    if not event.get("ok"):
-        return _block("T0", str(event.get("blocker") or "公告采集失败"))
-
     qa = fetch_investor_relations_qa(sym)
     ir_text = str(qa.get("investor_relations_qa") or "") if qa.get("ok") else ""
+
+    if not event.get("ok"):
+        if qa.get("ok") and len(ir_text.strip()) >= 80:
+            event = {
+                "ok": True,
+                "source": "cninfo:ir_transcript_primary",
+                "announcement_title": qa.get("report_title"),
+                "official_announcement_text": ir_text[:8000],
+                "published_date": qa.get("published_date"),
+                "adjunct_url": None,
+                "match_score": qa.get("score"),
+                "pdf_chars": qa.get("qa_full_chars"),
+                "analysis_window": qa.get("analysis_window") or event_window_meta(),
+            }
+        else:
+            return _block("T0", str(event.get("blocker") or qa.get("blocker") or "公告采集失败"))
 
     interact = fetch_interactive_e_supplement(sym)
     interact_text = str(interact.get("interactive_e_text") or "") if interact.get("ok") else ""

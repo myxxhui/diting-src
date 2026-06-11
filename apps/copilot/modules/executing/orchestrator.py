@@ -1725,13 +1725,21 @@ async def run_fii_gb200_milestone_daily(
             )
             continue
         payload = t0_item.get("payload") or {}
-        from apps.copilot.services.deepsea.dispatcher import dispatch_cohort_inference
+        batch: list[dict[str, Any]] = []
+        try:
+            from apps.copilot.services.deepsea.dispatcher import dispatch_cohort_inference
 
-        batch = await dispatch_cohort_inference(
-            symbol=code,
-            cache_group="fii-cninfo-dynamic",
-            t0_payload=payload,
-        )
+            batch = await dispatch_cohort_inference(
+                symbol=code,
+                cache_group="fii-cninfo-dynamic",
+                t0_payload=payload,
+            )
+        except Exception as exc:  # noqa: BLE001
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "fii_gb200_milestone DeepSea 批推降级（单探针继续）: %s", exc
+            )
         node = build_fii_gb200_milestone_node(
             payload,
             source=t0_item.get("source") or "T0",

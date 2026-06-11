@@ -10,6 +10,11 @@ venv
 .env.*
 !.env.template
 data/
+!data/config/
+!data/config/probe_registry/
+!data/config/probe_registry/**
+!data/config/executing_profiles/
+!data/config/executing_profiles/**
 dist/
 build/
 *.egg-info

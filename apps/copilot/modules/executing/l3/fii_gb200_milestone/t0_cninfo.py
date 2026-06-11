@@ -92,15 +92,86 @@ def _score_announcement(title: str, text: str) -> int:
     return score
 
 
-def _extract_milestone_excerpt(text: str, *, max_len: int = 1200) -> str:
+_GB200_MILESTONE_MARKERS = re.compile(
+    r"GB200|NVL72|NVL36|智算机柜|Blackwell",
+    re.I,
+)
+
+
+def _body_has_gb200_signal(text: str) -> bool:
+    """排除年报中 NVLinkSwitch 等泛 NVL 误命中。"""
+    return bool(_GB200_MILESTONE_MARKERS.search(text or ""))
+
+
+def _candidate_rank_key(c: dict[str, Any]) -> tuple[int, int, int, str]:
+    title = str(c.get("title") or "")
+    body = str(c.get("text") or "")
+    gb200_hit = 1 if re.search(r"GB200", body, re.I) else 0
+    full_report = 0 if "摘要" in title else 1
+    return (int(c.get("score") or 0), gb200_hit, full_report, str(c.get("published_date") or ""))
+
+
+def _rescore_candidates_with_pdf(
+    candidates: list[dict[str, Any]],
+    *,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """对标题分偏低的条目拉 PDF 正文重评分（业绩会实录常在正文而非标题）。"""
+    from apps.cryo_guard.cninfo_client import fetch_cninfo_adjunct_pdf_text
+
+    ranked = sorted(candidates, key=lambda c: (int(c["score"]), str(c.get("published_date") or "")), reverse=True)
+    out: list[dict[str, Any]] = []
+    for cand in ranked[:limit]:
+        row = dict(cand)
+        url = str(row.get("adjunct_url") or "")
+        body = ""
+        if url:
+            try:
+                body = fetch_cninfo_adjunct_pdf_text(row.get("adjunct_url"), row.get("adjunct_type"))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("GB200 候选 PDF 抽取失败: %s", exc)
+        row["text"] = body
+        if body:
+            row["score"] = _score_announcement(str(row.get("title") or ""), body)
+            if _body_has_gb200_signal(body):
+                row["score"] = max(int(row["score"]), 28)
+        out.append(row)
+    # 保留未拉 PDF 的其余候选（低优先级）
+    seen = {c.get("adjunct_url") or c.get("title") for c in out}
+    for cand in ranked[limit:]:
+        key = cand.get("adjunct_url") or cand.get("title")
+        if key not in seen:
+            out.append(cand)
+    return out
+
+
+def _normalize_pdf_text(text: str) -> str:
+    """PDF 抽取常含换行断句 · 归一化后再做里程碑摘录。"""
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def _extract_milestone_excerpt(text: str, *, max_len: int = 2400) -> str:
+    norm = _normalize_pdf_text(text)
+    if not norm:
+        return ""
+
+    gb200 = re.search(r"GB200.{0,420}", norm, re.I)
+    if gb200:
+        start = max(0, gb200.start() - 160)
+        return norm[start : start + max_len].strip()
+
     for pat in (
-        r"[^。\n]{0,30}(?:智算机柜|GB200|NVL|Blackwell|规模交付|量产|批量交付)[^。\n]{0,200}",
-        r"[^。\n]{0,20}液冷[^。\n]{0,180}",
+        r"(?:NVL72|NVL36|智算机柜|Blackwell).{0,320}",
+        r"规模交付.{0,240}",
+        r"量产爬坡.{0,240}",
+        r"批量交付.{0,240}",
     ):
-        m = re.search(pat, text, re.I)
+        m = re.search(pat, norm, re.I)
         if m:
-            return m.group(0).strip()[:max_len]
-    return text.strip()[:max_len]
+            start = max(0, m.start() - 120)
+            return norm[start : start + max_len].strip()
+
+    return norm[:max_len]
 
 
 def _event_text_for_mapping(title: str, body: str) -> str:
@@ -109,12 +180,12 @@ def _event_text_for_mapping(title: str, body: str) -> str:
     body = body.strip()
     if len(body) >= 120:
         excerpt = _extract_milestone_excerpt(body)
-        if len(excerpt) >= 20:
-            return excerpt
-    blob = f"{title}\n{body[:3000]}".strip()
+        if len(excerpt) >= 40:
+            return f"{title}\n{excerpt}" if title else excerpt
+    blob = _normalize_pdf_text(f"{title}\n{body}")
     excerpt = _extract_milestone_excerpt(blob)
-    if len(excerpt) >= 20:
-        return excerpt
+    if len(excerpt) >= 40:
+        return f"{title}\n{excerpt}" if title and title not in excerpt else excerpt
     if len(title) >= 20:
         return title
     return blob[:1200]
@@ -131,7 +202,7 @@ def _is_generic_periodic(title: str) -> bool:
 
 
 def fetch_gb200_official_event(symbol: str) -> dict[str, Any]:
-    """近 6 个月巨潮公告 · 取最高分 GB200/智算机柜里程碑条目。"""
+    """近 12 个月巨潮公告 · 标题+PDF 正文联合评分 · GB200/智算机柜里程碑。"""
     from apps.cryo_guard.cninfo_client import fetch_cninfo_adjunct_pdf_text, iter_cninfo_announcements
 
     sym = symbol.zfill(6)[-6:]
@@ -140,7 +211,17 @@ def fetch_gb200_official_event(symbol: str) -> dict[str, Any]:
     candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    for kw in ("GB200", "智算", "机柜", "NVL", "Blackwell", "AI服务器", ""):
+    for kw in (
+        "GB200",
+        "智算",
+        "机柜",
+        "NVL",
+        "Blackwell",
+        "AI服务器",
+        "半年度报告",
+        "年度报告",
+        "",
+    ):
         for item in iter_cninfo_announcements(
             sym,
             start.strftime("%Y%m%d"),
@@ -175,7 +256,7 @@ def fetch_gb200_official_event(symbol: str) -> dict[str, Any]:
             )
 
     if not candidates:
-        return {"ok": False, "blocker": "[B] 近6个月巨潮无 GB200/智算机柜相关公告"}
+        return {"ok": False, "blocker": "[B] 近12个月巨潮无 GB200/智算机柜相关公告"}
 
     candidates = [
         c for c in candidates if is_within_event_window(c.get("published_date"), ref=end)
@@ -183,30 +264,30 @@ def fetch_gb200_official_event(symbol: str) -> dict[str, Any]:
     if not candidates:
         return {
             "ok": False,
-            "blocker": "[B] 近6个月巨潮无 GB200/智算机柜相关公告（命中条目均超出分析窗口）",
+            "blocker": "[B] 近12个月巨潮无 GB200/智算机柜相关公告（命中条目均超出分析窗口）",
         }
 
-    milestone_candidates = [c for c in candidates if not _is_generic_periodic(c["title"])]
-    if milestone_candidates:
-        candidates = milestone_candidates
+    candidates = _rescore_candidates_with_pdf(candidates, limit=14)
+    milestone_candidates = [
+        c
+        for c in candidates
+        if not _is_generic_periodic(c["title"]) or _body_has_gb200_signal(str(c.get("text") or ""))
+    ]
+    pool = milestone_candidates if milestone_candidates else candidates
 
-    best = max(candidates, key=lambda c: (int(c["score"]), str(c.get("published_date") or "")))
-    if int(best["score"]) < 12:
+    best = max(pool, key=_candidate_rank_key)
+    if int(best["score"]) < 12 and not _body_has_gb200_signal(str(best.get("text") or "")):
         return {
             "ok": False,
             "blocker": "[D] 已扫巨潮公告·无 GB200/量产节点关键词命中（非准出）",
             "titles_scanned": len(candidates),
         }
 
-    body = ""
+    body = str(best.get("text") or "")
     url = str(best.get("adjunct_url") or "")
-    skip_pdf = _is_generic_periodic(best["title"]) or _PERIODIC_REPORT_TITLE.search(best["title"])
-    if url and not skip_pdf:
+    if not body and url:
         try:
-            body = fetch_cninfo_adjunct_pdf_text(
-                best.get("adjunct_url"),
-                best.get("adjunct_type"),
-            )
+            body = fetch_cninfo_adjunct_pdf_text(best.get("adjunct_url"), best.get("adjunct_type"))
         except Exception as exc:  # noqa: BLE001
             logger.warning("GB200 最佳公告 PDF 抽取失败: %s", exc)
 
