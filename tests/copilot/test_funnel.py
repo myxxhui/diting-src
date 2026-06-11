@@ -134,7 +134,8 @@ async def test_executing_workspace_renders_all_symbol_loaders():
     assert body.count("executing-symbol-card") >= 2
     assert "暂无 T2 持仓分析" in body
     assert "/opus" in body
-    assert "hx-trigger='revealed once'" in body
+    assert "data-detail-url='/api/executing/601138/detail'" in body
+    assert "executing-campaigns-loader" in body or "executing-t2-panel" in body
     assert "/api/executing/601138/detail" in body
     assert "/api/executing/002837/detail" in body
     assert " open" not in body.split("executing-symbol-card")[1]

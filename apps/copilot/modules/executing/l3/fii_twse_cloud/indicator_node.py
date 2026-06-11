@@ -54,6 +54,10 @@ def build_fii_twse_cloud_node(
             "cloud_revenue_mid_ntd": mid,
             "cloud_mom_rank": contract.get("pr_evidence", {}).get("cloud_mom_rank"),
             "segments": segments,
+            "revenue_history": t0_payload.get("revenue_history") or [],
+            "pr_raw_text": t0_payload.get("pr_raw_text") or "",
+            "segment_baseline_weights_last_q": t0_payload.get("segment_baseline_weights_last_q") or {},
+            "seasonality_factor_consumer": t0_payload.get("seasonality_factor_consumer") or {},
             "card_strategy": card_strategy,
             "sources": {
                 "twse_monthly": _TWSE_MONTHLY,

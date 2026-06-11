@@ -96,20 +96,58 @@
       if (panel) panel.setAttribute('data-view', activeView || '');
     };
 
+    /** 切换 Tab 后仅 process 带显式 hx-trigger 的节点（禁止 process 整 panel · 防误触发） */
+    window.workbenchProcessPanelHtmx = function (view) {
+      if (typeof htmx === 'undefined') return;
+      var panel = document.getElementById('workbench-panel');
+      if (!panel) return;
+      if (view === 'radar') {
+        var cand = document.getElementById('radar-candidates-list');
+        if (cand) htmx.process(cand);
+      }
+      if (view === 'roadmap') {
+        panel.querySelectorAll('[hx-trigger]').forEach(function (el) {
+          var trig = (el.getAttribute('hx-trigger') || '').trim();
+          if (trig.indexOf('load') === 0 || trig.indexOf('load ') >= 0 || trig === 'load') {
+            htmx.process(el);
+          }
+        });
+      }
+      if (view === 'executing') {
+        panel.querySelectorAll('[hx-get="/api/executing/settings-html"]').forEach(function (el) {
+          htmx.process(el);
+        });
+      }
+      if (view === 'planning' || view === 'executing') {
+        var loader = document.getElementById('executing-campaigns-loader');
+        if (loader && loader.getAttribute('data-loaded') !== '1' && loader.getAttribute('hx-get')) {
+          htmx.process(loader);
+        }
+      }
+    };
+
+    /** HTMX 为 defer 加载 · 须在 DOMContentLoaded 后再 boot（否则 executing/planning 永卡加载中） */
+    window.workbenchBootWhenReady = function () {
+      if (typeof htmx === 'undefined') return false;
+      var panel = document.getElementById('workbench-panel');
+      if (!panel) return false;
+      window.workbenchInitPanel(panel.getAttribute('data-view') || '');
+      return true;
+    };
+
     window.workbenchInitPanel = function (view) {
       if (view === 'radar' && typeof window.radarBootRadarPanel === 'function') {
         window.radarBootRadarPanel();
       }
-      if (view === 'executing' && typeof window.executingBootPanel === 'function') {
-        window.executingBootPanel();
+      if (view === 'executing' || view === 'planning') {
+        if (typeof window.executingBootCampaignsList === 'function') {
+          window.executingBootCampaignsList();
+        }
       }
       if (view === 'planning' && typeof window.planningBootPanel === 'function') {
         window.planningBootPanel();
       }
-      if (typeof htmx !== 'undefined') {
-        var panel = document.getElementById('workbench-panel');
-        if (panel) htmx.process(panel);
-      }
+      window.workbenchProcessPanelHtmx(view);
     };
 
     /** 执行区 T2 摘要 · 解除固定后恢复自动同步 */
@@ -135,20 +173,225 @@
         .catch(function () { btn.disabled = false; });
     });
 
-    /** 执行区：折叠卡默认收起 · 展开时补拉详情（兜底） */
-    window.executingBootPanel = function () {
-      document.querySelectorAll('.executing-symbol-card').forEach(function (details) {
-        details.open = false;
-        if (details._executingBound) return;
-        details._executingBound = true;
-        details.addEventListener('toggle', function () {
-          if (!details.open) return;
-          var slot = details.querySelector('.executing-detail-slot');
-          if (!slot || (slot.id && slot.id.indexOf('executing-detail-') === 0)) return;
-          if (typeof htmx !== 'undefined') {
-            htmx.trigger(slot, 'revealed');
-          }
+    /** 执行区：详情 sessionStorage + 稳定 slot · 防列表重绘 / 切 Tab 后指标消失 */
+    window.executingDetailCacheKey = 'executing-detail-body-v3:';
+    window.executingDetailCacheVersion = '3';
+    window.executingDetailInflight = window.executingDetailInflight || {};
+    window.executingOpenSymbols = window.executingOpenSymbols || new Set();
+    window.executingDetailJl3Keys = function (body) {
+      if (!body) return [];
+      var raw = body.getAttribute('data-jl3-keys') || '';
+      return raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    };
+    window.executingDetailJl3ReadyKeys = function (body) {
+      if (!body) return [];
+      var raw = body.getAttribute('data-jl3-ready') || '';
+      return raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    };
+    window.executingDetailJl3Complete = function (body) {
+      if (!body) return false;
+      if (body.getAttribute('data-detail-cache-version') !== window.executingDetailCacheVersion) {
+        return false;
+      }
+      var expected = window.executingDetailJl3Keys(body);
+      if (!expected.length) {
+        return false;
+      }
+      return expected.every(function (k) {
+        return body.querySelector('.executing-jl3-probe-fold[data-probe-key="' + k + '"]');
+      });
+    };
+    window.executingDetailSlotEl = function (sym) {
+      if (!sym) return null;
+      return document.getElementById('executing-detail-' + sym);
+    };
+    window.executingDetailBodyEl = function (sym) {
+      if (!sym) return null;
+      return document.getElementById('executing-detail-body-' + sym)
+        || (window.executingDetailSlotEl(sym)
+          && window.executingDetailSlotEl(sym).querySelector('.executing-detail-body'));
+    };
+    window.executingDetailLoaded = function (body) {
+      return body && body.getAttribute('data-detail-state') === 'loaded';
+    };
+    window.executingDetailHasContent = function (body) {
+      if (!body) return false;
+      if (body.getAttribute('data-detail-cache-version') !== window.executingDetailCacheVersion) {
+        return false;
+      }
+      if (!window.executingDetailJl3Complete(body)) {
+        return false;
+      }
+      if (body.querySelector('.executing-fold-section, .executing-probe-fold, .executing-jl3-probe-fold, .executing-position-card')) {
+        return true;
+      }
+      var txt = (body.textContent || '').replace(/\s+/g, '');
+      return txt.length > 40 && txt.indexOf('加载JL') === -1 && txt.indexOf('加载 JL') === -1;
+    };
+    window.executingDetailCacheRead = function (sym) {
+      try {
+        return sessionStorage.getItem(window.executingDetailCacheKey + sym) || '';
+      } catch (e) {
+        return window.executingDetailCache && window.executingDetailCache[sym] || '';
+      }
+    };
+    window.executingDetailCacheWrite = function (sym, html) {
+      if (!sym || !html) return;
+      window.executingDetailCache = window.executingDetailCache || {};
+      window.executingDetailCache[sym] = html;
+      try {
+        sessionStorage.setItem(window.executingDetailCacheKey + sym, html);
+      } catch (e) { /* quota / private mode */ }
+    };
+    window.executingRestoreDetailFromCache = function (sym) {
+      var html = window.executingDetailCacheRead(sym);
+      var body = window.executingDetailBodyEl(sym);
+      if (!html || !body) return false;
+      if (html.indexOf('data-detail-cache-version="3"') < 0) return false;
+      if (window.executingDetailLoaded(body) && window.executingDetailHasContent(body)) return false;
+      body.outerHTML = html.trim();
+      var restored = window.executingDetailBodyEl(sym);
+      if (!restored) return false;
+      var card = restored.closest('.executing-symbol-card');
+      if (card) card.open = true;
+      if (typeof htmx !== 'undefined') htmx.process(restored);
+      return window.executingDetailHasContent(restored);
+    };
+    window.executingEnsureDetailLoad = function (sym, force) {
+      if (!sym) return;
+      var slot = window.executingDetailSlotEl(sym);
+      var body = window.executingDetailBodyEl(sym);
+      if (!slot || !body) return;
+      if (!force && window.executingDetailLoaded(body) && window.executingDetailHasContent(body)) return;
+      if (!force && window.executingRestoreDetailFromCache(sym)) return;
+      var state = body.getAttribute('data-detail-state') || '';
+      if (state === 'loading-busy' && window.executingDetailInflight[sym]) return;
+      var url = slot.getAttribute('data-detail-url');
+      if (!url) return;
+      body.setAttribute('data-detail-state', 'loading-busy');
+      window.executingDetailInflight[sym] = true;
+      if (typeof htmx !== 'undefined') {
+        htmx.ajax('GET', url, {
+          target: '#executing-detail-body-' + sym,
+          swap: 'outerHTML',
+          headers: { Accept: 'text/html' }
         });
+      }
+    };
+    window.executingDetailIntegrityCheck = function () {
+      var panel = document.getElementById('workbench-panel');
+      if (!panel || panel.getAttribute('data-view') !== 'executing') return;
+      document.querySelectorAll('.executing-symbol-card[data-symbol]').forEach(function (card) {
+        if (!card.open) return;
+        var sym = card.getAttribute('data-symbol');
+        if (!sym) return;
+        window.executingOpenSymbols.add(sym);
+        var body = window.executingDetailBodyEl(sym);
+        if (!body) {
+          window.executingEnsureDetailLoad(sym, true);
+          return;
+        }
+        if (window.executingDetailLoaded(body) && !window.executingDetailHasContent(body)) {
+          if (!window.executingRestoreDetailFromCache(sym)) {
+            window.executingEnsureDetailLoad(sym, true);
+          }
+          return;
+        }
+        if (window.executingDetailLoaded(body) && !window.executingDetailJl3Complete(body)) {
+          window.executingEnsureDetailLoad(sym, true);
+          return;
+        }
+        if (!window.executingDetailLoaded(body) && body.getAttribute('data-detail-state') !== 'loading-busy') {
+          window.executingEnsureDetailLoad(sym);
+        }
+      });
+    };
+    if (!window._executingDetailToggleBound) {
+      window._executingDetailToggleBound = true;
+      document.body.addEventListener('toggle', function (ev) {
+        var details = ev.target;
+        if (!details || !details.classList || !details.classList.contains('executing-symbol-card')) return;
+        var sym = details.getAttribute('data-symbol') || '';
+        if (!details.open) {
+          if (sym) window.executingOpenSymbols.delete(sym);
+          return;
+        }
+        if (sym) window.executingOpenSymbols.add(sym);
+        var body = window.executingDetailBodyEl(sym);
+        if (body && window.executingDetailLoaded(body) && !window.executingDetailJl3Complete(body)) {
+          window.executingEnsureDetailLoad(sym, true);
+        } else {
+          window.executingEnsureDetailLoad(sym);
+        }
+      }, true);
+    }
+    if (!window._executingDetailVisibilityBound) {
+      window._executingDetailVisibilityBound = true;
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') {
+          window.executingDetailIntegrityCheck();
+        }
+      });
+      window.addEventListener('pageshow', function () {
+        window.executingDetailIntegrityCheck();
+      });
+    }
+    /** 现价条 HTMX 轮询后 · 若误伤 detail body 则从 cache 自愈 */
+    if (!window._executingDetailGuardBound) {
+      window._executingDetailGuardBound = true;
+      document.body.addEventListener('htmx:afterSwap', function (ev) {
+        var t = ev.detail && ev.detail.target;
+        if (!t) return;
+        if (t.id && t.id.indexOf('executing-mark-') === 0) return;
+        if (!t.classList || !t.classList.contains('executing-detail-body')) return;
+        var sym = t.getAttribute('data-symbol') || '';
+        if (!sym && t.id && t.id.indexOf('executing-detail-body-') === 0) {
+          sym = t.id.replace('executing-detail-body-', '');
+        }
+        if (!sym) return;
+        if (window.executingDetailHasContent(t)) return;
+        if (window.executingRestoreDetailFromCache(sym)) return;
+        window.executingEnsureDetailLoad(sym, true);
+      });
+    }
+    window.executingBootCampaignsList = function (force) {
+      var loader = document.getElementById('executing-campaigns-loader');
+      if (!loader || typeof htmx === 'undefined') return false;
+      if (!force && loader.getAttribute('data-loaded') === '1') return true;
+      if (!force && loader.querySelector('.workspace-symbol-list')) {
+        loader.setAttribute('data-loaded', '1');
+        return true;
+      }
+      var view = loader.getAttribute('data-campaigns-view') || '';
+      var panel = document.getElementById('workbench-panel');
+      if (!view && panel) view = panel.getAttribute('data-view') || '';
+      if (view !== 'planning' && view !== 'executing') return false;
+      if (!force && loader.getAttribute('hx-get') && loader.getAttribute('hx-trigger')) {
+        htmx.process(loader);
+        htmx.trigger(loader, 'load');
+        return true;
+      }
+      htmx.ajax('GET', '/api/campaigns?view=' + encodeURIComponent(view), {
+        target: '#executing-campaigns-loader',
+        swap: 'innerHTML',
+        headers: { Accept: 'text/html' }
+      });
+      return true;
+    };
+    window.executingRefreshCampaignsList = function () {
+      var loader = document.getElementById('executing-campaigns-loader');
+      if (!loader) return;
+      loader.removeAttribute('data-loaded');
+      window.executingBootCampaignsList(true);
+    };
+    window.executingRestoreOpenCards = function () {
+      if (!window.executingOpenSymbols || !window.executingOpenSymbols.size) return;
+      document.querySelectorAll('.executing-symbol-card[data-symbol]').forEach(function (d) {
+        var sym = d.getAttribute('data-symbol');
+        if (sym && window.executingOpenSymbols.has(sym)) {
+          d.open = true;
+          window.executingEnsureDetailLoad(sym);
+        }
       });
     };
 
@@ -164,6 +407,37 @@
       }
     };
 
+    document.body.addEventListener('htmx:afterSwap', function (ev) {
+      var t = ev.detail && ev.detail.target;
+      if (!t || !t.classList || !t.classList.contains('executing-detail-body')) return;
+      var sym = t.getAttribute('data-symbol') || '';
+      if (!sym && t.id && t.id.indexOf('executing-detail-body-') === 0) {
+        sym = t.id.replace('executing-detail-body-', '');
+      }
+      if (t.getAttribute('data-detail-state') === 'loaded' && sym) {
+        window.executingDetailCacheWrite(sym, t.outerHTML);
+        delete window.executingDetailInflight[sym];
+      }
+      if (sym) {
+        var card = t.closest('.executing-symbol-card');
+        if (card) card.open = true;
+        if (typeof htmx !== 'undefined') htmx.process(t);
+      }
+    });
+
+    document.body.addEventListener('htmx:responseError', function (ev) {
+      var t = ev.detail && ev.detail.target;
+      if (!t || !t.classList || !t.classList.contains('executing-detail-body')) return;
+      var sym = t.getAttribute('data-symbol') || '';
+      if (!sym && t.id && t.id.indexOf('executing-detail-body-') === 0) {
+        sym = t.id.replace('executing-detail-body-', '');
+      }
+      delete window.executingDetailInflight[sym];
+      if (t.getAttribute('data-detail-state') === 'loading-busy') {
+        t.setAttribute('data-detail-state', 'loading');
+      }
+    });
+
     document.body.addEventListener('htmx:beforeRequest', function (ev) {
       var elt = ev.detail && ev.detail.elt;
       if (elt && elt.classList && elt.classList.contains('workbench-tab')) {
@@ -176,22 +450,55 @@
       var t = ev.detail && ev.detail.target;
       if (!t || t.id !== 'workbench-panel') return;
       var view = t.getAttribute('data-view') || '';
+      window.executingDetailInflight = {};
       window.workbenchSyncTabs(view);
       window.workbenchInitPanel(view);
     });
 
     document.body.addEventListener('htmx:afterSwap', function (ev) {
       var t = ev.detail && ev.detail.target;
-      if (!t || !t.getAttribute || !t.getAttribute('hx-get')) return;
-      var hxGet = t.getAttribute('hx-get') || '';
-      if (hxGet.indexOf('view=executing') === -1 && hxGet.indexOf('view=planning') === -1) return;
+      if (!t || t.id !== 'executing-campaigns-loader') return;
+      t.setAttribute('data-loaded', '1');
       var panel = document.getElementById('workbench-panel');
       var view = panel && panel.getAttribute('data-view');
-      if (view === 'executing' && typeof window.executingBootPanel === 'function') {
-        window.executingBootPanel();
-      }
       if (view === 'planning' && typeof window.planningBootPanel === 'function') {
         window.planningBootPanel();
+      }
+      if (view === 'executing' && typeof window.executingRestoreOpenCards === 'function') {
+        window.executingRestoreOpenCards();
+        if (typeof window.executingDetailIntegrityCheck === 'function') {
+          window.executingDetailIntegrityCheck();
+        }
+      }
+    });
+
+    document.body.addEventListener('htmx:responseError', function (ev) {
+      var t = ev.detail && ev.detail.target;
+      if (!t || t.id !== 'executing-campaigns-loader') return;
+      t.removeAttribute('data-loaded');
+      if (!t.querySelector('.executing-campaigns-error')) {
+        t.insertAdjacentHTML(
+          'beforeend',
+          '<p class="executing-campaigns-error text-sm text-rose-600 py-3 text-center">'
+          + '标的列表加载失败 · <button type="button" class="underline" '
+          + 'onclick="window.executingRefreshCampaignsList()">重试</button></p>'
+        );
+      }
+    });
+
+    /** 漏斗晋级/降级/移除后刷新标的列表（勿依赖 loader 上的 hx-get · 防 click 冒泡） */
+    document.body.addEventListener('htmx:afterRequest', function (ev) {
+      if (!ev.detail || !ev.detail.successful) return;
+      var elt = ev.detail.elt;
+      if (!elt || elt.tagName !== 'FORM') return;
+      var path = (ev.detail.pathInfo && ev.detail.pathInfo.requestPath) || '';
+      if (!/\/api\/(funnel\/symbols\/[^/]+\/(demote|remove)|campaigns\/\d+\/(archive|promote-executing))/.test(path)) {
+        return;
+      }
+      var panel = document.getElementById('workbench-panel');
+      var view = panel && panel.getAttribute('data-view');
+      if (view === 'planning' || view === 'executing') {
+        window.executingRefreshCampaignsList();
       }
     });
 
@@ -226,6 +533,17 @@
         window.radarAnalyzeBtnBusy(false);
       }
     });
+
+    if (!window.workbenchBootWhenReady()) {
+      document.addEventListener('DOMContentLoaded', function () {
+        if (window.workbenchBootWhenReady()) return;
+        var tries = 0;
+        var bootTimer = setInterval(function () {
+          tries += 1;
+          if (window.workbenchBootWhenReady() || tries > 250) clearInterval(bootTimer);
+        }, 20);
+      });
+    }
   })();
   </script>
 

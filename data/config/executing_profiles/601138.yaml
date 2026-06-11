@@ -7,6 +7,13 @@ name: "工业富联"
 profile: "601138"
 
 honhai_twse_code: "2317.TW"
+# 鸿海系对 601138 持股（来源：2025 年报 + 2025-12-31 前十大股东 · 卡片脚注同步）
+honhai_ownership:
+  as_of: "2025-12-31"
+  controller: "鸿海精密工业股份有限公司"
+  china_galaxy_direct_pct: 36.73
+  concert_party_total_pct: 85.72
+  confirm: "工业富联年报释义 + 定期报告前十大股东（上交所/巨潮）"
 peer_quanta_code: "2382.TW"
 sector_index_code: "931071.CSI"
 sector_index_name: "中证人工智能"

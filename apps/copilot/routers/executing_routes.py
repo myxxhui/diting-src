@@ -343,8 +343,9 @@ async def api_executing_detail_html(
         logger.exception("执行区详情渲染失败 symbol=%s", sym)
         await session.rollback()
         return HTMLResponse(
-            f'<div id="executing-detail-{sym}" class="executing-workspace bg-rose-50 rounded-xl p-4 border border-rose-200">'
-            f'<p class="text-sm text-rose-800">加载 JL1–4 指标失败：{_esc(str(exc)[:300])}</p>'
+            f'<div id="executing-detail-body-{sym}" data-detail-state="error" data-symbol="{sym}" '
+            f'class="executing-detail-body executing-workspace bg-rose-50 rounded-xl p-4 border border-rose-200">'
+            f'<p class="text-sm text-rose-800">加载 JL 指标失败：{_esc(str(exc)[:300])}</p>'
             f'<p class="text-xs text-rose-600 mt-2">可点「立即跑今日体检」重试，或刷新页面。</p></div>',
             status_code=200,
         )
@@ -364,7 +365,11 @@ def _render_mark_price_strip(sym: str, ctx: dict[str, Any]) -> str:
     stale_html = ' · <span class="text-amber-600">行情 stale</span>' if ctx.get("price_stale") else ""
     return f"""
 <div id="executing-mark-{sym}" class="col-span-2 md:col-span-3 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5"
-     hx-get="/api/executing/positions/{sym}/mark-strip" hx-trigger="every 60s" hx-swap="outerHTML">
+     hx-get="/api/executing/positions/{sym}/mark-strip"
+     hx-trigger="every 60s"
+     hx-target="this"
+     hx-swap="outerHTML"
+     hx-disinherit="hx-target hx-swap">
   现价 <strong class="text-gray-900">{_esc(mark_disp)}</strong>
   · 成本 <strong class="text-gray-900">{_esc(cost_disp)}</strong>
   · 浮盈 <strong class="text-emerald-500">{_esc(ctx.get('unrealized_pnl_pct','—'))}%</strong>
@@ -409,12 +414,6 @@ async def _render_executing_detail_html(
     if opened_val and "T" in str(opened_val):
         opened_val = str(opened_val)[:10]
     notes_val = base.get("notes") or ""
-    lifecycle_badge = (
-        '<span class="text-xs px-2 py-0.5 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 font-medium ml-2">持仓中</span>'
-        if lifecycle == LIFECYCLE_HOLDING
-        else '<span class="text-xs px-2 py-0.5 rounded-md border border-sky-200 bg-sky-50 text-sky-700 font-medium ml-2">待建仓</span>'
-    )
-
     from apps.copilot.modules.executing.money_unit import EXECUTING_MONEY_UNIT
 
     money_hint = f"货币单位：<strong>{_esc(EXECUTING_MONEY_UNIT)}</strong>"
@@ -422,20 +421,36 @@ async def _render_executing_detail_html(
     enroll_btn = ""
     if not in_collect:
         enroll_btn = f"""
-  <form hx-post="/api/executing/{sym}/enroll-collect" hx-target="#executing-detail-{sym}" hx-swap="outerHTML" class="mb-3">
+  <form hx-post="/api/executing/{sym}/enroll-collect" hx-target="#executing-detail-body-{sym}" hx-swap="innerHTML" class="mb-3">
     <button type="submit" class="text-sm px-3 py-1.5 rounded-lg bg-sky-600 text-white hover:bg-sky-700 font-medium">
       加入数据获取列表
     </button>
     <span class="text-xs text-gray-500 ml-2">入表后 Cron 采集 JL4 · 待建仓亦可跟踪盘面指标</span>
   </form>
 """
-    pos_form = f"""
-<div class="executing-position-card bg-white border border-gray-200 rounded-xl shadow-sm p-6 mb-4">
-  <h3 class="text-base font-semibold text-gray-900 mb-1">层 A · 标的基础数据 · {_esc(sym)}{lifecycle_badge}</h3>
+    from apps.copilot.modules.executing.executing_render import (
+        _quote_intraday_watermark,
+        build_layer_a_header_summary,
+        render_degraded_probes,
+        render_hot_data_timeline,
+        render_layer_b_collect_gate_banner,
+        render_layer_b_pending_build_banner,
+        render_l3_probe_domain,
+        render_probe_domain,
+        render_qmt_atr_pending_placeholder,
+        wrap_executing_layer_a_section,
+    )
+
+    lifecycle_label = "持仓中" if lifecycle == LIFECYCLE_HOLDING else "待建仓"
+    layer_a_summary = build_layer_a_header_summary(
+        ctx, sym=sym, lifecycle_label=lifecycle_label
+    )
+    pos_form_inner = f"""
   {enroll_btn}
   <p class="text-xs text-gray-400 mb-1">保存后同步写入 <code class="text-[11px] bg-gray-100 px-1 rounded">user_positions</code> 与 <code class="text-[11px] bg-gray-100 px-1 rounded">executing_collect_symbols</code></p>
   <p class="text-xs text-gray-500 mb-4">{money_hint} · 价格字段均为此单位 · 现价随热数据 Cron 刷新（约 60s 自动更新）</p>
-  <form hx-post="/api/executing/positions/{sym}/save" hx-target="#executing-detail-{sym}" hx-swap="outerHTML"
+  {mark_strip}
+  <form hx-post="/api/executing/positions/{sym}/save" hx-target="#executing-detail-body-{sym}" hx-swap="innerHTML"
         class="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
     <label class="flex flex-col gap-1 text-gray-700">名称
       <input name="name" class="border border-gray-200 rounded-lg px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400" value="{_esc(ctx.get('name',''))}">
@@ -460,24 +475,16 @@ async def _render_executing_detail_html(
     <label class="flex flex-col gap-1 md:col-span-1 text-gray-700">备注
       <input name="notes" class="border border-gray-200 rounded-lg px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400" value="{_esc(notes_val)}">
     </label>
-    {mark_strip}
     <button type="submit" class="col-span-2 md:col-span-3 bg-blue-600 text-white rounded-lg py-2.5 hover:bg-blue-700 font-medium transition-colors">
       保存标的基础数据
     </button>
   </form>
-</div>
 """
-
-    from apps.copilot.modules.executing.executing_render import (
-        _quote_intraday_watermark,
-        render_degraded_probes,
-        render_hot_data_timeline,
-        render_layer_b_collect_gate_banner,
-        render_layer_b_pending_build_banner,
-        render_l3_probe_domain,
-        render_probe_domain,
-        render_qmt_atr_pending_placeholder,
+    pos_form = wrap_executing_layer_a_section(
+        f'<div class="executing-position-card px-2">{pos_form_inner}</div>',
+        header_summary=layer_a_summary,
     )
+
     from apps.copilot.modules.executing.probe_card_timing import build_probe_card_timing_map
     from apps.copilot.modules.executing.t1_assembler import (
         assemble_stock_signal,
@@ -561,7 +568,7 @@ async def _render_executing_detail_html(
     toolbar = f"""
 <div class="flex gap-2 mb-4 flex-wrap text-sm">
   <button class="px-3 py-1.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 font-medium transition-colors"
-    hx-post="/api/executing/{sym}/daily-run-html" hx-target="#executing-detail-{sym}" hx-swap="outerHTML">
+    hx-post="/api/executing/{sym}/daily-run-html" hx-target="#executing-detail-body-{sym}" hx-swap="innerHTML">
     立即跑今日体检
   </button>
   <button class="px-3 py-1.5 border border-gray-200 bg-white text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
@@ -608,15 +615,25 @@ async def _render_executing_detail_html(
         f"{render_degraded_probes(degraded_hints)}"
         f"{hot_timeline}"
         f'{render_l3_probe_domain(l3, timing_map=timing_map)}'
-        f'{render_probe_domain(l4, title="层 B · T1 指标（#15~#25）", accent="orange", empty_hint="暂无可用指标 · 点「立即跑今日体检」或等待 Cron 采集", symbol=sym, sync=sync, event_probe_states=event_probe_states, timing_map=timing_map)}'
+        f'{render_probe_domain(l4, title="JL4 · 盘面指标", accent="orange", empty_hint="暂无可用指标 · 点「立即跑今日体检」或等待 Cron 采集", symbol=sym, sync=sync, event_probe_states=event_probe_states, timing_map=timing_map)}'
     )
 
-    return HTMLResponse(
-        f'<div id="executing-detail-{sym}" class="executing-workspace bg-gray-50 rounded-xl p-4 -mx-1">'
+    jl3_ready_keys = [k for k in L3_KEYS if isinstance(l3.get(k), dict)]
+    jl3_keys_attr = ",".join(L3_KEYS)
+    body_html = (
         f"{toolbar}{cache_note}{pos_form}"
         f"{layer_b_html}"
         f"{audit_html}"
-        f'<p class="text-[11px] text-gray-400 text-center mt-2">advisory only · no-auto-execute · [Ref: 28_]</p></div>'
+        f'<p class="text-[11px] text-gray-400 text-center mt-2">advisory only · no-auto-execute · [Ref: 28_]</p>'
+    )
+    return HTMLResponse(
+        f'<div id="executing-detail-body-{sym}" '
+        f'data-detail-state="loaded" data-symbol="{sym}" '
+        f'data-detail-cache-version="3" '
+        f'data-jl3-keys="{_esc(jl3_keys_attr)}" '
+        f'data-jl3-ready="{_esc(",".join(jl3_ready_keys))}" '
+        f'class="executing-detail-body executing-workspace executing-detail-loaded bg-gray-50 rounded-xl p-4 -mx-1">'
+        f"{body_html}</div>"
     )
 
 

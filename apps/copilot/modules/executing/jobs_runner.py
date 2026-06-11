@@ -287,6 +287,12 @@ async def run_job(
         result = await run_fii_twse_cloud_monthly(session, symbols)
         return result
 
+    if job_id == "l3-fii-odm-quarterly":
+        from apps.copilot.modules.executing.orchestrator import run_fii_odm_direct_ratio_quarterly
+
+        result = await run_fii_odm_direct_ratio_quarterly(session, symbols)
+        return result
+
     if job_id in ("l4-micro-eod", "l3-news-daily", "collect-once"):
         out = []
         for sym in symbols:

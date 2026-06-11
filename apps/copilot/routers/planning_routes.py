@@ -415,6 +415,8 @@ async def planning_page(
     }
     if view == "roadmap":
         ctx.update(await _strategic_roadmap_context(session, request))
+    if view in ("planning", "executing"):
+        ctx["workspace_symbols_html"] = await build_workspace_symbols_html(session, view=view)
     return _tpl(request).TemplateResponse(request, "planning/workbench.html", ctx)
 
 
@@ -438,6 +440,8 @@ async def planning_panel(
     }
     if view == "roadmap":
         ctx.update(await _strategic_roadmap_context(session, request))
+    if view in ("planning", "executing"):
+        ctx["workspace_symbols_html"] = await build_workspace_symbols_html(session, view=view)
     return _tpl(request).TemplateResponse(
         request,
         "planning/_workbench_panel.html",
@@ -481,6 +485,76 @@ async def system_page(request: Request):
     return RedirectResponse(url="/settings#radar-prefs", status_code=302)
 
 
+async def _load_workspace_symbols_bundle(
+    session: AsyncSession,
+    *,
+    view: str,
+) -> tuple[list, int, dict, dict, list, dict, dict]:
+    """规划/执行区标的卡数据包（SSR 与 /api/campaigns 共用）。"""
+    symbols = await list_workspace_symbols(session, view=view)
+    container = await get_or_create_container(session)
+    t2_summaries: dict = {}
+    sym_list = [s.get("symbol", "") for s in symbols if s.get("symbol")]
+    from apps.copilot.modules.strategic.service import (
+        get_primary_tags_map,
+        jl_summary_for_phase,
+        list_board_phase_options,
+        suggest_tag_for_symbol,
+    )
+
+    tags_map = await get_primary_tags_map(session, sym_list)
+    tag_options = await list_board_phase_options(session)
+    tag_suggested: dict[str, dict | None] = {}
+    jl_summaries: dict[str, str] = {}
+    for sym in sym_list:
+        tag_suggested[sym] = await suggest_tag_for_symbol(session, sym)
+        t = tags_map.get(sym)
+        if t and t.get("phase_id"):
+            jl_summaries[sym] = await jl_summary_for_phase(session, t["phase_id"])
+    if view == "executing":
+        from apps.copilot.modules.executing.t2_advice_summary import (
+            load_executing_t2_summaries_for_symbols,
+        )
+
+        t2_summaries = await load_executing_t2_summaries_for_symbols(session, sym_list)
+    await session.commit()
+    return (
+        symbols,
+        container.id,
+        t2_summaries,
+        tags_map,
+        tag_options,
+        tag_suggested,
+        jl_summaries,
+    )
+
+
+async def build_workspace_symbols_html(session: AsyncSession, *, view: str) -> str:
+    """工作台规划/执行区首屏 SSR · 与 /api/campaigns HTML 同构。"""
+    if view not in ("planning", "executing"):
+        return ""
+    (
+        symbols,
+        container_id,
+        t2_summaries,
+        tags_map,
+        tag_options,
+        tag_suggested,
+        jl_summaries,
+    ) = await _load_workspace_symbols_bundle(session, view=view)
+    resp = _render_workspace_symbols_html(
+        symbols,
+        view=view,
+        container_id=container_id,
+        t2_summaries=t2_summaries,
+        tags_map=tags_map,
+        tag_options=tag_options,
+        tag_suggested=tag_suggested,
+        jl_summaries=jl_summaries,
+    )
+    return resp.body.decode("utf-8")
+
+
 @router.get("/api/campaigns")
 async def api_list_campaigns(
     request: Request,
@@ -491,38 +565,20 @@ async def api_list_campaigns(
     want_html = "text/html" in accept or request.headers.get("hx-request")
     # 标的级漏斗：planning/executing 视图按 funnel_stage 渲染标的卡（四区联动）
     if view in ("planning", "executing"):
-        symbols = await list_workspace_symbols(session, view=view)
-        container = await get_or_create_container(session)
-        t2_summaries: dict = {}
-        sym_list = [s.get("symbol", "") for s in symbols if s.get("symbol")]
-        from apps.copilot.modules.strategic.service import (
-            get_primary_tags_map,
-            jl_summary_for_phase,
-            list_board_phase_options,
-            suggest_tag_for_symbol,
-        )
-
-        tags_map = await get_primary_tags_map(session, sym_list)
-        tag_options = await list_board_phase_options(session)
-        tag_suggested: dict[str, dict | None] = {}
-        jl_summaries: dict[str, str] = {}
-        for sym in sym_list:
-            tag_suggested[sym] = await suggest_tag_for_symbol(session, sym)
-            t = tags_map.get(sym)
-            if t and t.get("phase_id"):
-                jl_summaries[sym] = await jl_summary_for_phase(session, t["phase_id"])
-        if view == "executing":
-            from apps.copilot.modules.executing.t2_advice_summary import (
-                load_executing_t2_summaries_for_symbols,
-            )
-
-            t2_summaries = await load_executing_t2_summaries_for_symbols(session, sym_list)
-        await session.commit()
+        (
+            symbols,
+            container_id,
+            t2_summaries,
+            tags_map,
+            tag_options,
+            tag_suggested,
+            jl_summaries,
+        ) = await _load_workspace_symbols_bundle(session, view=view)
         if want_html:
             return _render_workspace_symbols_html(
                 symbols,
                 view=view,
-                container_id=container.id,
+                container_id=container_id,
                 t2_summaries=t2_summaries,
                 tags_map=tags_map,
                 tag_options=tag_options,

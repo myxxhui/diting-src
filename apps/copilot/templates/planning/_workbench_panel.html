@@ -1198,8 +1198,20 @@
   {% if active == 'executing' %}
   <div hx-get="/api/executing/settings-html" hx-trigger="load" hx-swap="innerHTML" class="mb-3"></div>
   {% endif %}
-  <div hx-get="/api/campaigns?view={{ active }}" hx-trigger="load" hx-swap="innerHTML"
-       hx-headers='{"Accept": "text/html"}'>
+  {# 禁止 default trigger=click：仅 load once · 首屏 SSR 时跳过二次请求 #}
+  <div id="executing-campaigns-loader"
+       data-campaigns-view="{{ active }}"
+       {% if workspace_symbols_html %}
+       data-loaded="1"
+       {% else %}
+       hx-get="/api/campaigns?view={{ active }}"
+       hx-trigger="load once"
+       hx-swap="innerHTML"
+       {% endif %}
+       onclick="event.stopPropagation()">
+    {% if workspace_symbols_html %}
+      {{ workspace_symbols_html|safe }}
+    {% else %}
     <div class="text-gray-400 text-sm py-6 flex items-center justify-center gap-2">
       <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -1207,6 +1219,7 @@
       </svg>
       加载标的列表…
     </div>
+    {% endif %}
   </div>
   </div>
 </div>

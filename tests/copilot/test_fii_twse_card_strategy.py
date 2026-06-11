@@ -45,9 +45,52 @@ def test_card_strategy_has_three_goals():
     node = build_fii_twse_cloud_node(SAMPLE_T0, source="test")
     cs = node["raw_metrics"]["card_strategy"]
     assert "goal1_time_lag" in cs
+    assert "goal1b_cloud_vs_total" in cs
     assert "goal2_noise_isolation" in cs
     assert "goal3_trend_trigger" in cs
     assert len(cs["goal1_time_lag"]["monthly_series"]) >= 4
+    cmp_rows = cs["goal1b_cloud_vs_total"]["comparison_series"]
+    assert len(cmp_rows) >= 4
+    assert "total_mom_pct" in cmp_rows[-1]
+    assert "cloud_mom_pct" in cmp_rows[-1]
+    assert "sync_label" in cmp_rows[-1]
+
+
+def test_render_cloud_vs_total_table():
+    from apps.copilot.modules.executing.jl3_card_render import render_fii_cloud_vs_total_table
+
+    html = render_fii_cloud_vs_total_table(
+        [
+            {
+                "period": "2026-04",
+                "total_billion_ntd": 832.1,
+                "total_mom_pct": 3.5,
+                "cloud_lo_billion_ntd": 170.2,
+                "cloud_mom_pct": 5.1,
+                "cloud_share_pct": 20.5,
+                "sync_label": "云端更强",
+            }
+        ]
+    )
+    assert "云端MoM" in html or "月环比" in html
+    assert "云端网路" in html
+
+
+def test_honhai_ownership_on_card_face():
+    from apps.copilot.modules.executing.jl3_card_render import render_fii_ownership_card_face
+    from apps.copilot.modules.executing.l3.fii_twse_cloud.card_strategy import build_honhai_ownership_summary
+
+    html = render_fii_ownership_card_face(build_honhai_ownership_summary())
+    assert "鸿海系持股" in html
+    assert "85.72" in html
+    assert "详细了解股权与分红" in html
+    assert "现金分红" in html
+
+
+def test_card_strategy_includes_ownership():
+    node = build_fii_twse_cloud_node(SAMPLE_T0, source="test")
+    own = node["raw_metrics"]["card_strategy"].get("honhai_ownership") or {}
+    assert own.get("concert_party_pct") == 85.72
 
 
 def test_trend_signal_yellow_when_rank_second():
@@ -63,8 +106,9 @@ def test_trend_signal_yellow_when_rank_second():
 def test_render_strategy_panel():
     node = build_fii_twse_cloud_node(SAMPLE_T0, source="test")
     html = render_fii_twse_cloud_card(node)
-    assert "目标一 · 时间差套利" in html
-    assert "目标二 · 剥离果链噪音" in html
-    assert "目标三 · 程序化发令枪" in html
-    assert "三目标实战面板" in html
+    assert "云端网路 · 近" in html
+    assert "合并总营收" in html
+    assert "鸿海系持股" in html
+    assert "详细了解股权与分红" in html
+    assert "来源 ·" not in html
     assert "T1 白盒 JSON" in html

@@ -43,7 +43,7 @@ SAMPLE_T0 = {
 
 
 def test_l3_keys_and_registry_aligned():
-    assert PK_L3 == ("fii_twse_cloud",)
+    assert PK_L3 == ("fii_twse_cloud", "fii_odm_direct_ratio")
     assert set(L3_PROBE_REGISTRY) == set(L3_KEYS)
 
 
@@ -100,3 +100,42 @@ def test_render_fii_twse_cloud_card():
     assert "fii_twse_cloud" in html
     assert "T1 白盒 JSON" in html
     assert "母公司云端营收" in html
+
+
+def test_trunk_from_finmind_history():
+    from apps.copilot.modules.executing.l3.fii_twse_cloud.twse_client import (
+        trunk_from_finmind_history,
+    )
+
+    history = [
+        {"year": 2026, "month": 4, "total_revenue_ntd": 832_097_956_000, "total_mom_pct": 3.53},
+        {"year": 2026, "month": 5, "total_revenue_ntd": 859_409_333_000, "total_mom_pct": 3.28},
+    ]
+    trunk = trunk_from_finmind_history(history)
+    assert trunk["report_month"] == 5
+    assert "降级" in trunk["source"]
+
+
+def test_reconcile_trunk_prefers_finmind_when_newer():
+    from apps.copilot.modules.executing.l3.fii_twse_cloud.t0_collect import (
+        _reconcile_trunk_with_history,
+    )
+
+    trunk = {
+        "report_year": 2026,
+        "report_month": 4,
+        "total_revenue_ntd": 832_097_956_000,
+        "total_mom_pct": 3.53,
+        "total_yoy_pct": 29.0,
+        "prev_month_revenue_ntd": 803_737_716_000,
+        "source": "TWSE",
+    }
+    history = [
+        {"year": 2026, "month": 4, "total_revenue_ntd": 832_097_956_000, "total_mom_pct": 3.53},
+        {"year": 2026, "month": 5, "total_revenue_ntd": 859_409_333_000, "total_mom_pct": 3.28},
+    ]
+    out = _reconcile_trunk_with_history(trunk, history)
+    assert out["report_year"] == 2026
+    assert out["report_month"] == 5
+    assert out["total_revenue_ntd"] == 859_409_333_000
+    assert "FinMind" in out["source"]

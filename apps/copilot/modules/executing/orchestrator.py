@@ -1596,3 +1596,82 @@ async def run_fii_twse_cloud_monthly(
         "status": "ok" if ok else "error",
         "results": results,
     }
+
+
+async def run_fii_odm_direct_ratio_quarterly(
+    session: AsyncSession,
+    symbols: list[str],
+) -> dict[str, Any]:
+    """财报季窗口 · 601138 云计算 ODM 直供占比 T0→T1。"""
+    from apps.copilot.modules.executing.l3.fii_odm_direct_ratio.indicator_node import (
+        build_fii_odm_direct_ratio_node,
+    )
+    from apps.copilot.modules.executing.l3.fii_odm_direct_ratio.t0_collect import (
+        collect_fii_odm_direct_ratio_t0,
+        parse_baseline_from_t1_json,
+    )
+    from apps.copilot.modules.executing.profile import load_profile, profile_l3_keys
+    from apps.copilot.modules.executing.storage import (
+        load_t1_snapshot,
+        save_t0_batch,
+        upsert_t1_snapshot,
+    )
+
+    results: list[dict[str, Any]] = []
+    for sym in symbols:
+        code = sym.zfill(6)[-6:]
+        prof = load_profile(code)
+        if "fii_odm_direct_ratio" not in profile_l3_keys(prof):
+            results.append({"symbol": code, "status": "skip", "reason": "no_l3_fii_odm"})
+            continue
+        prev = await load_t1_snapshot(session, code, "fii_odm_direct_ratio")
+        baseline = parse_baseline_from_t1_json(prev.get("t1_json") if prev else None)
+        t0_item = collect_fii_odm_direct_ratio_t0(code, historical_ratio_baseline_pct=baseline)
+        if not t0_item.get("ok"):
+            await save_t0_batch(session, code, [t0_item])
+            results.append(
+                {
+                    "symbol": code,
+                    "status": "error",
+                    "error": t0_item.get("blocker"),
+                }
+            )
+            continue
+        payload = t0_item.get("payload") or {}
+        node = build_fii_odm_direct_ratio_node(
+            payload,
+            source=t0_item.get("source") or "T0",
+        )
+        await save_t0_batch(session, code, [t0_item])
+        await upsert_t1_snapshot(
+            session,
+            code,
+            "fii_odm_direct_ratio",
+            node,
+            source=t0_item.get("source"),
+        )
+        ratio = (node.get("t1_json") or {}).get("odm_ratio_pct") or {}
+        results.append(
+            {
+                "symbol": code,
+                "status": "ok",
+                "report": payload.get("report_period"),
+                "odm_mid_pct": ratio.get("mid"),
+            }
+        )
+
+    ok = [r for r in results if r.get("status") == "ok"]
+    await upsert_watermark(
+        session,
+        "l3-fii-odm-quarterly",
+        "*",
+        success=bool(ok),
+        trade_date=date.today(),
+        row_count=len(ok),
+        error=None if ok else "fii_odm_direct_ratio_failed",
+    )
+    return {
+        "job_id": "l3-fii-odm-quarterly",
+        "status": "ok" if ok else "error",
+        "results": results,
+    }

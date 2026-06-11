@@ -53,6 +53,8 @@ def test_executing_card_modal_strategic_section():
         render_executing_t2_banner=_t2_banner,
     )
     assert "executing-symbol-card" in html
+    assert "executing-t2-panel" in html
+    assert "data-detail-url='/api/executing/601138/detail'" in html
     assert "① 战略归属" in html
     assert "设置战略归属" in html
     assert "workspace-tag-601138" in html

@@ -249,6 +249,42 @@ async def latest_raw_map(session: AsyncSession, symbol: str) -> dict[str, dict[s
     return out
 
 
+async def load_t0_raw_by_probe(
+    session: AsyncSession,
+    symbol: str,
+    probe_key: str,
+) -> dict[str, Any] | None:
+    """读取单探针最新成功 T0 包装（ok/payload/source）。"""
+    from sqlalchemy import select
+
+    sym = symbol.zfill(6)[-6:]
+    row = (
+        await session.scalars(
+            select(ExecutingT0Raw)
+            .where(
+                ExecutingT0Raw.symbol == sym,
+                ExecutingT0Raw.probe_key == probe_key,
+            )
+            .order_by(ExecutingT0Raw.collected_at.desc())
+            .limit(1)
+        )
+    ).first()
+    if row is None:
+        return None
+    payload = row.payload_json if isinstance(row.payload_json, dict) else {}
+    if not payload.get("ok"):
+        return {
+            "ok": False,
+            "blocker": payload.get("blocker"),
+            "source": row.source or "",
+        }
+    return {
+        "ok": True,
+        "payload": payload.get("payload") or {},
+        "source": row.source or "",
+    }
+
+
 async def upsert_t1_snapshot(
     session: AsyncSession,
     symbol: str,

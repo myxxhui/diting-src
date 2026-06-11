@@ -309,9 +309,14 @@ def _render_probe_card(
     metric_formatters: dict[str, Callable[[Any], str]] | None = None,
     formula_accent: str = "",
     alert_html: str = "",
+    header_extra_html: str = "",
     t1_json: dict[str, Any] | None = None,
     status_ok: bool = True,
     visual_cooldown: bool = False,
+    show_source_footer: bool = True,
+    show_fact_block: bool = True,
+    show_formula_block: bool = True,
+    header_corner_html: str = "",
 ) -> str:
     """统一指标卡片：Header · 描述 · 公式区 · Tag 栏 · 来源 Footer。"""
     theme = _probe_theme(probe_key)
@@ -327,24 +332,41 @@ def _render_probe_card(
     sub_line = (
         f'<p class="text-xs text-gray-500 mt-1">{_esc(subtitle)}</p>' if subtitle else ""
     )
-    fact_block = (
-        f'<p class="text-sm text-gray-600 leading-relaxed mt-4">{_esc(fact_statement)}</p>'
-        if fact_statement
-        else ""
-    )
+    fact_block = ""
+    if show_fact_block and fact_statement:
+        fact_block = (
+            f'<p class="text-sm text-gray-600 leading-relaxed mt-4">{_esc(fact_statement)}</p>'
+        )
     formula_block = ""
-    if calculation_logic:
+    if show_formula_block and calculation_logic:
         formula_block = (
             f'<div class="{_FORMULA} {formula_border}">'
             f"{_highlight_formula(calculation_logic)}</div>"
         )
     tags_html = _render_metric_tags(metric_items or [], formatters=metric_formatters)
     footer_json = _render_t1_json_details(probe_key, t1_json) if t1_json else ""
-    source_line = _esc(source or "—")
+    source_footer = ""
+    if show_source_footer:
+        source_line = _esc(source or "—")
+        source_footer = f'<p class="text-[11px] text-gray-400">来源 · {source_line}</p>'
 
     timing_attr = ""
     if card_timing is not None:
         timing_attr = f' data-timing-health="{_esc(card_timing.health)}"'
+    corner = header_corner_html or ""
+    value_block = (
+        f'<div class="flex items-center gap-2">'
+        f"{_status_dot(status_ok_effective)}"
+        f'<span class="text-xl font-bold tabular-nums {value_color}">{value_html}</span>'
+        f"</div>"
+    )
+    if corner:
+        right_header = (
+            f'<div class="flex flex-col items-end gap-1.5 shrink-0 max-w-[12rem]">'
+            f"{corner}{value_block}</div>"
+        )
+    else:
+        right_header = f'<div class="flex items-center gap-2 shrink-0">{value_block}</div>'
 
     return f"""
 <article class="{card_cls}" style="{card_style}" data-probe-key="{_esc(probe_key)}" data-probe-category="{_esc(theme.get('category', ''))}"{timing_attr}>
@@ -353,22 +375,20 @@ def _render_probe_card(
     <div class="min-w-0 flex-1">
       <h3 class="text-base font-semibold text-gray-900 leading-snug">{_esc(title)}</h3>
       <div class="mt-1.5 flex flex-wrap items-center gap-2">
+        <span class="text-[10px] font-semibold uppercase tracking-wide text-orange-600/90">JL4</span>
         <span class="text-xs text-gray-500">{_esc(short_label)}</span>
-        <code class="text-[11px] font-mono px-2 py-0.5 rounded-md {badge_cls}">{_esc(probe_key)}</code>
       </div>
       {sub_line}
+      {header_extra_html}
     </div>
-    <div class="flex items-center gap-2 shrink-0">
-      {_status_dot(status_ok_effective)}
-      <span class="text-xl font-bold tabular-nums {value_color}">{value_html}</span>
-    </div>
+    {right_header}
   </header>
   {fact_block}
   {formula_block}
   {alert_html}
   {tags_html}
   <footer class="mt-5 pt-3 border-t border-gray-200">
-    <p class="text-[11px] text-gray-400">来源 · {source_line}</p>
+    {source_footer}
     {footer_json}
   </footer>
 </article>
@@ -1392,175 +1412,296 @@ def _format_mom_cell(mom: Any) -> str:
     return f'<span class="font-semibold tabular-nums {cls}">{v:+.1f}%</span>'
 
 
-def _render_fii_monthly_table(
-    rows: list[dict[str, Any]],
-    *,
-    value_key: str,
-    value_label: str,
-    billion_key: str | None = None,
-) -> str:
-    if not rows:
-        return '<p class="text-xs text-gray-400">暂无序列</p>'
-    body = []
-    for r in rows:
-        period = _esc(r.get("period", ""))
-        mom = _format_mom_cell(r.get("mom_pct"))
-        val = r.get(value_key)
-        if billion_key and r.get(billion_key) is not None:
-            val_txt = f'{r[billion_key]} 亿'
-        elif val is not None:
-            val_txt = _esc(val)
-        else:
-            val_txt = "—"
-        body.append(
-            f"<tr class=\"border-t border-gray-100\">"
-            f"<td class=\"py-1.5 pr-3 text-gray-600 font-mono text-[11px]\">{period}</td>"
-            f"<td class=\"py-1.5 pr-3 text-gray-800 text-[11px]\">{_esc(val_txt)}</td>"
-            f"<td class=\"py-1.5 text-right text-[11px]\">{mom}</td>"
-            f"</tr>"
-        )
-    return (
-        f'<table class="w-full text-left mt-2">'
-        f'<thead><tr class="text-[10px] text-gray-400 uppercase tracking-wide">'
-        f'<th class="pb-1 font-medium">月份</th>'
-        f'<th class="pb-1 font-medium">{_esc(value_label)}</th>'
-        f'<th class="pb-1 font-medium text-right">MoM</th></tr></thead>'
-        f"<tbody>{''.join(body)}</tbody></table>"
-    )
+def _format_compact_probe_value(val: Any) -> str:
+    if val is None or val == "":
+        return "—"
+    try:
+        f = float(val)
+        if abs(f) >= 100:
+            return f"{f:.1f}"
+        if abs(f) >= 10:
+            return f"{f:.2f}"
+        return f"{f:.3f}".rstrip("0").rstrip(".")
+    except (TypeError, ValueError):
+        return str(val)[:12]
 
 
-def _render_fii_signal_badge(status: str, label: str, summary: str) -> str:
-    palette = {
-        "green": ("bg-emerald-50 border-emerald-200 text-emerald-800", "🟢"),
-        "yellow": ("bg-amber-50 border-amber-200 text-amber-900", "🟡"),
-        "red": ("bg-red-50 border-red-200 text-red-800", "🔴"),
-    }
-    shell, icon = palette.get(status, palette["yellow"])
-    return (
-        f'<div class="flex items-start gap-3 p-3 rounded-lg border {shell}">'
-        f'<span class="text-lg leading-none mt-0.5">{icon}</span>'
-        f'<div class="min-w-0"><p class="text-sm font-semibold">{_esc(label)}</p>'
-        f'<p class="text-xs mt-0.5 opacity-90">{_esc(summary)}</p></div></div>'
-    )
-
-
-def _render_fii_strategy_panel(cs: dict[str, Any]) -> str:
-    if not cs:
+def _probe_node_summary_value(node: dict[str, Any] | None) -> str:
+    if not isinstance(node, dict):
         return ""
-    g1 = cs.get("goal1_time_lag") or {}
-    g2 = cs.get("goal2_noise_isolation") or {}
-    g3 = cs.get("goal3_trend_trigger") or {}
-    help_html = cs.get("help_html") or ""
+    val = node.get("value")
+    if val is None:
+        return ""
+    return _format_compact_probe_value(val)
 
-    signal_html = _render_fii_signal_badge(
-        str(g3.get("status") or "yellow"),
-        str(g3.get("label") or "观察区"),
-        str(g3.get("summary") or ""),
-    )
-    reasons = g3.get("reasons") or []
-    reasons_html = ""
-    if reasons:
-        items = "".join(f"<li>{_esc(r)}</li>" for r in reasons)
-        reasons_html = f'<ul class="text-[11px] text-gray-600 mt-2 list-disc pl-4 space-y-0.5">{items}</ul>'
 
-    table1 = _render_fii_monthly_table(
-        g1.get("monthly_series") or [],
-        value_key="total_billion_ntd",
-        value_label="合并营收(亿NTD)",
-        billion_key="total_billion_ntd",
-    )
+def build_layer_a_header_summary(
+    ctx: dict[str, Any],
+    *,
+    sym: str,
+    lifecycle_label: str,
+) -> str:
+    from apps.copilot.modules.executing.money_unit import format_price_display
 
-    cloud_mom = g2.get("cloud_lo_mom_pct")
-    consumer_mom = g2.get("consumer_mom_proxy_pct")
-    cloud_terms = "、".join(g2.get("cloud_ir_terms") or []) or "—"
-    consumer_terms = "、".join(g2.get("consumer_ir_terms") or []) or "—"
-    g2_tags = (
-        f'<div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">'
-        f'<div class="rounded-md bg-blue-50/80 px-3 py-2 border border-blue-100">'
-        f'<p class="text-[10px] text-blue-700 font-medium">云端网路 · 推导下限</p>'
-        f'<p class="text-lg font-bold text-blue-900 tabular-nums">{g2.get("cloud_lo_billion", "—")} 亿</p>'
-        f'<p class="text-[11px] text-blue-800">MoM {_format_mom_cell(cloud_mom)} · IR：{_esc(cloud_terms)}</p>'
-        f"</div>"
-        f'<div class="rounded-md bg-slate-50 px-3 py-2 border border-slate-200">'
-        f'<p class="text-[10px] text-slate-600 font-medium">消费智能 · 代理对照</p>'
-        f'<p class="text-lg font-bold text-slate-800 tabular-nums">MoM {_format_mom_cell(consumer_mom)}</p>'
-        f'<p class="text-[10px] text-slate-500">{_esc(g2.get("consumer_mom_note") or "")}</p>'
-        f'<p class="text-[11px] text-slate-600">IR：{_esc(consumer_terms)}</p>'
-        f"</div></div>"
-    )
+    parts = [sym, lifecycle_label]
+    mark = ctx.get("mark_price")
+    if mark is not None:
+        parts.append(f"现价 {format_price_display(mark)}")
+    pct = ctx.get("position_pct")
+    if pct is not None and pct != "":
+        parts.append(f"仓位 {pct}%")
+    pnl = ctx.get("unrealized_pnl_pct")
+    if pnl is not None and pnl != "" and pnl != "—":
+        parts.append(f"浮盈 {pnl}%")
+    return " · ".join(str(p) for p in parts)
 
-    help_block = ""
-    if help_html:
-        help_block = f"""
-<details class="group inline-block relative">
-  <summary class="list-none cursor-pointer w-5 h-5 rounded-full bg-gray-100 text-gray-500 text-xs font-bold flex items-center justify-center hover:bg-gray-200" title="指标说明">?</summary>
-  <div class="absolute z-20 right-0 mt-1 w-72 sm:w-96 p-3 rounded-lg border border-gray-200 bg-white shadow-lg text-[11px] text-gray-600 leading-relaxed">{help_html}</div>
+
+def build_jl3_probe_fold_summary(node: dict[str, Any]) -> tuple[str, str, str]:
+    """单张 JL3 卡折叠摘要 · (读数, 信号标签, 信号色 green|yellow|red)。"""
+    rm = node.get("raw_metrics") if isinstance(node.get("raw_metrics"), dict) else {}
+    cs = rm.get("card_strategy") if isinstance(rm.get("card_strategy"), dict) else {}
+    sig = cs.get("signal") if isinstance(cs.get("signal"), dict) else {}
+    sig_label = str(sig.get("label") or sig.get("summary") or "").strip()
+    sig_status = str(sig.get("status") or "yellow").strip().lower()
+    if sig_status not in ("green", "yellow", "red"):
+        sig_status = "yellow"
+    val = _probe_node_summary_value(node)
+    if not val:
+        detail = node.get("value_detail") or node.get("value")
+        if detail is not None and detail != "":
+            val = _format_compact_probe_value(detail)
+    return val, sig_label[:24], sig_status
+
+
+def render_jl3_missing_probe_fold(probe_key: str) -> str:
+    """JL3 探针尚无 PG 快照时仍占位展示（与 JL4 silent 卡一致 · 禁止静默消失）。"""
+    title = probe_indicator_name(probe_key) or probe_label(probe_key) or probe_key
+    short = probe_label(probe_key) or title
+    gid = probe_key.replace("_", "-")
+    return f"""
+<details class="executing-jl3-probe-fold group/jl3-{gid} mb-3 border border-dashed border-blue-200 rounded-xl overflow-hidden bg-blue-50/20" data-probe-key="{_esc(probe_key)}" data-jl3-state="missing" onclick="event.stopPropagation()">
+  <summary class="cursor-pointer list-none px-4 py-2.5 flex items-center justify-between gap-2 bg-blue-50/60 [&::-webkit-details-marker]:hidden">
+    <div class="min-w-0 flex items-center gap-1.5 flex-wrap">
+      <span class="text-[10px] font-semibold uppercase tracking-wide text-blue-700/90">JL3</span>
+      <span class="text-sm font-medium text-gray-900">{_esc(title)}</span>
+      <span class="text-[10px] text-gray-400">{_esc(short)}</span>
+      <span class="text-[10px] px-1.5 py-0.5 rounded border font-medium bg-gray-50 text-gray-600 border-gray-200">待采集</span>
+    </div>
+    <span class="text-[10px] text-gray-400 shrink-0 group-open/jl3-{gid}:hidden">展开 ▾</span>
+    <span class="text-[10px] text-gray-400 shrink-0 hidden group-open/jl3-{gid}:inline">收起 ▴</span>
+  </summary>
+  <div class="border-t border-blue-100/80 px-4 py-3 text-xs text-gray-600 leading-relaxed">
+    <p>尚无 PG 快照 · 等待 L3 Cron 或点上方「立即跑今日体检」触发 live 装配。</p>
+    <p class="text-[11px] text-gray-400 mt-1">Profile 已启用 · 算子就绪后会显示读数（probe: {_esc(probe_key)}）。</p>
+  </div>
 </details>"""
 
-    return f"""
-<div class="mt-4 space-y-4 border-t border-gray-100 pt-4">
-  <div class="flex items-start justify-between gap-2">
-    <p class="text-xs font-semibold text-gray-700">三目标实战面板 · 601138 影子定价锚</p>
-    {help_block}
-  </div>
-  {signal_html}
-  {reasons_html}
-  <section>
-    <h5 class="text-[11px] font-semibold text-gray-800">{_esc(g1.get("title", "目标一"))}</h5>
-    <p class="text-[10px] text-gray-500">{_esc(g1.get("subtitle", ""))}</p>
-    {table1}
-  </section>
-  <section>
-    <h5 class="text-[11px] font-semibold text-gray-800">{_esc(g2.get("title", "目标二"))}</h5>
-    <p class="text-[10px] text-gray-500">{_esc(g2.get("subtitle", ""))}</p>
-    {g2_tags}
-  </section>
-  <section>
-    <h5 class="text-[11px] font-semibold text-gray-800">{_esc(g3.get("title", "目标三"))}</h5>
-    <p class="text-[10px] text-gray-500">Bool 开关 · 供 QMT/PTrade 策略订阅（绿=进攻 / 红=防守 / 黄=观察）</p>
-  </section>
-</div>"""
+
+def build_jl3_panel_status_line(domain: dict[str, Any]) -> str:
+    domain = domain or {}
+    if not domain:
+        return "暂无 JL3 快照 · 等待 Cron 或「立即跑今日体检」"
+    chips: list[str] = []
+    for key in L3_KEYS:
+        node = domain.get(key)
+        if not isinstance(node, dict):
+            continue
+        label = probe_label(key) or key
+        rm = node.get("raw_metrics") if isinstance(node.get("raw_metrics"), dict) else {}
+        cs = rm.get("card_strategy") if isinstance(rm.get("card_strategy"), dict) else {}
+        sig = cs.get("signal") if isinstance(cs.get("signal"), dict) else {}
+        sig_label = str(sig.get("label") or "").strip()
+        val = _probe_node_summary_value(node)
+        if sig_label:
+            chips.append(f"{label} {sig_label}")
+        elif val:
+            chips.append(f"{label} {val}")
+        if len(chips) >= 3:
+            break
+    ready = len([k for k in L3_KEYS if isinstance(domain.get(k), dict)])
+    missing = [k for k in L3_KEYS if not isinstance(domain.get(k), dict)]
+    prefix = f"JL3 · {ready}/{len(L3_KEYS)} 项"
+    if missing and ready:
+        miss_labels = "、".join(probe_label(k) or k for k in missing[:2])
+        prefix += f" · 缺 {miss_labels}"
+    return f"{prefix} · " + " · ".join(chips) if chips else f"{prefix} · 已缓存"
 
 
-def render_fii_twse_cloud_card(
-    node: dict[str, Any],
-    *,
-    card_timing: ProbeCardTiming | None = None,
+def build_jl4_panel_status_line(
+    domain: dict[str, Any],
+    event_probe_states: dict[str, dict[str, Any]] | None = None,
 ) -> str:
-    """JL3 #1 · 母公司云端营收 · 三目标战略卡片 + T1 白盒抽屉。"""
-    t1_json = node.get("t1_json") if isinstance(node.get("t1_json"), dict) else None
-    rm = raw_metrics_for_display(node)
-    cs = rm.get("card_strategy") if isinstance(rm.get("card_strategy"), dict) else {}
-    strategy_html = _render_fii_strategy_panel(cs)
-
-    g3 = cs.get("goal3_trend_trigger") or {}
-    signal_status = str(g3.get("status") or "yellow")
-    value_color = {
-        "green": "text-emerald-700",
-        "yellow": "text-amber-700",
-        "red": "text-red-700",
-    }.get(signal_status, "text-gray-900")
-
-    period = ""
-    if rm.get("report_year") and rm.get("report_month"):
-        period = f"{rm['report_year']}-{int(rm['report_month']):02d} · 鸿海2317 → 601138"
-
-    return _render_probe_card(
-        probe_key="fii_twse_cloud",
-        title=node.get("indicator_name") or probe_indicator_name("fii_twse_cloud"),
-        short_label=probe_label("fii_twse_cloud"),
-        value_html=_esc(node.get("value_detail") or node.get("value") or "—"),
-        value_color=value_color,
-        subtitle=period or None,
-        card_timing=card_timing,
-        fact_statement=str(node.get("fact_statement") or ""),
-        calculation_logic=str(node.get("calculation_logic") or ""),
-        source=str(node.get("source") or ""),
-        metric_items=[],
-        alert_html=strategy_html,
-        t1_json=t1_json,
-        status_ok=signal_status != "red",
+    domain = domain or {}
+    event_probe_states = event_probe_states or {}
+    chips: list[str] = []
+    for key in PROBE_KEYS:
+        node = domain.get(key)
+        if isinstance(node, dict):
+            label = probe_label(key) or key
+            val = _probe_node_summary_value(node)
+            if val:
+                chips.append(f"{label} {val}")
+        elif key in event_probe_states:
+            st = event_probe_states[key]
+            mode = str(st.get("mode") or "")
+            if mode and mode != "active":
+                chips.append(f"{probe_label(key) or key} {mode}")
+        if len(chips) >= 4:
+            break
+    ready = sum(
+        1
+        for k in PROBE_KEYS
+        if isinstance(domain.get(k), dict)
+        or (
+            k in event_probe_states
+            and event_probe_states[k].get("mode") not in (None, "", "active")
+        )
     )
+    prefix = f"JL4 · {ready} 项"
+    return f"{prefix} · " + " · ".join(chips) if chips else f"{prefix} · 暂无盘面快照"
+
+
+def wrap_executing_layer_a_section(
+    inner_html: str,
+    *,
+    header_summary: str,
+) -> str:
+    return wrap_executing_collapsible_section(
+        inner_html,
+        section_id="layer_a_base",
+        title="标的基础数据",
+        subtitle="默认折叠 · 展开编辑持仓",
+        status_line=header_summary,
+        default_open=False,
+        accent="gray",
+    )
+
+
+def wrap_executing_collapsible_section(
+    body_html: str,
+    *,
+    section_id: str,
+    title: str,
+    subtitle: str = "",
+    status_line: str = "",
+    default_open: bool = False,
+    accent: str = "gray",
+) -> str:
+    """执行区详情内可折叠区块（JL3/JL4/层A · 默认折叠 · 摘要常显）。"""
+    open_attr = " open" if default_open else ""
+    accent_map = {
+        "blue": "border-blue-200 bg-blue-50/30",
+        "orange": "border-orange-200 bg-orange-50/20",
+        "gray": "border-gray-200 bg-gray-50/40",
+    }
+    shell = accent_map.get(accent, accent_map["gray"])
+    sub = (
+        f'<p class="text-[10px] text-gray-500 mt-0.5 pr-6">{_esc(subtitle)}</p>'
+        if subtitle
+        else ""
+    )
+    status = (
+        f'<p class="text-[11px] text-gray-700 mt-1 font-medium truncate pr-4">{_esc(status_line)}</p>'
+        if status_line
+        else ""
+    )
+    gid = section_id.replace("_", "-")
+    return f"""
+<details class="executing-fold-section group/{gid} mb-4 border rounded-xl overflow-hidden {shell}{open_attr}" onclick="event.stopPropagation()">
+  <summary class="cursor-pointer list-none px-4 py-3 flex items-start justify-between gap-3 hover:bg-white/60 [&::-webkit-details-marker]:hidden">
+    <div class="min-w-0 flex-1">
+      <span class="text-sm font-semibold text-gray-900">{_esc(title)}</span>
+      {sub}
+      {status}
+    </div>
+    <span class="text-[10px] text-gray-400 shrink-0 pt-0.5 group-open/{gid}:hidden">展开 ▾</span>
+    <span class="text-[10px] text-gray-400 shrink-0 pt-0.5 hidden group-open/{gid}:inline">收起 ▴</span>
+  </summary>
+  <div class="border-t border-gray-200/80 bg-white/80 px-2 py-3">{body_html}</div>
+</details>"""
+
+
+def wrap_executing_jl3_probe_card(
+    card_html: str,
+    *,
+    probe_key: str,
+    default_open: bool = False,
+    summary_value: str = "",
+    signal_label: str = "",
+    signal_status: str = "",
+) -> str:
+    """单张 JL3 指标卡 · 默认折叠 · 摘要行展示信号 + 关键读数（对齐 JL4 单卡折叠）。"""
+    open_attr = " open" if default_open else ""
+    title = probe_indicator_name(probe_key) or probe_label(probe_key) or probe_key
+    short = probe_label(probe_key) or title
+    gid = probe_key.replace("_", "-")
+    status_chip = ""
+    if signal_label:
+        status_colors = {
+            "green": "bg-emerald-50 text-emerald-700 border-emerald-200",
+            "yellow": "bg-amber-50 text-amber-700 border-amber-200",
+            "red": "bg-rose-50 text-rose-700 border-rose-200",
+        }
+        cls = status_colors.get(signal_status, "bg-gray-50 text-gray-600 border-gray-200")
+        status_chip = (
+            f'<span class="text-[10px] px-1.5 py-0.5 rounded border font-medium {cls}">'
+            f"{_esc(signal_label)}</span>"
+        )
+    val_chip = ""
+    if summary_value:
+        val_chip = (
+            f'<span class="text-xs font-semibold tabular-nums text-gray-800">'
+            f"{_esc(summary_value)}</span>"
+        )
+    return f"""
+<details class="executing-jl3-probe-fold group/jl3-{gid} mb-3 border border-blue-100 rounded-xl overflow-hidden bg-white{open_attr}" data-probe-key="{_esc(probe_key)}" data-jl3-state="ready" onclick="event.stopPropagation()">
+  <summary class="cursor-pointer list-none px-4 py-2.5 flex items-center justify-between gap-2 bg-blue-50/80 hover:bg-blue-100/60 [&::-webkit-details-marker]:hidden">
+    <div class="min-w-0 flex items-center gap-1.5 flex-wrap">
+      <span class="text-[10px] font-semibold uppercase tracking-wide text-blue-700/90">JL3</span>
+      <span class="text-sm font-medium text-gray-900">{_esc(title)}</span>
+      <span class="text-[10px] text-gray-400">{_esc(short)}</span>
+      {status_chip}
+      {val_chip}
+    </div>
+    <span class="text-[10px] text-gray-400 shrink-0 group-open/jl3-{gid}:hidden">展开 ▾</span>
+    <span class="text-[10px] text-gray-400 shrink-0 hidden group-open/jl3-{gid}:inline">收起 ▴</span>
+  </summary>
+  <div class="border-t border-blue-100/80">{card_html}</div>
+</details>"""
+
+
+def wrap_executing_probe_card(
+    card_html: str,
+    *,
+    probe_key: str,
+    default_open: bool = False,
+    summary_value: str = "",
+) -> str:
+    """单张 JL4 指标卡 · 默认折叠 · 摘要行展示当前读数。"""
+    open_attr = " open" if default_open else ""
+    title = probe_indicator_name(probe_key) or probe_label(probe_key) or probe_key
+    short = probe_label(probe_key) or title
+    gid = probe_key.replace("_", "-")
+    val_chip = ""
+    if summary_value:
+        val_chip = (
+            f'<span class="text-xs font-semibold tabular-nums text-gray-800 ml-2">'
+            f"{_esc(summary_value)}</span>"
+        )
+    return f"""
+<details class="executing-probe-fold group/{gid} mb-3 border border-gray-200 rounded-xl overflow-hidden bg-white{open_attr}" onclick="event.stopPropagation()">
+  <summary class="cursor-pointer list-none px-4 py-2.5 flex items-center justify-between gap-2 bg-gray-50/90 hover:bg-gray-100 [&::-webkit-details-marker]:hidden">
+    <div class="min-w-0 flex items-center gap-1 flex-wrap">
+      <span class="text-[10px] font-semibold uppercase tracking-wide text-orange-700/80">JL4</span>
+      <span class="text-sm font-medium text-gray-900">{_esc(title)}</span>
+      <span class="text-[10px] text-gray-400">{_esc(short)}</span>
+      {val_chip}
+    </div>
+    <span class="text-[10px] text-gray-400 shrink-0 group-open/{gid}:hidden">展开 ▾</span>
+    <span class="text-[10px] text-gray-400 shrink-0 hidden group-open/{gid}:inline">收起 ▴</span>
+  </summary>
+  <div class="border-t border-gray-100">{card_html}</div>
+</details>"""
 
 
 def render_probe_domain(
@@ -1578,96 +1719,143 @@ def render_probe_domain(
     event_probe_states = event_probe_states or {}
     domain = domain or {}
     if not domain and not event_probe_states:
-        return f"""
-<section class="{_SECTION}">
-  <h4 class="text-sm font-semibold text-gray-900 pb-2 mb-3 border-b border-gray-200">{_esc(title)}</h4>
-  <p class="text-sm text-gray-500">{_esc(empty_hint)}</p>
-</section>
-"""
+        return wrap_executing_collapsible_section(
+            f'<p class="text-sm text-gray-500 px-2">{_esc(empty_hint)}</p>',
+            section_id="jl4_probes",
+            title="JL4 · 盘面指标",
+            subtitle="默认折叠",
+            status_line=build_jl4_panel_status_line({}, event_probe_states),
+            default_open=False,
+            accent="orange",
+        )
     quote_at = _quote_intraday_watermark(sync, symbol) if symbol else None
     timing_map = timing_map or {}
     cards: list[str] = []
+
+    def _append_card(probe_key: str, card_html: str, node: dict[str, Any] | None = None) -> None:
+        cards.append(
+            wrap_executing_probe_card(
+                card_html,
+                probe_key=probe_key,
+                default_open=False,
+                summary_value=_probe_node_summary_value(node) if node else "",
+            )
+        )
+
     for k in PROBE_KEYS:
         node = domain.get(k)
         card_timing = timing_map.get(k)
         if k == "block_trade_discount" and not isinstance(node, dict):
             bt_state = event_probe_states.get("block_trade_discount")
             if bt_state and bt_state.get("mode") != "active":
-                cards.append(render_block_trade_silent_card(bt_state))
+                _append_card(k, render_block_trade_silent_card(bt_state))
             continue
         if k == "etf_redemption_impact" and not isinstance(node, dict):
             etf_state = event_probe_states.get("etf_redemption_impact")
             if etf_state and etf_state.get("mode") != "active":
-                cards.append(render_etf_redemption_silent_card(etf_state))
+                _append_card(k, render_etf_redemption_silent_card(etf_state))
             continue
         if not isinstance(node, dict):
             continue
         if k == "qmt_atr_trailing":
-            cards.append(
-                render_qmt_atr_trailing_card(node, quote_job_at=quote_at, card_timing=card_timing)
+            _append_card(
+                k,
+                render_qmt_atr_trailing_card(node, quote_job_at=quote_at, card_timing=card_timing),
+                node,
             )
         elif k == "volume_price_div":
-            cards.append(render_volume_price_div_card(node, card_timing=card_timing))
+            _append_card(k, render_volume_price_div_card(node, card_timing=card_timing), node)
         elif k == "smart_money_flow":
-            cards.append(render_smart_money_flow_card(node, card_timing=card_timing))
+            _append_card(k, render_smart_money_flow_card(node, card_timing=card_timing), node)
         elif k == "level2_super_order":
-            cards.append(render_level2_super_order_card(node, card_timing=card_timing))
+            _append_card(k, render_level2_super_order_card(node, card_timing=card_timing), node)
         elif k == "margin_short_skew":
-            cards.append(render_margin_short_skew_card(node, card_timing=card_timing))
+            _append_card(k, render_margin_short_skew_card(node, card_timing=card_timing), node)
         elif k == "turnover_acceleration":
-            cards.append(render_turnover_acceleration_card(node, card_timing=card_timing))
+            _append_card(k, render_turnover_acceleration_card(node, card_timing=card_timing), node)
         elif k == "block_trade_discount":
-            cards.append(render_block_trade_discount_card(node, card_timing=card_timing))
+            _append_card(k, render_block_trade_discount_card(node, card_timing=card_timing), node)
         elif k == "retail_concentration":
-            cards.append(render_retail_concentration_card(node, card_timing=card_timing))
+            _append_card(k, render_retail_concentration_card(node, card_timing=card_timing), node)
         elif k == "insider_sell_actual":
-            cards.append(render_insider_sell_actual_card(node, card_timing=card_timing))
+            _append_card(k, render_insider_sell_actual_card(node, card_timing=card_timing), node)
         elif k == "etf_redemption_impact":
-            cards.append(render_etf_redemption_impact_card(node, card_timing=card_timing))
+            _append_card(k, render_etf_redemption_impact_card(node, card_timing=card_timing), node)
         elif k == "tech_beta_correlation":
-            cards.append(render_tech_beta_correlation_card(node, card_timing=card_timing))
+            _append_card(k, render_tech_beta_correlation_card(node, card_timing=card_timing), node)
         else:
-            cards.append(render_generic_probe_card(k, node, card_timing=card_timing))
-    body = "".join(cards) or '<p class="text-sm text-gray-500">尚无 T1 数据</p>'
-    return f"""
-<section class="{_SECTION}">
-  <h4 class="text-sm font-semibold text-gray-900 pb-2 mb-1 border-b border-gray-200">{_esc(title)}</h4>
-  <div class="flex flex-col gap-6 mt-4">{body}</div>
-</section>
-"""
+            _append_card(k, render_generic_probe_card(k, node, card_timing=card_timing), node)
+    inner = "".join(cards) or f'<p class="text-sm text-gray-500 px-2">{_esc(empty_hint)}</p>'
+    jl4_status = build_jl4_panel_status_line(domain, event_probe_states)
+    panel_title = title if title.startswith("JL4") else "JL4 · 盘面指标"
+    return wrap_executing_collapsible_section(
+        inner,
+        section_id="jl4_probes",
+        title=panel_title,
+        subtitle="默认折叠 · 单卡可展开查看白盒",
+        status_line=jl4_status,
+        default_open=False,
+        accent="orange",
+    )
 
 
 def render_l3_probe_domain(
     domain: dict[str, Any],
     *,
-    title: str = "层 B · JL3 基本面（601138）",
-    empty_hint: str = "尚无 JL3 T1 数据 · 等待 l3-fii-twse-monthly Cron 或「立即跑今日体检」",
+    title: str = "JL3 · 基本面",
+    empty_hint: str = "尚无 JL3 快照 · 等待 Cron 或「立即跑今日体检」",
     timing_map: dict[str, ProbeCardTiming] | None = None,
 ) -> str:
     """JL3 蓝域指标卡片（Profile l3_probes）。"""
     domain = domain or {}
     timing_map = timing_map or {}
+    jl3_status = build_jl3_panel_status_line(domain)
+    panel_title = title if title.startswith("JL3") else "JL3 · 基本面"
     if not domain:
-        return f"""
-<section class="{_SECTION}">
-  <h4 class="text-sm font-semibold text-gray-900 pb-2 mb-3 border-b border-gray-200">{_esc(title)}</h4>
-  <p class="text-sm text-gray-500">{_esc(empty_hint)}</p>
-</section>
-"""
+        return wrap_executing_collapsible_section(
+            f'<p class="text-sm text-gray-500 px-2">{_esc(empty_hint)}</p>',
+            section_id="jl3_probes",
+            title=panel_title,
+            subtitle="默认折叠",
+            status_line=jl3_status,
+            default_open=False,
+            accent="blue",
+        )
     cards: list[str] = []
+    from apps.copilot.modules.executing.jl3_card_render import render_jl3_probe_card
+
     for k in L3_KEYS:
         node = domain.get(k)
         if not isinstance(node, dict):
+            cards.append(render_jl3_missing_probe_fold(k))
             continue
         card_timing = timing_map.get(k)
-        if k == "fii_twse_cloud":
-            cards.append(render_fii_twse_cloud_card(node, card_timing=card_timing))
-        else:
-            cards.append(render_generic_probe_card(k, node, card_timing=card_timing))
-    body = "".join(cards) or f'<p class="text-sm text-gray-500">{_esc(empty_hint)}</p>'
-    return f"""
-<section class="{_SECTION}">
-  <h4 class="text-sm font-semibold text-blue-900 pb-2 mb-1 border-b border-blue-200">{_esc(title)}</h4>
-  <div class="flex flex-col gap-6 mt-4">{body}</div>
-</section>
-"""
+        inner_card = render_jl3_probe_card(k, node, card_timing=card_timing)
+        summary_val, sig_label, sig_status = build_jl3_probe_fold_summary(node)
+        cards.append(
+            wrap_executing_jl3_probe_card(
+                inner_card,
+                probe_key=k,
+                summary_value=summary_val,
+                signal_label=sig_label,
+                signal_status=sig_status,
+                default_open=False,
+            )
+        )
+    inner = "".join(cards) or f'<p class="text-sm text-gray-500 px-2">{_esc(empty_hint)}</p>'
+    return wrap_executing_collapsible_section(
+        f'<div class="flex flex-col gap-1">{inner}</div>',
+        section_id="jl3_probes",
+        title=panel_title,
+        subtitle="默认折叠 · 单卡折叠展示关键读数 · 展开查看白盒",
+        status_line=jl3_status,
+        default_open=False,
+        accent="blue",
+    )
+
+
+# JL3 统一卡片 · 向后兼容 re-export（新探针见 jl3_card_render.py）
+from apps.copilot.modules.executing.jl3_card_render import (  # noqa: E402
+    render_fii_twse_cloud_card,
+    render_jl3_probe_card,
+)

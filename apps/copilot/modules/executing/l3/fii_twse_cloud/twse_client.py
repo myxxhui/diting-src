@@ -100,6 +100,32 @@ def fetch_finmind_history(
     return out
 
 
+def trunk_from_finmind_history(history: list[dict[str, Any]]) -> dict[str, Any]:
+    """TWSE OpenAPI 不可用时的主档降级 · 取 FinMind 最新月。"""
+    if not history:
+        raise ValueError("FinMind 历史为空，无法构造主档")
+    last = history[-1]
+    ly, lm = int(last["year"]), int(last["month"])
+    prev_rev = int(history[-2]["total_revenue_ntd"]) if len(history) >= 2 else None
+    mom = last.get("total_mom_pct")
+    yoy = None
+    for h in history:
+        if int(h["year"]) == ly - 1 and int(h["month"]) == lm:
+            base = int(h["total_revenue_ntd"])
+            if base > 0:
+                yoy = (int(last["total_revenue_ntd"]) - base) / base * 100.0
+            break
+    return {
+        "report_year": ly,
+        "report_month": lm,
+        "total_revenue_ntd": int(last["total_revenue_ntd"]),
+        "prev_month_revenue_ntd": prev_rev,
+        "total_mom_pct": mom,
+        "total_yoy_pct": yoy,
+        "source": "FinMind TaiwanStockMonthRevenue (TWSE OpenAPI 不可用降级)",
+    }
+
+
 def enrich_history_mom(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """为历史序列补 MoM。"""
     by_key = {(h["year"], h["month"]): h for h in history}

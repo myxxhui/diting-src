@@ -121,7 +121,37 @@ def test_position_lifecycle_pending_vs_holding():
     assert "smart_money_flow" in filtered
 
 
-def test_render_qmt_atr_trailing_shows_audit_fields():
+def test_render_l3_probe_domain_always_two_folds():
+    from apps.copilot.modules.executing.executing_render import render_l3_probe_domain
+    from apps.copilot.modules.executing.l3.fii_odm_direct_ratio.indicator_node import (
+        build_fii_odm_direct_ratio_node,
+    )
+    from apps.copilot.modules.executing.l3.fii_twse_cloud.indicator_node import (
+        build_fii_twse_cloud_node,
+    )
+    from tests.copilot.test_fii_twse_cloud import SAMPLE_T0
+
+    twse = build_fii_twse_cloud_node(SAMPLE_T0, source="unit_test")
+    html_one = render_l3_probe_domain({"fii_twse_cloud": twse})
+    assert 'data-probe-key="fii_twse_cloud"' in html_one
+    assert 'data-probe-key="fii_odm_direct_ratio"' in html_one
+    assert "待采集" in html_one
+
+    odm = build_fii_odm_direct_ratio_node(
+        {
+            "report_period": "2025-Q3",
+            "report_year": 2025,
+            "report_quarter": 3,
+            "total_cloud_revenue_cny": 1e10,
+            "qa_raw_transcript": "ODM直供占比提升",
+        },
+        source="unit_test",
+    )
+    html_both = render_l3_probe_domain({"fii_twse_cloud": twse, "fii_odm_direct_ratio": odm})
+    assert html_both.count('data-probe-key="fii_twse_cloud"') >= 1
+    assert html_both.count('data-probe-key="fii_odm_direct_ratio"') >= 1
+    assert "待采集" not in html_both
+
     from apps.copilot.modules.executing.executing_render import (
         render_hot_data_timeline,
         render_qmt_atr_trailing_card,
@@ -520,15 +550,47 @@ async def test_executing_detail_uses_snapshot_cache(db_ready):
             "smart_money_flow",
             {"value": 0.5, "fact_statement": "主力净流入", "source": "unit"},
         )
+        await upsert_t1_snapshot(
+            session,
+            "601138",
+            "fii_twse_cloud",
+            {
+                "value": 189.0,
+                "value_detail": "189亿",
+                "fact_statement": "云端营收",
+                "source": "unit",
+                "raw_metrics": {
+                    "card_strategy": {
+                        "signal": {
+                            "status": "green",
+                            "label": "景气",
+                            "summary": "同比改善",
+                        }
+                    }
+                },
+            },
+        )
         await session.commit()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         r = await client.get("/api/executing/601138/detail")
     assert r.status_code == 200
-    assert "executing-detail-601138" in r.text
+    assert "executing-detail-body-601138" in r.text
+    assert "标的基础数据" in r.text
+    assert "JL3 · 基本面" in r.text
+    assert "JL4 · 盘面指标" in r.text
     assert "PG 快照缓存" in r.text
+    assert "executing-fold-section" in r.text
+    assert "executing-probe-fold" in r.text
+    assert "executing-jl3-probe-fold" in r.text
     assert "smart_money_flow" in r.text or "主力净流入" in r.text
+    assert 'id="executing-mark-601138"' in r.text
+    assert 'hx-target="this"' in r.text
+    assert 'hx-disinherit="hx-target hx-swap"' in r.text
+    mark_idx = r.text.find('id="executing-mark-601138"')
+    form_idx = r.text.find('hx-post="/api/executing/positions/601138/save"')
+    assert mark_idx >= 0 and form_idx >= 0 and mark_idx < form_idx
 
 
 def test_fetch_mark_price_prefers_quote_then_draft():
