@@ -25,6 +25,12 @@ _CARD_BASE = (
 )
 _SECTION = "executing-probe-section mb-6"
 
+# 嵌套在 executing-symbol-card（外层 details）内 · stopPropagation 须挂在 summary 上，
+# 勿挂 details 本身，否则部分浏览器无法 toggle open。
+_EXECUTING_FOLD_SUMMARY_STOP = (
+    ' onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"'
+)
+
 # probe_key → 分类主题（Tailwind 完整类名 + inline 左边框兜底）
 PROBE_THEMES: dict[str, dict[str, str]] = {
     "qmt_atr_trailing": {
@@ -284,8 +290,8 @@ def _render_metric_tags(
 def _render_t1_json_details(probe_key: str, t1_json: dict[str, Any]) -> str:
     json_block = _esc(json.dumps(t1_json, ensure_ascii=False, indent=2))
     return f"""
-<details class="mt-3 group">
-  <summary class="text-[11px] text-gray-500 cursor-pointer hover:text-gray-700 font-medium list-none">
+<details class="executing-t1-json-fold mt-3 group">
+  <summary class="executing-fold-summary text-[11px] text-gray-500 cursor-pointer hover:text-gray-700 font-medium list-none block select-none"{_EXECUTING_FOLD_SUMMARY_STOP}>
     T1 白盒 JSON（喂 T2）<span class="text-gray-400 group-open:hidden"> ▾</span><span class="hidden group-open:inline text-gray-400"> ▴</span>
   </summary>
   <pre class="text-[10px] bg-gray-900 text-emerald-300 p-3 rounded-lg mt-2 overflow-x-auto font-mono leading-relaxed">{json_block}</pre>
@@ -1479,8 +1485,8 @@ def render_jl3_missing_probe_fold(probe_key: str) -> str:
     short = probe_label(probe_key) or title
     gid = probe_key.replace("_", "-")
     return f"""
-<details class="executing-jl3-probe-fold group/jl3-{gid} mb-3 border border-dashed border-blue-200 rounded-xl overflow-hidden bg-blue-50/20" data-probe-key="{_esc(probe_key)}" data-jl3-state="missing" onclick="event.stopPropagation()">
-  <summary class="cursor-pointer list-none px-4 py-2.5 flex items-center justify-between gap-2 bg-blue-50/60 [&::-webkit-details-marker]:hidden">
+<details class="executing-jl3-probe-fold group/jl3-{gid} mb-3 border border-dashed border-blue-200 rounded-xl overflow-hidden bg-blue-50/20" data-probe-key="{_esc(probe_key)}" data-jl3-state="missing">
+  <summary class="executing-fold-summary cursor-pointer list-none block select-none px-4 py-2.5 flex items-center justify-between gap-2 bg-blue-50/60 [&::-webkit-details-marker]:hidden"{_EXECUTING_FOLD_SUMMARY_STOP}>
     <div class="min-w-0 flex items-center gap-1.5 flex-wrap">
       <span class="text-[10px] font-semibold uppercase tracking-wide text-blue-700/90">JL3</span>
       <span class="text-sm font-medium text-gray-900">{_esc(title)}</span>
@@ -1497,12 +1503,19 @@ def render_jl3_missing_probe_fold(probe_key: str) -> str:
 </details>"""
 
 
-def build_jl3_panel_status_line(domain: dict[str, Any]) -> str:
+def build_jl3_panel_status_line(
+    domain: dict[str, Any],
+    *,
+    l3_keys: tuple[str, ...] | None = None,
+) -> str:
     domain = domain or {}
+    keys = l3_keys if l3_keys is not None else L3_KEYS
+    if not keys:
+        return "Profile 未配置 JL3 指标"
     if not domain:
         return "暂无 JL3 快照 · 等待 Cron 或「立即跑今日体检」"
     chips: list[str] = []
-    for key in L3_KEYS:
+    for key in keys:
         node = domain.get(key)
         if not isinstance(node, dict):
             continue
@@ -1518,9 +1531,9 @@ def build_jl3_panel_status_line(domain: dict[str, Any]) -> str:
             chips.append(f"{label} {val}")
         if len(chips) >= 3:
             break
-    ready = len([k for k in L3_KEYS if isinstance(domain.get(k), dict)])
-    missing = [k for k in L3_KEYS if not isinstance(domain.get(k), dict)]
-    prefix = f"JL3 · {ready}/{len(L3_KEYS)} 项"
+    ready = len([k for k in keys if isinstance(domain.get(k), dict)])
+    missing = [k for k in keys if not isinstance(domain.get(k), dict)]
+    prefix = f"JL3 · {ready}/{len(keys)} 项"
     if missing and ready:
         miss_labels = "、".join(probe_label(k) or k for k in missing[:2])
         prefix += f" · 缺 {miss_labels}"
@@ -1607,8 +1620,8 @@ def wrap_executing_collapsible_section(
     )
     gid = section_id.replace("_", "-")
     return f"""
-<details class="executing-fold-section group/{gid} mb-4 border rounded-xl overflow-hidden {shell}{open_attr}" onclick="event.stopPropagation()">
-  <summary class="cursor-pointer list-none px-4 py-3 flex items-start justify-between gap-3 hover:bg-white/60 [&::-webkit-details-marker]:hidden">
+<details class="executing-fold-section group/{gid} mb-4 border rounded-xl overflow-hidden {shell}{open_attr}">
+  <summary class="executing-fold-summary cursor-pointer list-none block select-none px-4 py-3 flex items-start justify-between gap-3 hover:bg-white/60 [&::-webkit-details-marker]:hidden"{_EXECUTING_FOLD_SUMMARY_STOP}>
     <div class="min-w-0 flex-1">
       <span class="text-sm font-semibold text-gray-900">{_esc(title)}</span>
       {sub}
@@ -1654,8 +1667,8 @@ def wrap_executing_jl3_probe_card(
             f"{_esc(summary_value)}</span>"
         )
     return f"""
-<details class="executing-jl3-probe-fold group/jl3-{gid} mb-3 border border-blue-100 rounded-xl overflow-hidden bg-white{open_attr}" data-probe-key="{_esc(probe_key)}" data-jl3-state="ready" onclick="event.stopPropagation()">
-  <summary class="cursor-pointer list-none px-4 py-2.5 flex items-center justify-between gap-2 bg-blue-50/80 hover:bg-blue-100/60 [&::-webkit-details-marker]:hidden">
+<details class="executing-jl3-probe-fold group/jl3-{gid} mb-3 border border-blue-100 rounded-xl overflow-hidden bg-white{open_attr}" data-probe-key="{_esc(probe_key)}" data-jl3-state="ready">
+  <summary class="executing-fold-summary cursor-pointer list-none block select-none px-4 py-2.5 flex items-center justify-between gap-2 bg-blue-50/80 hover:bg-blue-100/60 [&::-webkit-details-marker]:hidden"{_EXECUTING_FOLD_SUMMARY_STOP}>
     <div class="min-w-0 flex items-center gap-1.5 flex-wrap">
       <span class="text-[10px] font-semibold uppercase tracking-wide text-blue-700/90">JL3</span>
       <span class="text-sm font-medium text-gray-900">{_esc(title)}</span>
@@ -1689,8 +1702,8 @@ def wrap_executing_probe_card(
             f"{_esc(summary_value)}</span>"
         )
     return f"""
-<details class="executing-probe-fold group/{gid} mb-3 border border-gray-200 rounded-xl overflow-hidden bg-white{open_attr}" onclick="event.stopPropagation()">
-  <summary class="cursor-pointer list-none px-4 py-2.5 flex items-center justify-between gap-2 bg-gray-50/90 hover:bg-gray-100 [&::-webkit-details-marker]:hidden">
+<details class="executing-probe-fold group/{gid} mb-3 border border-gray-200 rounded-xl overflow-hidden bg-white{open_attr}">
+  <summary class="executing-fold-summary cursor-pointer list-none block select-none px-4 py-2.5 flex items-center justify-between gap-2 bg-gray-50/90 hover:bg-gray-100 [&::-webkit-details-marker]:hidden"{_EXECUTING_FOLD_SUMMARY_STOP}>
     <div class="min-w-0 flex items-center gap-1 flex-wrap">
       <span class="text-[10px] font-semibold uppercase tracking-wide text-orange-700/80">JL4</span>
       <span class="text-sm font-medium text-gray-900">{_esc(title)}</span>
@@ -1805,15 +1818,17 @@ def render_l3_probe_domain(
     title: str = "JL3 · 基本面",
     empty_hint: str = "尚无 JL3 快照 · 等待 Cron 或「立即跑今日体检」",
     timing_map: dict[str, ProbeCardTiming] | None = None,
+    l3_keys: tuple[str, ...] | None = None,
 ) -> str:
     """JL3 蓝域指标卡片（Profile l3_probes）。"""
     domain = domain or {}
     timing_map = timing_map or {}
-    jl3_status = build_jl3_panel_status_line(domain)
+    keys = l3_keys if l3_keys is not None else L3_KEYS
+    jl3_status = build_jl3_panel_status_line(domain, l3_keys=keys)
     panel_title = title if title.startswith("JL3") else "JL3 · 基本面"
-    if not domain:
+    if not keys:
         return wrap_executing_collapsible_section(
-            f'<p class="text-sm text-gray-500 px-2">{_esc(empty_hint)}</p>',
+            f'<p class="text-sm text-gray-500 px-2">本标的 Profile 未配置 JL3 指标</p>',
             section_id="jl3_probes",
             title=panel_title,
             subtitle="默认折叠",
@@ -1824,7 +1839,7 @@ def render_l3_probe_domain(
     cards: list[str] = []
     from apps.copilot.modules.executing.jl3_card_render import render_jl3_probe_card
 
-    for k in L3_KEYS:
+    for k in keys:
         node = domain.get(k)
         if not isinstance(node, dict):
             cards.append(render_jl3_missing_probe_fold(k))

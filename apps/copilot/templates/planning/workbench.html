@@ -75,6 +75,12 @@
   {% include "planning/_workbench_panel.html" %}
 </div>
 
+<style>
+  .executing-fold-summary { display: block; }
+  .executing-fold-summary::-webkit-details-marker { display: none; }
+  .executing-fold-summary::marker { content: ''; }
+</style>
+
   <script>
     (function () {
     var TAB_ON = 'bg-blue-600 text-white shadow-md ring-2 ring-blue-400 ring-offset-1';
@@ -195,7 +201,7 @@
       }
       var expected = window.executingDetailJl3Keys(body);
       if (!expected.length) {
-        return false;
+        return true;
       }
       return expected.every(function (k) {
         return body.querySelector('.executing-jl3-probe-fold[data-probe-key="' + k + '"]');
@@ -306,6 +312,17 @@
         }
       });
     };
+    if (!window._executingFoldClickBound) {
+      window._executingFoldClickBound = true;
+      document.body.addEventListener('click', function (ev) {
+        var sum = ev.target.closest && ev.target.closest(
+          '.executing-fold-section > summary, .executing-probe-fold > summary, '
+          + '.executing-jl3-probe-fold > summary, .executing-t1-json-fold > summary'
+        );
+        if (!sum) return;
+        ev.stopPropagation();
+      }, true);
+    }
     if (!window._executingDetailToggleBound) {
       window._executingDetailToggleBound = true;
       document.body.addEventListener('toggle', function (ev) {

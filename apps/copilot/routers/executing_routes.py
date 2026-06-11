@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.copilot.db.database import get_db
 from apps.copilot.db.models import ExecutingDailyAudit
 from apps.copilot.modules.executing.orchestrator import run_daily_pipeline, run_t0_collect
-from apps.copilot.modules.executing.profile import L3_KEYS, L4_KEYS
+from apps.copilot.modules.executing.profile import L4_KEYS, load_profile, profile_l3_keys
 from apps.copilot.modules.executing.pipeline_status import build_sync_status
 from apps.copilot.modules.executing.positions import (
     delete_position,
@@ -493,6 +493,8 @@ async def _render_executing_detail_html(
 
     has_holding = lifecycle == LIFECYCLE_HOLDING
     layer_b_enabled = in_collect
+    prof = load_profile(sym)
+    symbol_l3_keys = profile_l3_keys(prof)
     degraded_hints: list[str] = []
     l3: dict = {}
     l4: dict = {}
@@ -520,7 +522,7 @@ async def _render_executing_detail_html(
                 "点「立即跑今日体检」可触发 live 刷新</p>"
             )
         indicators = signal.get("indicators") or {}
-        l3 = {k: v for k, v in indicators.items() if k in L3_KEYS}
+        l3 = {k: v for k, v in indicators.items() if k in symbol_l3_keys}
         l4 = {k: v for k, v in indicators.items() if k in L4_KEYS}
         l4 = filter_l4_for_lifecycle(l4, lifecycle)
         if has_holding and isinstance(l4.get("qmt_atr_trailing"), dict):
@@ -614,12 +616,12 @@ async def _render_executing_detail_html(
         f"{qmt_pending_html}"
         f"{render_degraded_probes(degraded_hints)}"
         f"{hot_timeline}"
-        f'{render_l3_probe_domain(l3, timing_map=timing_map)}'
+        f'{render_l3_probe_domain(l3, timing_map=timing_map, l3_keys=symbol_l3_keys)}'
         f'{render_probe_domain(l4, title="JL4 · 盘面指标", accent="orange", empty_hint="暂无可用指标 · 点「立即跑今日体检」或等待 Cron 采集", symbol=sym, sync=sync, event_probe_states=event_probe_states, timing_map=timing_map)}'
     )
 
-    jl3_ready_keys = [k for k in L3_KEYS if isinstance(l3.get(k), dict)]
-    jl3_keys_attr = ",".join(L3_KEYS)
+    jl3_ready_keys = [k for k in symbol_l3_keys if isinstance(l3.get(k), dict)]
+    jl3_keys_attr = ",".join(symbol_l3_keys)
     body_html = (
         f"{toolbar}{cache_note}{pos_form}"
         f"{layer_b_html}"

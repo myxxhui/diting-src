@@ -132,6 +132,17 @@ def test_render_l3_probe_domain_always_two_folds():
     from tests.copilot.test_fii_twse_cloud import SAMPLE_T0
 
     twse = build_fii_twse_cloud_node(SAMPLE_T0, source="unit_test")
+    html_empty = render_l3_probe_domain({})
+    assert 'data-probe-key="fii_twse_cloud"' in html_empty
+    assert 'data-probe-key="fii_odm_direct_ratio"' in html_empty
+    assert "待采集" in html_empty
+    assert "executing-jl3-probe-fold" in html_empty
+    assert "onmousedown=" in html_empty
+    import re
+
+    for tag in re.findall(r"<details class=\"executing-jl3-probe-fold[^\"]*\"", html_empty):
+        assert "onclick" not in tag
+
     html_one = render_l3_probe_domain({"fii_twse_cloud": twse})
     assert 'data-probe-key="fii_twse_cloud"' in html_one
     assert 'data-probe-key="fii_odm_direct_ratio"' in html_one
