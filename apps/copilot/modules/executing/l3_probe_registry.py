@@ -6,12 +6,14 @@ from __future__ import annotations
 
 from apps.copilot.modules.executing.probe_keys import L3_KEYS
 from apps.copilot.modules.executing.probes._base import ExecutingProbe, T1LiveContext
+from apps.copilot.modules.executing.probes.l3 import fii_gb200_milestone as fii_gb200_milestone_mod
 from apps.copilot.modules.executing.probes.l3 import fii_odm_direct_ratio as fii_odm_direct_ratio_mod
 from apps.copilot.modules.executing.probes.l3 import fii_twse_cloud as fii_twse_cloud_mod
 
 _L3_PROBE_MODULES: tuple[ExecutingProbe, ...] = (
     fii_twse_cloud_mod.PROBE,
     fii_odm_direct_ratio_mod.PROBE,
+    fii_gb200_milestone_mod.PROBE,
 )
 
 L3_PROBE_REGISTRY: dict[str, ExecutingProbe] = {p.spec.key: p for p in _L3_PROBE_MODULES}

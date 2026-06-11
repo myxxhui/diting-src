@@ -1,0 +1,433 @@
+# Probe 实现注册表 · 688008
+# [Ref: 28_ §2.13] — Cursor/CI 实现路由的机器真相源
+# update_trigger: event_driven | cron | intraday
+# t1_pipeline: python_hard | pymupdf_structured | playwright_structured | deepsea_semantic | hybrid_merge
+
+registry_version: '1.0'
+symbol: '688008'
+profile: '688008'
+prefix: ran
+l3_probes:
+  ran_ddr5_rcon_ship:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: ran-dynamic-monthly
+    cache_group: ran-dynamic-monthly
+    job_id: l3-ran-dynamic
+    t0_source_id: memory_shipment_feed
+    cadence: monthly
+    stale_days: 35
+    model_tier: flash
+  ran_cxl_mxc_node:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: ran-dynamic-daily
+    cache_group: ran-dynamic-daily
+    job_id: l3-ran-dynamic
+    t0_source_id: cninfo_announcement_feed
+    cadence: dynamic
+    stale_days: 14
+    model_tier: flash
+  ran_pcie_retimer:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: ran-dynamic-daily
+    cache_group: ran-dynamic-daily
+    job_id: l3-ran-dynamic
+    t0_source_id: cninfo_announcement_feed
+    cadence: dynamic
+    stale_days: 14
+    model_tier: flash
+  ran_gross_margin:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: ran-earnings-q
+    cache_group: tushare_fina_indicator
+    job_id: l3-ran-financials-quarterly
+    t0_source_id: tushare_fina_indicator
+    cadence: quarterly
+    stale_days: 120
+  ran_contract_liab:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: ran-earnings-q
+    cache_group: tushare_balance_sheet
+    job_id: l3-ran-financials-quarterly
+    t0_source_id: tushare_balance_sheet
+    cadence: quarterly
+    stale_days: 120
+  ran_inventory_turn:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: ran-earnings-q
+    cache_group: tushare_fina_indicator
+    job_id: l3-ran-financials-quarterly
+    t0_source_id: tushare_fina_indicator
+    cadence: quarterly
+    stale_days: 120
+  ran_jintide_server:
+    signal_type: structured
+    t1_pipeline: playwright_structured
+    update_trigger: cron
+    batch_id: ran-bid-dynamic
+    cache_group: ran-bid-dynamic
+    job_id: l3-ran-dynamic
+    t0_source_id: gov_procurement_bid
+    cadence: dynamic
+    stale_days: 14
+  ran_rd_expense:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: ran-earnings-q
+    cache_group: tushare_income
+    job_id: l3-ran-financials-quarterly
+    t0_source_id: tushare_income
+    cadence: quarterly
+    stale_days: 120
+  ran_aic_chip_test:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: ran-dynamic-daily
+    cache_group: ran-dynamic-daily
+    job_id: l3-ran-dynamic
+    t0_source_id: cninfo_announcement_feed
+    cadence: dynamic
+    stale_days: 14
+    model_tier: flash
+  ran_cfo_health:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: ran-earnings-q
+    cache_group: tushare_cashflow
+    job_id: l3-ran-financials-quarterly
+    t0_source_id: tushare_cashflow
+    cadence: quarterly
+    stale_days: 120
+  ran_serdes_ip:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: ran-dynamic-daily
+    cache_group: ran-dynamic-daily
+    job_id: l3-ran-dynamic
+    t0_source_id: patent_bureau_feed
+    cadence: dynamic
+    stale_days: 14
+    model_tier: flash
+  ran_rambus_patent:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: ran-risk-dynamic
+    cache_group: ran-risk-dynamic
+    job_id: l3-ran-dynamic
+    t0_source_id: patent_litigation_feed
+    cadence: dynamic
+    stale_days: 14
+    model_tier: flash
+  ran_headcount_all:
+    signal_type: structured
+    t1_pipeline: pymupdf_structured
+    update_trigger: cron
+    batch_id: ran-earnings-annual
+    cache_group: ran-earnings-annual
+    job_id: l3-ran-financials-quarterly
+    t0_source_id: cninfo_annual_pdf
+    cadence: annual
+    stale_days: 365
+  ran_intel_platform:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: ran-dynamic-q
+    cache_group: ran-dynamic-q
+    job_id: l3-ran-dynamic
+    t0_source_id: platform_roadmap_feed
+    cadence: quarterly
+    stale_days: 120
+    model_tier: flash
+  ran_tsmc_wafer:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: cron
+    batch_id: ran-supply-monthly
+    cache_group: tsmc_wafer_schedule
+    job_id: l3-ran-dynamic
+    t0_source_id: tsmc_wafer_schedule
+    cadence: monthly
+    stale_days: 35
+    model_tier: flash
+  r_ran_rambus_share:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: cron
+    batch_id: ran-risk-q
+    cache_group: ran-risk-q
+    job_id: l3-ran-dynamic
+    t0_source_id: rambus_earnings_feed
+    cadence: quarterly
+    stale_days: 120
+    model_tier: pro_required
+  r_ran_tapeout_fail:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: cron
+    batch_id: ran-risk-semi
+    cache_group: ran-risk-semi
+    job_id: l3-ran-dynamic
+    t0_source_id: rd_disclosure_feed
+    cadence: semi_annual
+    stale_days: 200
+    model_tier: pro_required
+  r_ran_jintide_zero:
+    signal_type: structured
+    t1_pipeline: playwright_structured
+    update_trigger: cron
+    batch_id: ran-bid-q
+    cache_group: gov_procurement_bid
+    job_id: l3-ran-dynamic
+    t0_source_id: gov_procurement_bid
+    cadence: quarterly
+    stale_days: 120
+  r_ran_rd_capital_bad:
+    signal_type: structured
+    t1_pipeline: pymupdf_structured
+    update_trigger: cron
+    batch_id: ran-earnings-annual
+    cache_group: ran-earnings-annual
+    job_id: l3-ran-financials-quarterly
+    t0_source_id: cninfo_annual_pdf
+    cadence: annual
+    stale_days: 365
+jl4_probes:
+  qmt_atr_trailing:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: intraday
+    batch_id: jl4-bars-eod
+    cache_group: tencent_fqkline_250d
+    job_id: l4-atr-bars-sync
+    t0_source_id: tencent_fqkline
+    cadence: daily
+    stale_days: 1
+  volume_price_div:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: intraday
+    batch_id: jl4-15m-intraday
+    cache_group: tencent_fqkline_15m
+    job_id: l4-vol-div-15m
+    t0_source_id: tencent_fqkline_15m
+    cadence: intraday
+    stale_days: 1
+  smart_money_flow:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: jl4-moneyflow-eod
+    cache_group: tushare_moneyflow_daily
+    job_id: l4-smart-money-eod
+    t0_source_id: tushare_moneyflow
+    cadence: daily
+    stale_days: 1
+  level2_super_order:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: jl4-moneyflow-eod
+    cache_group: tushare_moneyflow_daily
+    job_id: l2-super-order-eod
+    t0_source_id: tushare_moneyflow
+    cadence: daily
+    stale_days: 1
+  margin_short_skew:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: jl4-margin-morning
+    cache_group: tushare_margin_daily
+    job_id: l4-margin-skew-morning
+    t0_source_id: tushare_margin_detail
+    cadence: daily
+    stale_days: 1
+  turnover_acceleration:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: jl4-liquidity-eod
+    cache_group: tushare_daily_basic
+    job_id: l4-turnover-accel-eod
+    t0_source_id: tushare_daily_basic
+    cadence: daily
+    stale_days: 1
+  block_trade_discount:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: jl4-block-eod
+    cache_group: tushare_block_trade
+    job_id: l4-block-trade-eod
+    t0_source_id: tushare_block_trade
+    cadence: daily
+    stale_days: 1
+  retail_concentration:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: jl4-liquidity-eod
+    cache_group: tushare_moneyflow_daily
+    job_id: l4-turnover-retail-eod
+    t0_source_id: tushare_moneyflow
+    cadence: daily
+    stale_days: 1
+  insider_sell_actual:
+    signal_type: hybrid
+    t1_pipeline: hybrid_merge
+    update_trigger: cron
+    batch_id: jl4-insider-evening
+    cache_group: cninfo_insider_announcement
+    job_id: l4-insider-evening
+    t0_source_id: cninfo_insider_announcement
+    model_tier: flash
+    cadence: daily
+    stale_days: 1
+  etf_redemption_impact:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: jl4-etf-eod
+    cache_group: etf_share_daily
+    job_id: l4-etf-eod
+    t0_source_id: sina_etf_share
+    cadence: daily
+    stale_days: 1
+  tech_beta_correlation:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: jl4-liquidity-eod
+    cache_group: tushare_daily_index
+    job_id: l4-beta-correlation-eod
+    t0_source_id: tushare_daily_plus_index
+    cadence: daily
+    stale_days: 1
+batch_groups:
+  ran-dynamic-monthly:
+    update_trigger: event_driven
+    job_id: l3-ran-dynamic
+    cache_kind: deepsea_context
+    probe_keys:
+    - ran_ddr5_rcon_ship
+  ran-dynamic-daily:
+    update_trigger: event_driven
+    job_id: l3-ran-dynamic
+    cache_kind: deepsea_context
+    probe_keys:
+    - ran_cxl_mxc_node
+    - ran_pcie_retimer
+    - ran_aic_chip_test
+    - ran_serdes_ip
+  tushare_fina_indicator:
+    update_trigger: cron
+    job_id: l3-ran-financials-quarterly
+    cache_kind: tushare_api
+    probe_keys:
+    - ran_gross_margin
+    - ran_inventory_turn
+    t0_source_id: tushare_fina_indicator
+  tushare_balance_sheet:
+    update_trigger: cron
+    job_id: l3-ran-financials-quarterly
+    cache_kind: tushare_api
+    probe_keys:
+    - ran_contract_liab
+    t0_source_id: tushare_balance_sheet
+  ran-bid-dynamic:
+    update_trigger: cron
+    job_id: l3-ran-dynamic
+    cache_kind: structured_parse
+    probe_keys:
+    - ran_jintide_server
+  tushare_income:
+    update_trigger: cron
+    job_id: l3-ran-financials-quarterly
+    cache_kind: tushare_api
+    probe_keys:
+    - ran_rd_expense
+    t0_source_id: tushare_income
+  tushare_cashflow:
+    update_trigger: cron
+    job_id: l3-ran-financials-quarterly
+    cache_kind: tushare_api
+    probe_keys:
+    - ran_cfo_health
+    t0_source_id: tushare_cashflow
+  ran-risk-dynamic:
+    update_trigger: event_driven
+    job_id: l3-ran-dynamic
+    cache_kind: deepsea_context
+    probe_keys:
+    - ran_rambus_patent
+  ran-earnings-annual:
+    update_trigger: cron
+    job_id: l3-ran-financials-quarterly
+    cache_kind: structured_parse
+    probe_keys:
+    - ran_headcount_all
+    - r_ran_rd_capital_bad
+  ran-dynamic-q:
+    update_trigger: event_driven
+    job_id: l3-ran-dynamic
+    cache_kind: deepsea_context
+    probe_keys:
+    - ran_intel_platform
+  tsmc_wafer_schedule:
+    update_trigger: cron
+    job_id: l3-ran-dynamic
+    cache_kind: deepsea_context
+    probe_keys:
+    - ran_tsmc_wafer
+  ran-risk-q:
+    update_trigger: cron
+    job_id: l3-ran-dynamic
+    cache_kind: deepsea_context
+    probe_keys:
+    - r_ran_rambus_share
+    model_tier: pro_required
+  ran-risk-semi:
+    update_trigger: cron
+    job_id: l3-ran-dynamic
+    cache_kind: deepsea_context
+    probe_keys:
+    - r_ran_tapeout_fail
+    model_tier: pro_required
+  gov_procurement_bid:
+    update_trigger: cron
+    job_id: l3-ran-dynamic
+    cache_kind: structured_parse
+    probe_keys:
+    - r_ran_jintide_zero
+  jl4-moneyflow-eod:
+    update_trigger: cron
+    job_id: l4-smart-money-eod
+    cache_kind: pg_table
+    probe_keys:
+    - smart_money_flow
+    - level2_super_order
+  jl4-liquidity-eod:
+    update_trigger: cron
+    job_id: l4-turnover-accel-eod
+    cache_kind: pg_table
+    probe_keys:
+    - turnover_acceleration
+    - retail_concentration
+    - tech_beta_correlation

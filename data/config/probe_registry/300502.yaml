@@ -1,0 +1,441 @@
+# Probe 实现注册表 · 300502
+# [Ref: 28_ §2.13] — Cursor/CI 实现路由的机器真相源
+# update_trigger: event_driven | cron | intraday
+# t1_pipeline: python_hard | pymupdf_structured | playwright_structured | deepsea_semantic | hybrid_merge
+
+registry_version: '1.0'
+symbol: '300502'
+profile: '300502'
+prefix: nev
+l3_probes:
+  nev_net_margin:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: nev-earnings-q
+    cache_group: tushare_fina_indicator
+    job_id: l3-nev-financials-quarterly
+    t0_source_id: tushare_fina_indicator
+    cadence: quarterly
+    stale_days: 120
+  nev_meta_share:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: nev-dynamic-daily
+    cache_group: nev-dynamic-daily
+    job_id: l3-nev-dynamic
+    t0_source_id: cninfo_announcement_feed
+    cadence: dynamic
+    stale_days: 14
+    model_tier: flash
+  nev_thailand_cap:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: nev-dynamic-daily
+    cache_group: nev-dynamic-daily
+    job_id: l3-nev-dynamic
+    t0_source_id: cninfo_announcement_feed
+    cadence: dynamic
+    stale_days: 14
+    model_tier: flash
+  nev_lpo_progress:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: nev-dynamic-daily
+    cache_group: nev-dynamic-daily
+    job_id: l3-nev-dynamic
+    t0_source_id: cninfo_announcement_feed
+    cadence: dynamic
+    stale_days: 14
+    model_tier: flash
+  nev_gross_premium:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: nev-earnings-q
+    cache_group: tushare_fina_indicator
+    job_id: l3-nev-financials-quarterly
+    t0_source_id: tushare_fina_indicator
+    cadence: quarterly
+    stale_days: 120
+  nev_inventory_days:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: nev-earnings-q
+    cache_group: tushare_fina_indicator
+    job_id: l3-nev-financials-quarterly
+    t0_source_id: tushare_fina_indicator
+    cadence: quarterly
+    stale_days: 120
+  nev_contract_liab:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: nev-earnings-q
+    cache_group: tushare_balance_sheet
+    job_id: l3-nev-financials-quarterly
+    t0_source_id: tushare_balance_sheet
+    cadence: quarterly
+    stale_days: 120
+  nev_silicon_photon:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: nev-dynamic-daily
+    cache_group: nev-dynamic-daily
+    job_id: l3-nev-dynamic
+    t0_source_id: ofc_test_feedback
+    cadence: dynamic
+    stale_days: 14
+    model_tier: flash
+  nev_cw_laser_cost:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: cron
+    batch_id: nev-supply-monthly
+    cache_group: upstream_cw_laser_price
+    job_id: l3-nev-dynamic
+    t0_source_id: upstream_cw_laser_price
+    cadence: monthly
+    stale_days: 35
+    model_tier: flash
+  nev_fin_expense:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: nev-earnings-q
+    cache_group: tushare_income
+    job_id: l3-nev-financials-quarterly
+    t0_source_id: tushare_income
+    cadence: quarterly
+    stale_days: 120
+  nev_top5_concen:
+    signal_type: structured
+    t1_pipeline: pymupdf_structured
+    update_trigger: cron
+    batch_id: nev-earnings-annual
+    cache_group: nev-earnings-annual
+    job_id: l3-nev-financials-quarterly
+    t0_source_id: cninfo_annual_pdf
+    cadence: annual
+    stale_days: 365
+  nev_sales_growth:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: nev-earnings-q
+    cache_group: tushare_fina_indicator
+    job_id: l3-nev-financials-quarterly
+    t0_source_id: tushare_fina_indicator
+    cadence: quarterly
+    stale_days: 120
+  nev_free_cash_flow:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: nev-earnings-q
+    cache_group: tushare_cashflow
+    job_id: l3-nev-financials-quarterly
+    t0_source_id: tushare_cashflow
+    cadence: quarterly
+    stale_days: 120
+  nev_fixed_asset:
+    signal_type: structured
+    t1_pipeline: pymupdf_structured
+    update_trigger: cron
+    batch_id: nev-earnings-q
+    cache_group: nev-earnings-q
+    job_id: l3-nev-financials-quarterly
+    t0_source_id: cninfo_quarterly_pdf
+    cadence: quarterly
+    stale_days: 120
+  nev_insider_sell:
+    signal_type: hybrid
+    t1_pipeline: hybrid_merge
+    update_trigger: cron
+    batch_id: nev-governance-daily
+    cache_group: cninfo_governance_announcement
+    job_id: l3-nev-dynamic
+    t0_source_id: cninfo_governance_announcement
+    cadence: daily
+    stale_days: 7
+    model_tier: flash
+  r_nev_meta_delay:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: nev-risk-dynamic
+    cache_group: nev-risk-dynamic
+    job_id: l3-nev-dynamic
+    t0_source_id: meta_infrastructure_feed
+    cadence: dynamic
+    stale_days: 14
+    model_tier: pro_required
+  r_nev_thai_tariff:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: nev-risk-dynamic
+    cache_group: nev-risk-dynamic
+    job_id: l3-nev-dynamic
+    t0_source_id: policy_news_feed
+    cadence: dynamic
+    stale_days: 14
+    model_tier: pro_required
+  r_nev_lpo_fail:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: nev-risk-dynamic
+    cache_group: nev-risk-dynamic
+    job_id: l3-nev-dynamic
+    t0_source_id: oif_procurement_feed
+    cadence: dynamic
+    stale_days: 14
+    model_tier: pro_required
+  r_nev_yield_crash:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: cron
+    batch_id: nev-risk-monthly
+    cache_group: nev-risk-monthly
+    job_id: l3-nev-dynamic
+    t0_source_id: customer_complaint_feed
+    cadence: monthly
+    stale_days: 35
+    model_tier: pro_required
+  r_nev_talent_loss:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: nev-risk-dynamic
+    cache_group: nev-risk-dynamic
+    job_id: l3-nev-dynamic
+    t0_source_id: cninfo_announcement_feed
+    cadence: dynamic
+    stale_days: 14
+    model_tier: pro_required
+  r_nev_patent_sue:
+    signal_type: structured
+    t1_pipeline: playwright_structured
+    update_trigger: cron
+    batch_id: nev-risk-dynamic
+    cache_group: nev-risk-dynamic
+    job_id: l3-nev-dynamic
+    t0_source_id: itc_337_announcement
+    cadence: dynamic
+    stale_days: 14
+jl4_probes:
+  qmt_atr_trailing:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: intraday
+    batch_id: jl4-bars-eod
+    cache_group: tencent_fqkline_250d
+    job_id: l4-atr-bars-sync
+    t0_source_id: tencent_fqkline
+    cadence: daily
+    stale_days: 1
+  volume_price_div:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: intraday
+    batch_id: jl4-15m-intraday
+    cache_group: tencent_fqkline_15m
+    job_id: l4-vol-div-15m
+    t0_source_id: tencent_fqkline_15m
+    cadence: intraday
+    stale_days: 1
+  smart_money_flow:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: jl4-moneyflow-eod
+    cache_group: tushare_moneyflow_daily
+    job_id: l4-smart-money-eod
+    t0_source_id: tushare_moneyflow
+    cadence: daily
+    stale_days: 1
+  level2_super_order:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: jl4-moneyflow-eod
+    cache_group: tushare_moneyflow_daily
+    job_id: l2-super-order-eod
+    t0_source_id: tushare_moneyflow
+    cadence: daily
+    stale_days: 1
+  margin_short_skew:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: jl4-margin-morning
+    cache_group: tushare_margin_daily
+    job_id: l4-margin-skew-morning
+    t0_source_id: tushare_margin_detail
+    cadence: daily
+    stale_days: 1
+  turnover_acceleration:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: jl4-liquidity-eod
+    cache_group: tushare_daily_basic
+    job_id: l4-turnover-accel-eod
+    t0_source_id: tushare_daily_basic
+    cadence: daily
+    stale_days: 1
+  block_trade_discount:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: jl4-block-eod
+    cache_group: tushare_block_trade
+    job_id: l4-block-trade-eod
+    t0_source_id: tushare_block_trade
+    cadence: daily
+    stale_days: 1
+  retail_concentration:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: jl4-liquidity-eod
+    cache_group: tushare_moneyflow_daily
+    job_id: l4-turnover-retail-eod
+    t0_source_id: tushare_moneyflow
+    cadence: daily
+    stale_days: 1
+  insider_sell_actual:
+    signal_type: hybrid
+    t1_pipeline: hybrid_merge
+    update_trigger: cron
+    batch_id: jl4-insider-evening
+    cache_group: cninfo_insider_announcement
+    job_id: l4-insider-evening
+    t0_source_id: cninfo_insider_announcement
+    model_tier: flash
+    cadence: daily
+    stale_days: 1
+  etf_redemption_impact:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: jl4-etf-eod
+    cache_group: etf_share_daily
+    job_id: l4-etf-eod
+    t0_source_id: sina_etf_share
+    cadence: daily
+    stale_days: 1
+  tech_beta_correlation:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: jl4-liquidity-eod
+    cache_group: tushare_daily_index
+    job_id: l4-beta-correlation-eod
+    t0_source_id: tushare_daily_plus_index
+    cadence: daily
+    stale_days: 1
+batch_groups:
+  tushare_fina_indicator:
+    update_trigger: cron
+    job_id: l3-nev-financials-quarterly
+    cache_kind: tushare_api
+    probe_keys:
+    - nev_net_margin
+    - nev_gross_premium
+    - nev_inventory_days
+    - nev_sales_growth
+    t0_source_id: tushare_fina_indicator
+  nev-dynamic-daily:
+    update_trigger: event_driven
+    job_id: l3-nev-dynamic
+    cache_kind: deepsea_context
+    probe_keys:
+    - nev_meta_share
+    - nev_thailand_cap
+    - nev_lpo_progress
+    - nev_silicon_photon
+  tushare_balance_sheet:
+    update_trigger: cron
+    job_id: l3-nev-financials-quarterly
+    cache_kind: tushare_api
+    probe_keys:
+    - nev_contract_liab
+    t0_source_id: tushare_balance_sheet
+  upstream_cw_laser_price:
+    update_trigger: cron
+    job_id: l3-nev-dynamic
+    cache_kind: deepsea_context
+    probe_keys:
+    - nev_cw_laser_cost
+  tushare_income:
+    update_trigger: cron
+    job_id: l3-nev-financials-quarterly
+    cache_kind: tushare_api
+    probe_keys:
+    - nev_fin_expense
+    t0_source_id: tushare_income
+  nev-earnings-annual:
+    update_trigger: cron
+    job_id: l3-nev-financials-quarterly
+    cache_kind: structured_parse
+    probe_keys:
+    - nev_top5_concen
+  tushare_cashflow:
+    update_trigger: cron
+    job_id: l3-nev-financials-quarterly
+    cache_kind: tushare_api
+    probe_keys:
+    - nev_free_cash_flow
+    t0_source_id: tushare_cashflow
+  nev-earnings-q:
+    update_trigger: cron
+    job_id: l3-nev-financials-quarterly
+    cache_kind: structured_parse
+    probe_keys:
+    - nev_fixed_asset
+  cninfo_governance_announcement:
+    update_trigger: cron
+    job_id: l3-nev-dynamic
+    cache_kind: deepsea_context
+    probe_keys:
+    - nev_insider_sell
+  nev-risk-dynamic:
+    update_trigger: event_driven
+    job_id: l3-nev-dynamic
+    cache_kind: deepsea_context
+    probe_keys:
+    - r_nev_meta_delay
+    - r_nev_thai_tariff
+    - r_nev_lpo_fail
+    - r_nev_talent_loss
+    - r_nev_patent_sue
+    model_tier: pro_required
+  nev-risk-monthly:
+    update_trigger: cron
+    job_id: l3-nev-dynamic
+    cache_kind: deepsea_context
+    probe_keys:
+    - r_nev_yield_crash
+    model_tier: pro_required
+  jl4-moneyflow-eod:
+    update_trigger: cron
+    job_id: l4-smart-money-eod
+    cache_kind: pg_table
+    probe_keys:
+    - smart_money_flow
+    - level2_super_order
+  jl4-liquidity-eod:
+    update_trigger: cron
+    job_id: l4-turnover-accel-eod
+    cache_kind: pg_table
+    probe_keys:
+    - turnover_acceleration
+    - retail_concentration
+    - tech_beta_correlation

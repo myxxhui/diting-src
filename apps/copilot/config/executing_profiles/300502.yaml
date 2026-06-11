@@ -1,6 +1,6 @@
 # 执行中工作区 · 300502 新易盛
-# JL3 可变长 + JL4 固定 11 · 当前 14+11=25
-# [Ref: 28_ §2.3 · §2.1.1]
+# JL3 定稿 15 项 nev_* + JL4 固定 11 = 26 · 防守 r_nev_* 见 28_ §2.4
+# [Ref: 28_ §2.4 · §2.1.1]
 
 symbol: "300502"
 name: "新易盛"
@@ -12,76 +12,81 @@ sector_index_code: "931235.CSI"
 sector_index_name: "中证全指通信设备"
 
 l3_probes:
-  eop_16t_qual:
-    label: "1.6T送样"
-    reading_class: "研发抢位"
-    cadence: dynamic
-    stale_days: 14
-  eop_dsp_lead:
-    label: "DSP交期"
-    reading_class: "供应链"
-    cadence: weekly
-    stale_days: 7
-  eop_eml_laser:
-    label: "激光器供给"
-    reading_class: "上游芯片"
-    cadence: quarterly
-    stale_days: 120
-  eop_client_top2:
-    label: "前二客户集中度"
-    reading_class: "客户结构"
-    cadence: quarterly
-    stale_days: 120
-  eop_800g_yield:
-    label: "800G良率折损"
-    reading_class: "制造良率"
-    cadence: quarterly
-    stale_days: 120
-  eop_inno_delta:
-    label: "中际增速差"
-    reading_class: "同业抢单"
-    cadence: quarterly
-    stale_days: 120
-  eop_800g_margin:
-    label: "800G净利率"
+  nev_net_margin:
+    label: "整体净利率"
     reading_class: "盈利质量"
     cadence: quarterly
     stale_days: 120
-  eop_siph_ratio:
-    label: "硅光出货占比"
-    reading_class: "技术路径"
+  nev_meta_share:
+    label: "Meta 采购渗透"
+    reading_class: "客户结构"
     cadence: dynamic
     stale_days: 14
-  eop_finished_gd:
-    label: "产成品库存"
+  nev_thailand_cap:
+    label: "泰国产能爬坡"
+    reading_class: "交付力"
+    cadence: dynamic
+    stale_days: 14
+  nev_lpo_progress:
+    label: "LPO 批量交付"
+    reading_class: "技术迭代"
+    cadence: dynamic
+    stale_days: 14
+  nev_gross_premium:
+    label: "高端毛利差"
+    reading_class: "盈利质量"
+    cadence: quarterly
+    stale_days: 120
+  nev_inventory_days:
+    label: "存货周转天数"
     reading_class: "财务运营"
     cadence: quarterly
     stale_days: 120
-  eop_usd_cny:
-    label: "汇兑损益"
+  nev_contract_liab:
+    label: "合同负债增速"
+    reading_class: "订单前瞻"
+    cadence: quarterly
+    stale_days: 120
+  nev_silicon_photon:
+    label: "硅光量产验证"
+    reading_class: "技术跨越"
+    cadence: dynamic
+    stale_days: 14
+  nev_cw_laser_cost:
+    label: "CW 激光器成本"
     reading_class: "成本因子"
-    cadence: daily
-    stale_days: 1
-  eop_domestic_bid:
-    label: "国内集采份额"
-    reading_class: "订单簿"
     cadence: monthly
     stale_days: 35
-  eop_32t_rd:
-    label: "3.2T研发强度"
-    reading_class: "研发抢位"
+  nev_fin_expense:
+    label: "汇兑损益"
+    reading_class: "成本因子"
     cadence: quarterly
     stale_days: 120
-  eop_intangible:
-    label: "商誉占比"
-    reading_class: "财务风险"
+  nev_top5_concen:
+    label: "前五大客户集中度"
+    reading_class: "客户结构"
+    cadence: yearly
+    stale_days: 400
+  nev_sales_growth:
+    label: "营收增速差"
+    reading_class: "扩张动能"
     cadence: quarterly
     stale_days: 120
-  eop_thai_util:
-    label: "泰国工厂达产"
-    reading_class: "交付力"
-    cadence: dynamic
-    stale_days: 30
+  nev_free_cash_flow:
+    label: "自由现金流"
+    reading_class: "财务运营"
+    cadence: quarterly
+    stale_days: 120
+  nev_fixed_asset:
+    label: "在建工程转固"
+    reading_class: "产能前瞻"
+    cadence: quarterly
+    stale_days: 120
+  nev_insider_sell:
+    label: "董监高合规"
+    reading_class: "治理"
+    cadence: daily
+    stale_days: 1
 
 probes:
   qmt_atr_trailing:

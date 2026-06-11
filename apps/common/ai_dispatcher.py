@@ -43,6 +43,55 @@ def anthropic_https_proxy_url() -> str:
     ).strip()
 
 
+def _parse_proxy_host_port(proxy_url: str) -> tuple[str, int] | None:
+    """从 ANTHROPIC_HTTPS_PROXY URL 解析 host/port（用于 TCP 探活）。"""
+    raw = (proxy_url or "").strip()
+    if not raw:
+        return None
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(raw)
+        host = parsed.hostname or ""
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        if not host:
+            tail = raw.split("@")[-1].replace("http://", "").replace("https://", "")
+            host, _, port_s = tail.partition(":")
+            port = int(port_s.split("/")[0]) if port_s else 3128
+        return host, int(port)
+    except (TypeError, ValueError):
+        return None
+
+
+def probe_anthropic_proxy_tcp(*, timeout_sec: float = 10.0) -> tuple[bool, str]:
+    """TCP 探活新加坡出口代理；失败时返回可执行修复提示。"""
+    proxy = anthropic_https_proxy_url()
+    if not proxy:
+        return True, "direct"
+    parsed = _parse_proxy_host_port(proxy)
+    if not parsed:
+        return False, f"ANTHROPIC_HTTPS_PROXY 格式无效：{proxy[:80]}"
+    host, port = parsed
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(max(1.0, float(timeout_sec)))
+    try:
+        sock.connect((host, port))
+        return True, f"{host}:{port}"
+    except OSError as exc:
+        return False, (
+            f"Anthropic 出口代理不可达（{host}:{port} · {exc}）。"
+            "常见原因：新加坡 ECS/EIP 已重建但 Copilot Secret 仍指向旧 IP。"
+            "请在 diting-infra 执行：make verify-sg-anthropic-proxy && make sync-anthropic-proxy-to-copilot"
+        )
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
 def anthropic_omit_temperature(model: str) -> bool:
     """Opus 4.5+ 部分型号已弃用 temperature 参数。"""
     m = (model or "").lower()
@@ -577,6 +626,12 @@ class AIDispatcher:
         read_timeout = anthropic_read_timeout_sec(scene=scene, max_tokens=max_tokens)
         use_stream = anthropic_use_streaming(scene=scene, max_tokens=max_tokens)
         use_ephemeral = scene == "radar_assess" and bool(anthropic_https_proxy_url())
+        if scene == "radar_assess" and anthropic_https_proxy_url():
+            ok, detail = probe_anthropic_proxy_tcp(
+                timeout_sec=float(os.getenv("ANTHROPIC_PROXY_CONNECT_PROBE_SEC", "10"))
+            )
+            if not ok:
+                raise RuntimeError(detail)
         try:
             if use_stream and not use_ephemeral:
                 return self._remote_stream_once(
@@ -592,21 +647,34 @@ class AIDispatcher:
                 )
 
             if use_ephemeral:
+                max_attempts = max(
+                    1,
+                    int(os.getenv("ANTHROPIC_PROXY_MAX_ATTEMPTS", "3")),
+                )
                 last_exc: Exception | None = None
-                for attempt in range(2):
+                for attempt in range(max_attempts):
                     ep_client, ep_http = self._make_ephemeral_anthropic_client(read_timeout)
                     try:
                         out = _create_with_client(ep_client)
                         out.setdefault("raw", {})["_ephemeral_client"] = True
+                        out.setdefault("raw", {})["_proxy_attempt"] = attempt + 1
                         return out
                     except Exception as exc:
                         last_exc = exc
-                        if attempt == 0 and is_transient_anthropic_error(exc):
+                        if (
+                            attempt < max_attempts - 1
+                            and is_transient_anthropic_error(exc)
+                        ):
+                            wait = min(30.0, 2.0 * (2**attempt))
                             logger.warning(
-                                "[AIDispatcher] T2 经代理 non-stream 瞬态失败，换新连接重试: %s",
+                                "[AIDispatcher] T2 经代理 non-stream 瞬态失败 attempt=%s/%s，"
+                                "%.0fs 后换新连接重试: %s",
+                                attempt + 1,
+                                max_attempts,
+                                wait,
                                 exc,
                             )
-                            time.sleep(2.0)
+                            time.sleep(wait)
                             continue
                         raise
                     finally:

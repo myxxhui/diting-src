@@ -14,6 +14,8 @@ from apps.common.ai_dispatcher import (
     anthropic_read_timeout_sec,
     anthropic_use_streaming,
     is_transient_anthropic_error,
+    probe_anthropic_proxy_tcp,
+    _parse_proxy_host_port,
 )
 
 
@@ -57,6 +59,28 @@ def test_is_transient_anthropic_error_chunked():
         )
     )
     assert not is_transient_anthropic_error(RuntimeError("401 invalid x-api-key"))
+
+
+def test_parse_proxy_host_port():
+    assert _parse_proxy_host_port("http://user:pass@47.237.76.203:3128") == (
+        "47.237.76.203",
+        3128,
+    )
+    assert _parse_proxy_host_port("") is None
+
+
+def test_probe_anthropic_proxy_tcp_no_proxy(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_HTTPS_PROXY", raising=False)
+    ok, detail = probe_anthropic_proxy_tcp()
+    assert ok is True
+    assert detail == "direct"
+
+
+def test_probe_anthropic_proxy_tcp_unreachable(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_HTTPS_PROXY", "http://127.0.0.1:31999")
+    ok, detail = probe_anthropic_proxy_tcp(timeout_sec=0.5)
+    assert ok is False
+    assert "sync-anthropic-proxy-to-copilot" in detail
 
 
 def test_call_mock_no_key():

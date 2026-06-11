@@ -551,13 +551,74 @@
       }
     });
 
+    window.workbenchShowHtmxBootError = function () {
+      var loaders = [
+        document.getElementById('executing-campaigns-loader'),
+        document.getElementById('opus-t2-panel-slot')
+      ];
+      loaders.forEach(function (el) {
+        if (!el) return;
+        if (el.querySelector('.workspace-symbol-list, #t2-analyst-panel')) return;
+        el.innerHTML = '<p class="text-sm text-rose-600 py-4 text-center">'
+          + '页面脚本未就绪 · <button type="button" class="underline" '
+          + 'onclick="location.reload()">刷新重试</button></p>';
+      });
+    };
+
+    window.workbenchFetchHtml = function (url, targetId) {
+      var target = document.getElementById(targetId);
+      if (!target) return Promise.resolve(false);
+      return fetch(url, { headers: { Accept: 'text/html', 'HX-Request': 'true' } })
+        .then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.text();
+        })
+        .then(function (html) {
+          target.innerHTML = html;
+          if (targetId === 'executing-campaigns-loader') {
+            target.setAttribute('data-loaded', '1');
+            if (typeof window.executingRestoreOpenCards === 'function') {
+              window.executingRestoreOpenCards();
+            }
+          }
+          if (targetId === 'opus-t2-panel-slot' && typeof window.t2AnalystBootPanel === 'function') {
+            window.t2AnalystBootPanel();
+          }
+          if (typeof htmx !== 'undefined') htmx.process(target);
+          return true;
+        })
+        .catch(function () { return false; });
+    };
+
+    window.workbenchBootWithoutHtmxFallback = function () {
+      var panel = document.getElementById('workbench-panel');
+      var view = panel && panel.getAttribute('data-view');
+      var jobs = [];
+      if (view === 'planning' || view === 'executing') {
+        jobs.push(window.workbenchFetchHtml(
+          '/api/campaigns?view=' + encodeURIComponent(view || 'executing'),
+          'executing-campaigns-loader'
+        ));
+      }
+      return Promise.all(jobs);
+    };
+
     if (!window.workbenchBootWhenReady()) {
       document.addEventListener('DOMContentLoaded', function () {
         if (window.workbenchBootWhenReady()) return;
         var tries = 0;
         var bootTimer = setInterval(function () {
           tries += 1;
-          if (window.workbenchBootWhenReady() || tries > 250) clearInterval(bootTimer);
+          if (window.workbenchBootWhenReady()) {
+            clearInterval(bootTimer);
+            return;
+          }
+          if (tries > 500) {
+            clearInterval(bootTimer);
+            window.workbenchBootWithoutHtmxFallback().then(function (results) {
+              if (!results.some(Boolean)) window.workbenchShowHtmxBootError();
+            });
+          }
         }, 20);
       });
     }

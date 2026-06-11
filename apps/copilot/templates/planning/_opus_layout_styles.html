@@ -417,4 +417,314 @@
     .opus-session-item .opus-session-title { display: none; }
     .opus-templates-inline { flex-direction: column; }
   }
+
+  /* ── T2 分析回复排版 ───────────────────────────────────── */
+  #t2-analyst-messages .opus-assistant-bubble {
+    max-width: min(920px, 100%);
+    width: 100%;
+  }
+  .opus-assistant-body.t2-assistant-body {
+    padding: 12px 14px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: #1f2937;
+  }
+
+  .t2-analyst-result { width: 100%; }
+  .t2-analyst-result--compact .t2-reply-portfolio,
+  .t2-analyst-result--structured .t2-reply-portfolio {
+    margin-bottom: 10px;
+  }
+
+  .t2-reply-portfolio {
+    border: 1px solid #bbf7d0;
+    border-radius: 12px;
+    background: linear-gradient(180deg, #f0fdf4 0%, #fff 100%);
+    overflow: hidden;
+  }
+  .t2-reply-hero {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px 14px;
+    padding: 12px 14px;
+    border-bottom: 1px solid #dcfce7;
+  }
+  .t2-reply-hero-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #047857;
+    margin-bottom: 4px;
+  }
+  .t2-reply-summary {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.5;
+    color: #111827;
+  }
+  .t2-reply-action-badge {
+    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 6px 12px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+
+  .t2-reply-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .t2-reply-section {
+    padding: 10px 14px;
+    border-top: 1px solid #f3f4f6;
+  }
+  .t2-reply-section--warn {
+    background: #fffbeb;
+  }
+  .t2-reply-section--stop {
+    background: #fef2f2;
+  }
+  .t2-reply-section-title {
+    margin: 0 0 6px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #6b7280;
+    letter-spacing: 0.04em;
+  }
+  .t2-reply-section-body {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #374151;
+  }
+
+  .t2-segment-hint {
+    margin: 0 0 8px;
+    font-size: 10px;
+    color: #9ca3af;
+  }
+  .t2-segment-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .t2-segment {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fff;
+    padding: 8px 10px;
+  }
+  .t2-segment-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  .t2-segment-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #111827;
+  }
+  .t2-segment-body {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.55;
+    color: #4b5563;
+  }
+
+  .t2-target-chips {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 8px;
+  }
+  .t2-target-chip {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fff;
+    padding: 8px 10px;
+  }
+  .t2-target-chip-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+  .t2-target-sym {
+    font-size: 11px;
+    font-weight: 700;
+    font-family: ui-monospace, monospace;
+    color: #374151;
+  }
+  .t2-target-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  .t2-target-pct {
+    font-size: 10px;
+    color: #6b7280;
+  }
+  .t2-target-rat {
+    margin: 6px 0 0;
+    font-size: 11px;
+    line-height: 1.45;
+    color: #6b7280;
+  }
+
+  .t2-reply-meta {
+    margin: 0;
+    padding: 8px 14px;
+    font-size: 10px;
+    color: #9ca3af;
+    border-top: 1px solid #ecfdf5;
+    background: #fafafa;
+  }
+  .t2-reply-fallback {
+    white-space: pre-wrap;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #374151;
+    padding: 4px 2px;
+  }
+
+  .t2-symbol-list { margin-top: 4px; }
+  .t2-symbol-list-title {
+    margin: 0 0 8px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #6b7280;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .t2-symbol-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #fafafa;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+  .t2-symbol-card[open] {
+    background: #fff;
+    border-color: #ddd6fe;
+    box-shadow: 0 1px 4px rgba(109, 40, 217, 0.06);
+  }
+  .t2-symbol-summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 10px 12px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .t2-symbol-summary::-webkit-details-marker { display: none; }
+  .t2-symbol-title {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: #111827;
+    display: inline;
+  }
+  .t2-symbol-hint {
+    font-size: 10px;
+    color: #9ca3af;
+    margin-left: 8px;
+  }
+  .t2-symbol-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 999px;
+    flex-shrink: 0;
+  }
+  .t2-symbol-body {
+    padding: 0 12px 12px;
+    border-top: 1px solid #f3f4f6;
+  }
+
+  .t2-nine-dim-block {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #e0e7ff;
+  }
+  .t2-nine-dim-title {
+    margin: 0 0 8px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #4338ca;
+  }
+  .t2-nine-dim-overall {
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #312e81;
+    line-height: 1.45;
+  }
+  .t2-nine-dim-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 6px;
+  }
+  .t2-nine-dim-card {
+    border: 1px solid #e0e7ff;
+    border-radius: 8px;
+    background: #fff;
+    font-size: 11px;
+  }
+  .t2-nine-dim-summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 6px 8px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+  }
+  .t2-nine-dim-summary::-webkit-details-marker { display: none; }
+  .t2-nine-dim-label {
+    font-weight: 600;
+    color: #374151;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .t2-nine-dim-verdict {
+    font-size: 10px;
+    color: #6366f1;
+    font-weight: 600;
+  }
+  .t2-nine-dim-body {
+    padding: 0 8px 8px;
+    color: #4b5563;
+    line-height: 1.45;
+  }
+  .t2-conf-bar {
+    display: inline-block;
+    width: 40px;
+    height: 4px;
+    background: #e5e7eb;
+    border-radius: 2px;
+    overflow: hidden;
+    vertical-align: middle;
+  }
+  .t2-conf-fill {
+    display: block;
+    height: 100%;
+    background: #8b5cf6;
+    border-radius: 2px;
+  }
+  .t2-conf-pct {
+    font-size: 9px;
+    color: #9ca3af;
+    margin-left: 2px;
+  }
 </style>

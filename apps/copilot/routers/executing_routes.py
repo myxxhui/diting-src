@@ -650,10 +650,12 @@ async def api_analyst_panel_html(
         DEFAULT_PROMPT_TEMPLATE,
     )
     from apps.copilot.modules.executing.t2_token_limits import token_limits_summary
+    from apps.copilot.modules.executing.t2_radar_nine_dim import radar_layout_panel_summary
     from apps.copilot.modules.radar.chat import DEFAULT_CHAT_MODEL, RADAR_CHAT_MODELS
 
     redis = _redis_for_panel()
     symbol_rows = await _load_analyst_symbol_rows(session, redis)
+    radar_nine = radar_layout_panel_summary()
     return _templates.TemplateResponse(
         request,
         "planning/_t2_analyst_panel.html",
@@ -664,6 +666,7 @@ async def api_analyst_panel_html(
             "default_prompt_template": DEFAULT_PROMPT_TEMPLATE,
             "default_jl13_data_template": DEFAULT_JL13_DATA_TEMPLATE,
             "token_limits": token_limits_summary(),
+            "radar_nine_dim": radar_nine,
         },
     )
 
@@ -788,13 +791,13 @@ def _render_analyst_chat_panel(payload: dict[str, Any]) -> str:
             data = meta.get("payload") or meta.get("preview") or {}
             from apps.copilot.modules.executing.t2_analyst_render import (
                 render_opus_assistant_bubble,
-                render_t2_chat_prose,
+                render_t2_chat_reply,
                 _assistant_pin_eligible,
             )
 
             card = ""
             if data:
-                card = render_t2_chat_prose(data, meta)
+                card = render_t2_chat_reply(data, meta)
             elif content:
                 card = f"<p class='whitespace-pre-wrap text-sm'>{content}</p>"
             rid = str(meta.get("request_id") or data.get("request_id") or "")
@@ -969,6 +972,7 @@ async def api_analyst_chat(
     model_id: str = Form(""),
     include_t1_jl4: str = Form(""),
     include_jl13_data: str = Form(""),
+    include_radar_nine_dim: str = Form(""),
     jl13_data_prompt: str = Form(""),
     symbols: list[str] = Form(default=[]),
     session: AsyncSession = Depends(get_db),
@@ -1008,6 +1012,7 @@ async def api_analyst_chat(
                 include_t1_jl4=include_t1_jl4 == "1",
                 jl13_data_prompt=jl13_data_prompt,
                 include_jl13_data=include_jl13_data == "1",
+                include_radar_nine_dim=include_radar_nine_dim == "1",
                 redis_client=redis,
             )
         )
@@ -1026,6 +1031,7 @@ async def api_analyst_chat(
             include_t1_jl4=include_t1_jl4 == "1",
             jl13_data_prompt=jl13_data_prompt,
             include_jl13_data=include_jl13_data == "1",
+            include_radar_nine_dim=include_radar_nine_dim == "1",
             redis_client=redis,
         )
     except ValueError as exc:
@@ -1193,6 +1199,7 @@ def _render_t2_analyst_audit_list(rows: list[Any]) -> str:
 def _render_t2_analyst_audit_detail(row: Any) -> str:
     import json
 
+    from apps.copilot.modules.executing.t2_advice_summary import structured_audit_from_payload
     from apps.copilot.modules.executing.t2_analyst_render import render_t2_assistant_card
 
     payload = row.payload_json or {}

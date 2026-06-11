@@ -49,6 +49,7 @@ JOB_REGISTRY: tuple[ExecutingJobSpec, ...] = (
     ExecutingJobSpec("l4-micro-eod", "10 16 * * 1-5", True, True, 1800),
     ExecutingJobSpec("l3-fii-twse-monthly", "0 8 5-12 * *", True, True, 1800),
     ExecutingJobSpec("l3-fii-odm-quarterly", "0 20 * * 1-5", True, True, 3600),
+    ExecutingJobSpec("l3-fii-gb200-milestone", "0 17 * * 1-5", True, True, 3600),
     ExecutingJobSpec("l3-news-daily", "0 18 * * 1-5", True, True, 1800),
     ExecutingJobSpec("daily-pipeline", "45 18 * * 1-5", True, True, 3600),
     ExecutingJobSpec("bootstrap-sync", "", True, False, 3600),

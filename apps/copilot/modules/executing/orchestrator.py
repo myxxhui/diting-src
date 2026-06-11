@@ -1675,3 +1675,107 @@ async def run_fii_odm_direct_ratio_quarterly(
         "status": "ok" if ok else "error",
         "results": results,
     }
+
+
+async def run_fii_gb200_milestone_daily(
+    session: AsyncSession,
+    symbols: list[str],
+) -> dict[str, Any]:
+    """601138 GB200 量产节点 · 巨潮公告 T0→T1（盘后 17:00 窗口）。"""
+    from apps.copilot.modules.executing.l3.fii_gb200_milestone.indicator_node import (
+        build_fii_gb200_milestone_node,
+    )
+    from apps.copilot.modules.executing.l3.fii_gb200_milestone.prior_snapshot import (
+        prior_lifecycle_stage_from_t1,
+        prior_signal_snapshot_from_t1,
+    )
+    from apps.copilot.modules.executing.l3.fii_gb200_milestone.t0_collect import (
+        collect_fii_gb200_milestone_t0,
+    )
+    from apps.copilot.modules.executing.profile import load_profile, profile_l3_keys
+    from apps.copilot.modules.executing.storage import (
+        load_t1_snapshot,
+        save_t0_batch,
+        upsert_t1_snapshot,
+    )
+
+    results: list[dict[str, Any]] = []
+    for sym in symbols:
+        code = sym.zfill(6)[-6:]
+        prof = load_profile(code)
+        if "fii_gb200_milestone" not in profile_l3_keys(prof):
+            results.append({"symbol": code, "status": "skip", "reason": "no_l3_fii_gb200_milestone"})
+            continue
+        prev = await load_t1_snapshot(session, code, "fii_gb200_milestone")
+        prior_snap = prior_signal_snapshot_from_t1(prev)
+        prior_stage = prior_lifecycle_stage_from_t1(prev)
+        t0_item = collect_fii_gb200_milestone_t0(
+            code,
+            prior_lifecycle_stage=prior_stage,
+            prior_signal_snapshot=prior_snap,
+        )
+        if not t0_item.get("ok"):
+            await save_t0_batch(session, code, [t0_item])
+            results.append(
+                {
+                    "symbol": code,
+                    "status": "error",
+                    "error": t0_item.get("blocker"),
+                }
+            )
+            continue
+        payload = t0_item.get("payload") or {}
+        from apps.copilot.services.deepsea.dispatcher import dispatch_cohort_inference
+
+        batch = await dispatch_cohort_inference(
+            symbol=code,
+            cache_group="fii-cninfo-dynamic",
+            t0_payload=payload,
+        )
+        node = build_fii_gb200_milestone_node(
+            payload,
+            source=t0_item.get("source") or "T0",
+        )
+        await save_t0_batch(session, code, [t0_item])
+        await upsert_t1_snapshot(
+            session,
+            code,
+            "fii_gb200_milestone",
+            node,
+            source=t0_item.get("source"),
+        )
+        sm = (node.get("t1_json") or {}).get("state_machine") or {}
+        results.append(
+            {
+                "symbol": code,
+                "status": "ok",
+                "published": payload.get("published_date"),
+                "stage": sm.get("current_stage"),
+                "transition": sm.get("transition"),
+                "trade_trigger": sm.get("trade_trigger"),
+                "deepsea_batch": [
+                    {
+                        "probe_key": b.get("probe_key"),
+                        "status": b.get("status"),
+                        "signal_status": (b.get("contract") or {}).get("signal_status"),
+                    }
+                    for b in batch
+                ],
+            }
+        )
+
+    ok = [r for r in results if r.get("status") == "ok"]
+    await upsert_watermark(
+        session,
+        "l3-fii-gb200-milestone",
+        "*",
+        success=bool(ok),
+        trade_date=date.today(),
+        row_count=len(ok),
+        error=None if ok else "fii_gb200_milestone_failed",
+    )
+    return {
+        "job_id": "l3-fii-gb200-milestone",
+        "status": "ok" if ok else "error",
+        "results": results,
+    }

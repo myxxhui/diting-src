@@ -293,6 +293,12 @@ async def run_job(
         result = await run_fii_odm_direct_ratio_quarterly(session, symbols)
         return result
 
+    if job_id == "l3-fii-gb200-milestone":
+        from apps.copilot.modules.executing.orchestrator import run_fii_gb200_milestone_daily
+
+        result = await run_fii_gb200_milestone_daily(session, symbols)
+        return result
+
     if job_id in ("l4-micro-eod", "l3-news-daily", "collect-once"):
         out = []
         for sym in symbols:

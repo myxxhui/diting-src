@@ -53,6 +53,10 @@
               <input type="checkbox" name="include_jl13_data" value="1" form="t2-analyst-form" checked class="rounded text-violet-600 scale-90">
               JL1–3
             </label>
+            <label class="inline-flex items-center gap-1 cursor-pointer" title="{% if radar_nine_dim|default({}) %}{{ radar_nine_dim.labels_preview }}{% else %}与雷达工作台 display_layout 同步{% endif %}">
+              <input type="checkbox" name="include_radar_nine_dim" value="1" form="t2-analyst-form" class="rounded text-violet-600 scale-90">
+              九维{% if radar_nine_dim|default({}) %}({{ radar_nine_dim.dim_count }}){% endif %}
+            </label>
             {% if token_limits %}
             <span class="text-[9px] text-violet-600/70">
               输入 ≤ {{ "{:,}".format(token_limits.max_input_chars) }} 字 · 输出 ≤ {{ "{:,}".format(token_limits.max_output_tokens) }} tok

@@ -323,6 +323,7 @@ def _render_probe_card(
     show_fact_block: bool = True,
     show_formula_block: bool = True,
     header_corner_html: str = "",
+    layer_badge: str = "JL4",
 ) -> str:
     """统一指标卡片：Header · 描述 · 公式区 · Tag 栏 · 来源 Footer。"""
     theme = _probe_theme(probe_key)
@@ -374,6 +375,15 @@ def _render_probe_card(
     else:
         right_header = f'<div class="flex items-center gap-2 shrink-0">{value_block}</div>'
 
+    layer_line = ""
+    if layer_badge:
+        layer_cls = (
+            "text-[10px] font-semibold uppercase tracking-wide text-blue-700/90"
+            if layer_badge == "JL3"
+            else "text-[10px] font-semibold uppercase tracking-wide text-orange-600/90"
+        )
+        layer_line = f'<span class="{layer_cls}">{_esc(layer_badge)}</span>'
+
     return f"""
 <article class="{card_cls}" style="{card_style}" data-probe-key="{_esc(probe_key)}" data-probe-category="{_esc(theme.get('category', ''))}"{timing_attr}>
   {timing_bar}
@@ -381,7 +391,7 @@ def _render_probe_card(
     <div class="min-w-0 flex-1">
       <h3 class="text-base font-semibold text-gray-900 leading-snug">{_esc(title)}</h3>
       <div class="mt-1.5 flex flex-wrap items-center gap-2">
-        <span class="text-[10px] font-semibold uppercase tracking-wide text-orange-600/90">JL4</span>
+        {layer_line}
         <span class="text-xs text-gray-500">{_esc(short_label)}</span>
       </div>
       {sub_line}

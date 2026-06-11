@@ -10,6 +10,7 @@ import re
 from typing import Any
 
 from apps.copilot.modules.executing.t2_advice_summary import structured_audit_from_payload
+from apps.copilot.modules.radar.schema import DIM_META, MARKET_PHASE_LABELS
 
 
 def _esc(s: Any) -> str:
@@ -45,6 +46,13 @@ def _action_label(code: str | None) -> str:
 def _action_badge(code: str | None) -> str:
     c = (code or "").strip().lower()
     return _ACTION_BADGE.get(c, "bg-gray-100 text-gray-700")
+
+
+def _dim_display(key: str) -> str:
+    meta = DIM_META.get(key) or {}
+    emoji = meta.get("emoji") or ""
+    label = meta.get("label") or key
+    return f"{emoji} {label}".strip()
 
 
 def _para(text: str | None, *, label: str = "", cls: str = "text-xs text-gray-700 leading-relaxed") -> str:
@@ -159,29 +167,34 @@ def _render_verdict_by_symbol(
 
     segments = _split_prose_by_symbol_names(t, ctx_map)
     if not segments:
-        return _para(t, label=f"{label}：")
+        if not t:
+            return ""
+        return (
+            f"<section class='t2-reply-section'>"
+            f"<h4 class='t2-reply-section-title'>{_esc(label)}</h4>"
+            f"<p class='t2-reply-section-body'>{_esc(t)}</p></section>"
+        )
 
     blocks: list[str] = []
     for sym, dname, chunk in segments:
         ctx = ctx_map.get(sym, {})
         title = f"{_esc(dname)} · {_esc(sym)}"
         blocks.append(
-            f"<div class='rounded border border-gray-200/80 bg-white/70 px-2.5 py-2 mt-1.5'>"
-            f"<div class='flex flex-wrap items-center gap-2 mb-1'>"
-            f"<span class='text-xs font-semibold text-gray-800'>{title}</span>"
+            f"<div class='t2-segment'>"
+            f"<div class='t2-segment-head'>"
+            f"<span class='t2-segment-title'>{title}</span>"
             f"{_pnl_badge(ctx.get('unrealized_profit_pct'))}"
             f"</div>"
-            f"<p class='text-xs text-gray-700 leading-relaxed'>{_esc(chunk)}</p>"
+            f"<p class='t2-segment-body'>{_esc(chunk)}</p>"
             f"</div>"
         )
 
     return (
-        f"<div class='mt-1.5'>"
-        f"<p class='text-xs text-gray-500 mb-1'>"
-        f"<span class='text-gray-400'>{_esc(label)}：</span>"
-        f"按标的分段 · 浮盈/浮亏以 T1 持仓为准（非组合加总）</p>"
-        f"{''.join(blocks)}"
-        f"</div>"
+        f"<section class='t2-reply-section'>"
+        f"<h4 class='t2-reply-section-title'>{_esc(label)}</h4>"
+        f"<p class='t2-segment-hint'>按标的分段 · 浮盈/浮亏以 T1 为准</p>"
+        f"<div class='t2-segment-group'>{''.join(blocks)}</div>"
+        f"</section>"
     )
 
 
@@ -275,12 +288,93 @@ def _jl4_summary(jl4_read: list[dict[str, Any]], limit: int = 4) -> str:
     ) + "</div>"
 
 
+def _conf_bar(conf: Any) -> str:
+    try:
+        c = float(conf)
+    except (TypeError, ValueError):
+        c = 0.0
+    pct = max(0, min(100, int(c * 100)))
+    return (
+        f"<span class='t2-conf-bar' aria-hidden='true'>"
+        f"<span class='t2-conf-fill' style='width:{pct}%'></span></span>"
+        f"<span class='t2-conf-pct'>{pct}%</span>"
+    )
+
+
+def _render_target_chips(cmd: dict[str, Any]) -> str:
+    """逐标的操作建议 · 横向芯片摘要。"""
+    chips: list[str] = []
+    for t in cmd.get("targets") or []:
+        if not isinstance(t, dict) or not t.get("symbol"):
+            continue
+        sym = str(t["symbol"])
+        advice = str(t.get("advice") or "")
+        pct = (t.get("pct_change") or "").strip()
+        rat = (t.get("rationale") or "").strip()
+        badge_cls = _action_badge(advice)
+        pct_s = f"<span class='t2-target-pct'>{_esc(pct)}</span>" if pct else ""
+        rat_s = (
+            f"<p class='t2-target-rat'>{_esc(rat)}</p>" if rat else ""
+        )
+        chips.append(
+            f"<div class='t2-target-chip'>"
+            f"<div class='t2-target-chip-head'>"
+            f"<span class='t2-target-sym'>{_esc(sym)}</span>"
+            f"<span class='t2-target-badge {_esc(badge_cls)}'>"
+            f"{_esc(_action_label(advice))}</span>{pct_s}</div>{rat_s}</div>"
+        )
+    if not chips:
+        return ""
+    return f"<div class='t2-target-chips'>{''.join(chips)}</div>"
+
+
+def _render_radar_nine_dimensions_block(radar: dict[str, Any] | None) -> str:
+    """渲染 symbol_audits.radar_nine_dimensions（与雷达九维卡片同构）。"""
+    if not isinstance(radar, dict) or not radar:
+        return ""
+    dims = radar.get("dimensions") or {}
+    if not isinstance(dims, dict) or not dims:
+        return ""
+    overall = radar.get("overall") or {}
+    cards: list[str] = []
+    for key, dim in dims.items():
+        if not isinstance(dim, dict):
+            continue
+        verdict = (dim.get("verdict") or "—").strip() or "—"
+        if key == "market_phase" and verdict in MARKET_PHASE_LABELS:
+            verdict = f"{MARKET_PHASE_LABELS[verdict]}（{verdict}）"
+        reasoning = (dim.get("reasoning") or "").strip()
+        cards.append(
+            f"<details class='t2-nine-dim-card'>"
+            f"<summary class='t2-nine-dim-summary'>"
+            f"<span class='t2-nine-dim-label'>{_esc(_dim_display(key))}</span>"
+            f"<span class='t2-nine-dim-verdict'>{_esc(verdict)}</span>"
+            f"{_conf_bar(dim.get('confidence'))}</summary>"
+            f"<div class='t2-nine-dim-body'>{_esc(reasoning) or '—'}</div>"
+            f"</details>"
+        )
+    if not cards:
+        return ""
+    head = (overall.get("conclusion") or "").strip()
+    head_html = (
+        f"<p class='t2-nine-dim-overall'>{_esc(head)}</p>" if head else ""
+    )
+    return (
+        f"<div class='t2-nine-dim-block'>"
+        f"<p class='t2-nine-dim-title'>雷达九维研报</p>"
+        f"{head_html}"
+        f"<div class='t2-nine-dim-grid'>{''.join(cards)}</div>"
+        f"</div>"
+    )
+
+
 def _render_symbol_section(
     symbol: str,
     audit: dict[str, Any],
     *,
     target: dict[str, Any] | None,
     ctx: dict[str, Any],
+    open_default: bool = False,
 ) -> str:
     name = ctx.get("name") or symbol
     advice = audit.get("near_term_advice") or (target or {}).get("advice")
@@ -301,19 +395,20 @@ def _render_symbol_section(
             f"</p>"
         )
     badge = _action_badge(str(advice))
+    open_attr = " open" if open_default else ""
     return f"""
-<details class="rounded-lg border border-gray-200 bg-gray-50/80 group">
-  <summary class="cursor-pointer list-none p-3 flex flex-wrap items-center justify-between gap-2 marker:content-none">
-    <div>
-      <h4 class="text-sm font-semibold text-gray-900 inline">{_esc(symbol)} · {_esc(name)}</h4>
-      <span class="text-[10px] text-gray-400 ml-2 group-open:hidden">点击展开</span>
+<details class="t2-symbol-card group"{open_attr}>
+  <summary class="t2-symbol-summary">
+    <div class="t2-symbol-head">
+      <h4 class="t2-symbol-title">{_esc(symbol)} · {_esc(name)}</h4>
+      <span class="t2-symbol-hint group-open:hidden">点击展开详情</span>
       {pos_line}
     </div>
-    <span class="text-xs font-medium px-2.5 py-1 rounded-full {_esc(badge)}">
+    <span class="t2-symbol-badge {_esc(badge)}">
       {_esc(_action_label(str(advice)))}{(' · ' + _esc(pct)) if pct else ''}
     </span>
   </summary>
-  <div class="px-3 pb-3 pt-0 border-t border-gray-200/60">
+  <div class="t2-symbol-body">
     {_para(rationale, label="建议理由：")}
     {_para(honesty, label="持仓诚实（加仓/维持/减仓 · 剩余资金）：")}
     {_para(cross, label="JL1–JL4 交叉验证：")}
@@ -326,6 +421,7 @@ def _render_symbol_section(
       <p class="text-[11px] font-medium text-gray-500 mb-1">JL4 读数摘要（本地 T1）</p>
       {_jl4_summary(audit.get("jl4_read") or [])}
     </div>
+    {_render_radar_nine_dimensions_block(audit.get("radar_nine_dimensions"))}
   </div>
 </details>
 """
@@ -355,21 +451,55 @@ def _render_portfolio_section(audit: dict[str, Any], payload: dict[str, Any]) ->
     cost_s = f"¥{float(cost):.4f}" if cost is not None else "—"
     ctx_map = _t1_context(payload)
 
+    summary = (cmd.get("one_sentence_summary") or "").strip()
+    stop = (cmd.get("stop_loss_line") or "").strip()
+    cross = (reasoning.get("cross_validation_logic") or "").strip()
+    conflicts = (reasoning.get("signal_conflicts") or "").strip()
+    l3_block = _render_verdict_by_symbol(
+        daily.get("L3_Fundamental_Verdict"), label="L3 基本面", ctx_map=ctx_map
+    )
+    l4_block = _render_verdict_by_symbol(
+        daily.get("L4_Microstructure_Verdict"), label="L4 资金博弈", ctx_map=ctx_map
+    )
+    targets_block = _render_target_chips(cmd)
+    extra_sections: list[str] = []
+    if stop:
+        extra_sections.append(
+            f"<section class='t2-reply-section t2-reply-section--stop'>"
+            f"<h4 class='t2-reply-section-title'>止盈止损</h4>"
+            f"<p class='t2-reply-section-body'>{_esc(stop)}</p></section>"
+        )
+    if cross:
+        extra_sections.append(
+            f"<section class='t2-reply-section'>"
+            f"<h4 class='t2-reply-section-title'>推理链</h4>"
+            f"<p class='t2-reply-section-body'>{_esc(cross)}</p></section>"
+        )
+    if conflicts:
+        extra_sections.append(
+            f"<section class='t2-reply-section t2-reply-section--warn'>"
+            f"<h4 class='t2-reply-section-title'>信号冲突</h4>"
+            f"<p class='t2-reply-section-body'>{_esc(conflicts)}</p></section>"
+        )
+
     return f"""
-<section class="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 mb-3">
-  <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-    <h3 class="text-sm font-semibold text-emerald-900">组合结论</h3>
-    <span class="text-xs font-semibold px-2.5 py-1 rounded-full {_esc(_action_badge(str(action)))}">
+<section class="t2-reply-portfolio">
+  <div class="t2-reply-hero">
+    <div class="t2-reply-hero-text">
+      <span class="t2-reply-hero-label">组合结论</span>
+      <p class="t2-reply-summary">{_esc(summary) or '—'}</p>
+    </div>
+    <span class="t2-reply-action-badge {_esc(_action_badge(str(action)))}">
       {_esc(_action_label(str(action)))}
     </span>
   </div>
-  {_para(cmd.get("one_sentence_summary"), label="一句话：", cls="text-sm text-gray-800 font-medium leading-relaxed")}
-  {_render_verdict_by_symbol(daily.get("L3_Fundamental_Verdict"), label="L3 基本面", ctx_map=ctx_map)}
-  {_render_verdict_by_symbol(daily.get("L4_Microstructure_Verdict"), label="L4 资金博弈", ctx_map=ctx_map)}
-  {_para(cmd.get("stop_loss_line"), label="止盈止损界碑：")}
-  {_para(reasoning.get("cross_validation_logic"), label="JL1–JL4 组合推理链：")}
-  {_para(reasoning.get("signal_conflicts"), label="信号冲突：")}
-  <p class="text-[10px] text-gray-400 mt-2 pt-2 border-t border-emerald-100">
+  <div class="t2-reply-sections">
+    {l3_block}
+    {l4_block}
+    {''.join(extra_sections)}
+    {f'<section class="t2-reply-section t2-reply-section--targets"><h4 class="t2-reply-section-title">逐标的</h4>{targets_block}</section>' if targets_block else ''}
+  </div>
+  <p class="t2-reply-meta">
     模型 {_esc(meta.get('model') or payload.get('model_id') or '—')} · {cost_s} ·
     入{_esc(meta.get('tokens_in', 0))}/出{_esc(meta.get('tokens_out', 0))}/
     {_esc(meta.get('max_output_tokens') or (payload.get('token_limits') or {}).get('max_output_tokens') or '—')} tok
@@ -377,6 +507,14 @@ def _render_portfolio_section(audit: dict[str, Any], payload: dict[str, Any]) ->
   {_render_truncation_warning(meta, payload)}
 </section>
 """
+
+
+def _render_compact_reply(payload: dict[str, Any]) -> str:
+    """轻量分区排版（未勾选九维时的对话区）。"""
+    audit = structured_audit_from_payload(payload)
+    if not audit.get("Execution_Command") and not audit.get("symbol_audits"):
+        return ""
+    return _render_portfolio_section(audit, payload)
 
 
 def _render_error_section(payload: dict[str, Any], meta: dict[str, Any]) -> str:
@@ -524,6 +662,26 @@ def extract_t2_prose_text(payload: dict[str, Any]) -> str:
     return "\n\n".join(parts).strip()
 
 
+def _payload_has_radar_nine_dimensions(payload: dict[str, Any]) -> bool:
+    if payload.get("include_radar_nine_dim"):
+        return True
+    audit = structured_audit_from_payload(payload)
+    for sym_audit in (audit.get("symbol_audits") or {}).values():
+        if not isinstance(sym_audit, dict):
+            continue
+        radar = sym_audit.get("radar_nine_dimensions")
+        if isinstance(radar, dict) and (radar.get("dimensions") or {}):
+            return True
+    return False
+
+
+def render_t2_chat_reply(payload: dict[str, Any], meta: dict[str, Any] | None = None) -> str:
+    """Opus 对话区主渲染：勾选九维或已有九维 JSON 时用结构化卡片，否则 prose。"""
+    if _payload_has_radar_nine_dimensions(payload):
+        return render_t2_assistant_card(payload, meta)
+    return render_t2_chat_prose(payload, meta)
+
+
 def render_t2_chat_prose(payload: dict[str, Any], meta: dict[str, Any] | None = None) -> str:
     """Opus 分析区 · 仅展示模型中文回复（JSON / 审计详情见 /audit）。"""
     meta = meta or {}
@@ -543,12 +701,14 @@ def render_t2_chat_prose(payload: dict[str, Any], meta: dict[str, Any] | None = 
     )
 
     if api_ok:
+        compact = _render_compact_reply(payload)
+        if compact:
+            return f"<div class='t2-analyst-result t2-analyst-result--compact'>{compact}</div>"
         prose = extract_t2_prose_text(payload)
         if prose:
             return (
-                f"<div class='t2-analyst-result'>"
-                f"<div class='text-sm text-gray-800 leading-relaxed whitespace-pre-wrap'>"
-                f"{_esc(prose)}</div></div>"
+                f"<div class='t2-analyst-result t2-analyst-result--compact'>"
+                f"<div class='t2-reply-fallback prose'>{_esc(prose)}</div></div>"
             )
 
     if truncated and payload.get("api_connected"):
@@ -560,6 +720,18 @@ def render_t2_chat_prose(payload: dict[str, Any], meta: dict[str, Any] | None = 
             "请减少标的数量或缩短问题后重试；完整原始输出可在审计页查看。</p></div>"
         )
     if parse_failed:
+        prose = extract_t2_prose_text(payload)
+        if prose:
+            return (
+                f"<div class='t2-analyst-result'>"
+                f"<div class='mb-2 rounded-lg border border-amber-200 bg-amber-50/80 "
+                f"p-2 text-xs text-amber-900'>"
+                f"<p class='font-medium mb-0.5'>JSON 未完整闭合，已尽力展示正文</p>"
+                f"<p class='leading-relaxed'>建议减少标的数量后重试以获取可同步执行区的结构化结论；"
+                f"完整原始输出见审计页。</p></div>"
+                f"<div class='text-sm text-gray-800 leading-relaxed whitespace-pre-wrap'>"
+                f"{_esc(prose)}</div></div>"
+            )
         return (
             "<div class='t2-analyst-result rounded-lg border border-amber-200 bg-amber-50/80 "
             "p-3 text-sm text-amber-900'>"
@@ -648,8 +820,8 @@ def render_opus_assistant_bubble(
         f"<circle cx='19' cy='12' r='2'/></svg></summary>"
         f"<div class='opus-msg-menu-panel' role='menu'>{pin_btn}{audit}{copy_btn}{exec_link}</div>"
         f"</details></div>"
-        f"<div class='rounded-2xl rounded-tl-sm bg-white border border-violet-100 px-4 py-3 "
-        f"text-sm text-gray-800 leading-relaxed shadow-sm opus-assistant-body'>{card_html}</div>"
+        f"<div class='rounded-2xl rounded-tl-sm bg-white border border-violet-100 "
+        f"shadow-sm opus-assistant-body t2-assistant-body'>{card_html}</div>"
         f"<p class='opus-pin-toast hidden text-[11px] text-emerald-700 mt-1 pr-1 text-right'></p>"
         f"</div>"
     )
@@ -682,18 +854,16 @@ def render_t2_assistant_card(payload: dict[str, Any], meta: dict[str, Any] | Non
         ctx_map = _t1_context(payload)
         symbols = _ordered_symbols(payload, audits)
         if symbols:
-            parts.append(
-                "<div class='space-y-2 mb-2'>"
-                "<h3 class='text-xs font-semibold text-gray-500 uppercase tracking-wide'>"
-                "逐标的建议</h3>"
-            )
-            for sym in symbols:
+            parts.append("<div class='t2-symbol-list'>")
+            parts.append("<h3 class='t2-symbol-list-title'>逐标的详情</h3>")
+            for i, sym in enumerate(symbols):
                 parts.append(
                     _render_symbol_section(
                         sym,
                         audits.get(sym) or {},
                         target=targets.get(sym),
                         ctx=ctx_map.get(sym, {}),
+                        open_default=(i == 0),
                     )
                 )
             parts.append("</div>")
@@ -716,4 +886,7 @@ def render_t2_assistant_card(payload: dict[str, Any], meta: dict[str, Any] | Non
             f"</p>"
         )
 
-    return f"<div class='t2-analyst-result space-y-1'>{''.join(parts)}{footer}</div>"
+    return (
+        f"<div class='t2-analyst-result t2-analyst-result--structured'>"
+        f"{''.join(parts)}{footer}</div>"
+    )

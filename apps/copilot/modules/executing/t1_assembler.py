@@ -30,7 +30,7 @@ from apps.copilot.modules.executing.probe_registry import (
     OPTIONAL_SILENT_PROBE_KEYS,
     collect_t1_live_for_key,
 )
-from apps.copilot.modules.executing.l3_probe_registry import collect_t1_live_l3_for_key
+from apps.copilot.modules.executing.l3_probe_registry import L3_PROBE_REGISTRY, collect_t1_live_l3_for_key
 from apps.copilot.modules.executing.probes._base import T1LiveContext
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ async def _gather_stock_indicators(
     degraded: list[str] = []
     sym = symbol.zfill(6)[-6:]
     prof = load_profile(sym)
-    l3_keys = profile_l3_keys(prof)
+    l3_keys = tuple(k for k in profile_l3_keys(prof) if k in L3_PROBE_REGISTRY)
     ctx = T1LiveContext(
         session=session,
         symbol=sym,
@@ -92,12 +92,11 @@ async def _gather_stock_indicators(
         ind_key, node = result
         indicators[ind_key] = node
 
-    for probe_key in l3_keys + list(PROBE_KEYS):
+    for probe_key in (*l3_keys, *PROBE_KEYS):
         if probe_key not in indicators and probe_key not in OPTIONAL_SILENT_PROBE_KEYS:
             degraded.append(_degraded_line(probe_key, raw_by_key.get(probe_key)))
 
     return indicators, degraded
-
 
 async def load_cached_stock_signal(
     session: AsyncSession,

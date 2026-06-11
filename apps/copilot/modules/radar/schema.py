@@ -135,7 +135,8 @@ def _schema_hint_for_keys(dim_keys: list[str]) -> str:
     return "\n".join(lines)
 
 
-def _format_dimension_brief(layout: dict[str, Any]) -> str:
+def format_dimension_brief(layout: dict[str, Any]) -> str:
+    """格式化 display_layout 维度列表（供 Prompt / Opus T2 注入）。"""
     from apps.copilot.modules.radar.display_layout import ordered_display_metas
 
     lines: list[str] = []
@@ -147,6 +148,15 @@ def _format_dimension_brief(layout: dict[str, Any]) -> str:
             + (f"：{guide}" if guide else "")
         )
     return "\n".join(lines) if lines else "（使用内置九维主题）"
+
+
+def schema_hint_for_keys(dim_keys: list[str]) -> str:
+    """Opus 输出 JSON schema 提示（按维度 key 列表）。"""
+    return _schema_hint_for_keys(dim_keys)
+
+
+def _format_dimension_brief(layout: dict[str, Any]) -> str:
+    return format_dimension_brief(layout)
 
 
 _SYSTEM_T2_FREEFORM = (

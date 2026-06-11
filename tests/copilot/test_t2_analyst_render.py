@@ -5,6 +5,7 @@ from apps.copilot.modules.executing.t2_analyst_render import (
     extract_t2_prose_text,
     render_t2_assistant_card,
     render_t2_chat_prose,
+    render_t2_chat_reply,
 )
 
 
@@ -87,11 +88,41 @@ def _sample_payload_ok() -> dict:
 def test_render_chat_prose_simple():
     html = render_t2_chat_prose(_sample_payload_ok(), {"status": "ok"})
     assert "t2-analyst-result" in html
+    assert "t2-reply-portfolio" in html
     assert "英维克优先减仓" in html
-    assert "【基本面】" in html
-    assert "组合结论" not in html
+    assert "L3 基本面" in html
+    assert "t2-target-chip" in html
     assert "JL1 宏观" not in html
     assert "<details" not in html
+
+
+def test_render_chat_reply_uses_card_when_nine_dim_enabled():
+    payload = {
+        **_sample_payload_ok(),
+        "include_radar_nine_dim": True,
+        "opus_audit": {
+            **_sample_payload_ok()["opus_audit"],
+            "symbol_audits": {
+                "300502.SZ": {
+                    "near_term_advice": "watch",
+                    "radar_nine_dimensions": {
+                        "overall": {"conclusion": "观察"},
+                        "dimensions": {
+                            "moat": {
+                                "verdict": "强",
+                                "reasoning": "光模块龙头",
+                                "confidence": 0.8,
+                            }
+                        },
+                    },
+                }
+            },
+        },
+    }
+    html = render_t2_chat_reply(payload, {"status": "ok", "request_id": "abc123"})
+    assert "雷达九维研报" in html
+    assert "组合结论" in html
+    assert "逐标的详情" in html
 
 
 def test_extract_t2_prose_text():
@@ -103,7 +134,8 @@ def test_extract_t2_prose_text():
 def test_render_success_three_symbols():
     html = render_t2_assistant_card(_sample_payload_ok(), {"status": "ok", "request_id": "abc123"})
     assert "组合结论" in html
-    assert "逐标的建议" in html
+    assert "逐标的详情" in html
+    assert "t2-symbol-card" in html
     assert "601138.SH" in html
     assert "002837.SZ" in html
     assert "300502.SZ" in html
@@ -113,7 +145,7 @@ def test_render_success_three_symbols():
     assert "按标的分段" in html
     assert "T1 浮盈" in html
     assert "T1 浮亏" in html
-    assert "非组合加总" in html
+    assert "按标的分段" in html
     assert "JL1 宏观" in html
     assert "JL3 微观靶向" in html
     assert "持仓诚实（加仓/维持/减仓" in html

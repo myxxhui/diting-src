@@ -676,15 +676,18 @@ def collect_l3_daily(symbol: str) -> list[dict[str, Any]]:
 
     titles, news_source = _fetch_titles(symbol)
 
-    if titles:
-        out.append(
-            _headline_probe(
-                titles,
-                "gb200_iteration_node",
-                ("GB200", "工业富联", "NVL", "量产", "服务器", "AI", "数据中心"),
-                news_source,
+    sym = symbol.zfill(6)[-6:]
+    if sym == "601138":
+        try:
+            from apps.copilot.modules.executing.l3.fii_gb200_milestone.t0_collect import (
+                collect_fii_gb200_milestone_t0,
             )
-        )
+
+            out.append(collect_fii_gb200_milestone_t0(sym))
+        except Exception as exc:  # noqa: BLE001
+            out.append(_block("fii_gb200_milestone", str(exc)[:200]))
+
+    if titles:
         sell_titles = [t for t in titles if "减持" in t]
         if sell_titles:
             out.append(
@@ -697,7 +700,6 @@ def collect_l3_daily(symbol: str) -> list[dict[str, Any]]:
         else:
             out.append(_collect_insider_sell_actual(symbol))
     else:
-        out.append(_block_typed("gb200_iteration_node", "B", "标的公告+快讯均为空"))
         out.append(_block_typed("insider_sell_actual", "B", "标的公告+快讯均为空 · 见 l4-insider-sell-eod"))
 
     out.append(_collect_mgmt_and_core_team(symbol))
@@ -818,12 +820,50 @@ def collect_qmt_atr_t0(
     return out
 
 
+def collect_profile_l3_t0(symbol: str) -> list[dict[str, Any]]:
+    """Profile 已注册 JL3 探针 T0 · 供 daily-run / collect-once 写入 PG。"""
+    from apps.copilot.modules.executing.l3_probe_registry import L3_PROBE_REGISTRY
+    from apps.copilot.modules.executing.profile import load_profile, profile_l3_keys
+
+    sym = symbol.zfill(6)[-6:]
+    prof = load_profile(sym)
+    out: list[dict[str, Any]] = []
+    for key in profile_l3_keys(prof):
+        if key not in L3_PROBE_REGISTRY:
+            continue
+        try:
+            if key == "fii_twse_cloud":
+                from apps.copilot.modules.executing.l3.fii_twse_cloud.t0_collect import (
+                    collect_fii_twse_cloud_t0,
+                )
+
+                twse = str(prof.get("honhai_twse_code") or "2317.TW")
+                out.append(collect_fii_twse_cloud_t0(twse_code=twse))
+            elif key == "fii_odm_direct_ratio":
+                from apps.copilot.modules.executing.l3.fii_odm_direct_ratio.t0_collect import (
+                    collect_fii_odm_direct_ratio_t0,
+                )
+
+                out.append(collect_fii_odm_direct_ratio_t0(sym))
+            elif key == "fii_gb200_milestone":
+                from apps.copilot.modules.executing.l3.fii_gb200_milestone.t0_collect import (
+                    collect_fii_gb200_milestone_t0,
+                )
+
+                out.append(collect_fii_gb200_milestone_t0(sym))
+        except Exception as exc:  # noqa: BLE001
+            out.append(_block(key, str(exc)[:200]))
+    return out
+
+
 def collect_all_t0(
     symbol: str,
     *,
     daily_bar_rows: list[Any] | None = None,
     entry_date: Any = None,
 ) -> list[dict[str, Any]]:
-    return collect_qmt_atr_t0(
+    out = collect_qmt_atr_t0(
         symbol, daily_bar_rows=daily_bar_rows, entry_date=entry_date
     )
+    out.extend(collect_profile_l3_t0(symbol))
+    return out

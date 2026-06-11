@@ -128,6 +128,22 @@ def _probe_node_from_raw(key: str, raw: dict[str, Any] | None) -> dict[str, Any]
             if events
             else f"巨潮已扫{payload.get('titles_scanned', '?')}条·无董监高事件",
         )
+    if key == "fii_gb200_milestone":
+        if raw and raw.get("ok"):
+            from apps.copilot.modules.executing.l3.fii_gb200_milestone.indicator_node import (
+                build_fii_gb200_milestone_node,
+            )
+
+            payload = raw.get("payload") or {}
+            if payload.get("official_announcement_text"):
+                try:
+                    return build_fii_gb200_milestone_node(
+                        payload,
+                        source=raw.get("source") or "",
+                    )
+                except Exception:
+                    pass
+        return None
     if key in ("gb200_iteration_node", "insider_sell_actual"):
         headlines = payload.get("matched_headlines") or []
         if not headlines and not payload.get("value"):

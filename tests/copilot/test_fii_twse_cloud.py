@@ -43,7 +43,7 @@ SAMPLE_T0 = {
 
 
 def test_l3_keys_and_registry_aligned():
-    assert PK_L3 == ("fii_twse_cloud", "fii_odm_direct_ratio")
+    assert PK_L3 == ("fii_twse_cloud", "fii_odm_direct_ratio", "fii_gb200_milestone")
     assert set(L3_PROBE_REGISTRY) == set(L3_KEYS)
 
 

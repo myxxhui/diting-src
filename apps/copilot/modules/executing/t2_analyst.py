@@ -19,6 +19,7 @@ from apps.copilot.modules.executing.t2_preexec_envelope import (
     build_executing_opus_messages,
     build_t2_preexec_envelope,
 )
+from apps.copilot.modules.executing.t2_radar_nine_dim import inject_radar_nine_dim_into_envelope
 from apps.copilot.modules.executing.t2_token_limits import (
     inject_t2_output_budget,
     token_limits_summary,
@@ -400,6 +401,7 @@ async def assemble_t2_analyst_payload(
     include_t1_jl4: bool,
     jl13_data_prompt: str = "",
     include_jl13_data: bool = True,
+    include_radar_nine_dim: bool = False,
     redis_client: Any = None,
 ) -> dict[str, Any]:
     """组装 T2 预执行 envelope 与 Opus messages。"""
@@ -412,6 +414,9 @@ async def assemble_t2_analyst_payload(
         t1 = strip_jl4_from_t1(t1)
 
     envelope = build_t2_preexec_envelope(t1)
+    envelope = inject_radar_nine_dim_into_envelope(
+        envelope, enabled=include_radar_nine_dim
+    )
     messages = build_executing_opus_messages(envelope)
     inject_t2_output_budget(envelope, messages, symbol_count=len(syms))
     resolved_model = resolve_chat_model(model_id)
@@ -426,6 +431,7 @@ async def assemble_t2_analyst_payload(
     user_body["model_id"] = resolved_model
     user_body["include_t1_jl4"] = include_t1_jl4
     user_body["include_jl13_data"] = include_jl13_data
+    user_body["include_radar_nine_dim"] = include_radar_nine_dim
     user_body["jl13_data_prompt"] = (jl13_data_prompt or "").strip() or None
     user_body["user_question"] = composed_question
     messages[1]["content"] = json.dumps(user_body, ensure_ascii=False)
@@ -459,6 +465,7 @@ async def assemble_t2_analyst_payload(
         "user_question": composed_question,
         "jl13_data_prompt": user_body.get("jl13_data_prompt"),
         "include_jl13_data": include_jl13_data,
+        "include_radar_nine_dim": include_radar_nine_dim,
         "symbols": list((t1.get("portfolio_signals") or {}).keys()),
         "jl4_indicator_counts": jl4_counts,
         "envelope": envelope,
@@ -469,7 +476,7 @@ async def assemble_t2_analyst_payload(
 
 
 def _parse_opus_audit_json(text: str) -> dict[str, Any]:
-    """解析 Opus T2 输出 JSON；容忍 ``` 围栏与末尾多余字符。"""
+    """解析 Opus T2 输出 JSON；容忍 ``` 围栏、末尾多余字符与缺失闭合括号。"""
     cleaned = (text or "").strip()
     if not cleaned:
         return {"raw_text": ""}
@@ -493,17 +500,35 @@ def _parse_opus_audit_json(text: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
+    chunk = cleaned[start:]
     end = cleaned.rfind("}") + 1
     if end > start:
-        chunk = cleaned[start:end]
+        slice_chunk = cleaned[start:end]
         try:
-            return json.loads(chunk)
+            obj = json.loads(slice_chunk)
+            if isinstance(obj, dict):
+                return obj
         except json.JSONDecodeError:
-            for trim in range(1, 6):
+            for trim in range(1, 16):
                 try:
-                    return json.loads(chunk[:-trim])
+                    obj = json.loads(slice_chunk[:-trim])
+                    if isinstance(obj, dict):
+                        return obj
                 except json.JSONDecodeError:
                     continue
+
+    # Opus 偶发 stop_reason=end_turn 但 JSON 未闭合（缺 } 或 ]）
+    brace_gap = chunk.count("{") - chunk.count("}")
+    bracket_gap = chunk.count("[") - chunk.count("]")
+    if brace_gap > 0 or bracket_gap > 0:
+        suffix = ("]" * max(0, bracket_gap)) + ("}" * max(0, brace_gap))
+        for extra in range(0, 8):
+            try:
+                obj = json.loads(chunk + suffix + ("}" * extra))
+                if isinstance(obj, dict):
+                    return obj
+            except json.JSONDecodeError:
+                continue
     return {"raw_text": text[:4000]}
 
 
@@ -650,6 +675,7 @@ async def analyst_chat_turn(
     include_t1_jl4: bool,
     jl13_data_prompt: str = "",
     include_jl13_data: bool = True,
+    include_radar_nine_dim: bool = False,
     redis_client: Any = None,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
@@ -672,6 +698,7 @@ async def analyst_chat_turn(
         include_t1_jl4=include_t1_jl4,
         jl13_data_prompt=jl13_data_prompt,
         include_jl13_data=include_jl13_data,
+        include_radar_nine_dim=include_radar_nine_dim,
         redis_client=redis_client,
     )
 
@@ -729,9 +756,9 @@ async def analyst_chat_turn(
         "status": status,
         "error": opus_error,
     }
-    from apps.copilot.modules.executing.t2_analyst_render import render_t2_chat_prose
+    from apps.copilot.modules.executing.t2_analyst_render import render_t2_chat_reply
 
-    payload["assistant_render_html"] = render_t2_chat_prose(payload, assistant_meta)
+    payload["assistant_render_html"] = render_t2_chat_reply(payload, assistant_meta)
 
     if progress_cb:
         progress_cb("persist", 92, "写入审计与会话历史…")
@@ -791,6 +818,7 @@ async def run_t2_analyst_job(
     include_t1_jl4: bool,
     jl13_data_prompt: str,
     include_jl13_data: bool,
+    include_radar_nine_dim: bool,
     redis_client: Any,
 ) -> None:
     """后台执行 T2 分析（独立 DB 会话 · Redis 进度供 HTMX 轮询）。"""
@@ -813,6 +841,7 @@ async def run_t2_analyst_job(
                 include_t1_jl4=include_t1_jl4,
                 jl13_data_prompt=jl13_data_prompt,
                 include_jl13_data=include_jl13_data,
+                include_radar_nine_dim=include_radar_nine_dim,
                 redis_client=redis_client,
                 progress_cb=cb,
             )

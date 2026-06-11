@@ -23,7 +23,11 @@ OPTIONAL_EVENT_PROBE_KEYS: frozenset[str] = frozenset(
     {"block_trade_discount", "etf_redemption_impact"}
 )
 
-L3_KEYS: tuple[str, ...] = ("fii_twse_cloud", "fii_odm_direct_ratio")
+L3_KEYS: tuple[str, ...] = (
+    "fii_twse_cloud",
+    "fii_odm_direct_ratio",
+    "fii_gb200_milestone",
+)
 L4_KEYS: tuple[str, ...] = PROBE_KEYS
 
 # JL4 持仓依赖：仅 #1 须 user_positions.opened_at（峰值窗）；其余 #2~#11 待建仓即可采集跟踪

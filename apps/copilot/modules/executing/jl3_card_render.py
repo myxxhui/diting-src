@@ -700,6 +700,12 @@ def render_jl3_probe_card(
         )
 
         cs = refresh_card_strategy_for_node(node)
+    elif probe_key == "fii_gb200_milestone":
+        from apps.copilot.modules.executing.l3.fii_gb200_milestone.card_strategy import (
+            refresh_card_strategy_for_node,
+        )
+
+        cs = refresh_card_strategy_for_node(node)
     value_color, status_ok = jl3_value_color_from_signal(cs)
     header_extra = ""
     header_corner = ""
@@ -712,6 +718,14 @@ def render_jl3_probe_card(
         alert_html = render_fii_twse_cloud_body(node)
     elif probe_key == "fii_odm_direct_ratio":
         alert_html = render_fii_odm_direct_ratio_body(node)
+    elif probe_key == "fii_gb200_milestone":
+        from apps.copilot.modules.executing.l3.fii_gb200_milestone.card_strategy import (
+            refresh_card_strategy_for_node,
+            render_gb200_milestone_body,
+        )
+
+        cs = refresh_card_strategy_for_node(node)
+        alert_html = render_gb200_milestone_body(node)
     else:
         alert_html = render_jl3_strategy_collapsible(cs, probe_key=probe_key)
 
@@ -722,15 +736,29 @@ def render_jl3_probe_card(
         sub = str(rm["report_period"])
 
     rpc = _get_render_probe_card()
-    fii_kw = (
-        {
+    fii_kw: dict[str, Any] = {}
+    metric_items: list[tuple[str, Any]] = []
+    if probe_key in ("fii_twse_cloud", "fii_odm_direct_ratio"):
+        fii_kw = {
             "show_source_footer": False,
             "show_fact_block": False,
             "show_formula_block": False,
         }
-        if probe_key in ("fii_twse_cloud", "fii_odm_direct_ratio")
-        else {}
-    )
+    elif probe_key == "fii_gb200_milestone":
+        contract = node.get("t1_json") if isinstance(node.get("t1_json"), dict) else {}
+        dc = contract.get("deepsea_contract") if isinstance(contract.get("deepsea_contract"), dict) else {}
+        sm = contract.get("state_machine") if isinstance(contract.get("state_machine"), dict) else {}
+        sv = contract.get("shadow_validation") if isinstance(contract.get("shadow_validation"), dict) else {}
+        metric_items = [
+            ("NPI", sm.get("current_stage_label") or sm.get("current_stage") or "未识别"),
+            ("动量", dc.get("momentum_delta") or contract.get("momentum_delta")),
+            ("侧翼验真", "PASS" if sv.get("passed") else "待验"),
+        ]
+        fii_kw = {
+            "show_source_footer": True,
+            "show_fact_block": True,
+            "show_formula_block": False,
+        }
     return rpc(
         probe_key=probe_key,
         title=node.get("indicator_name") or probe_indicator_name(probe_key),
@@ -744,10 +772,11 @@ def render_jl3_probe_card(
         fact_statement=str(node.get("fact_statement") or ""),
         calculation_logic=str(node.get("calculation_logic") or ""),
         source=str(node.get("source") or ""),
-        metric_items=[],
+        metric_items=metric_items,
         alert_html=alert_html,
         t1_json=t1_json,
         status_ok=status_ok,
+        layer_badge="",
         **fii_kw,
     )
 

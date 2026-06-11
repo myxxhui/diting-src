@@ -83,6 +83,30 @@ def test_default_prompt_template():
 
 
 @pytest.mark.asyncio
+async def test_assemble_t2_analyst_payload_with_radar_nine_dim(db_ready):
+    session = AsyncMock()
+    with patch(
+        "apps.copilot.modules.executing.t2_analyst.assemble_batch_portfolio",
+        new_callable=AsyncMock,
+        return_value=_sample_t1(),
+    ):
+        payload = await assemble_t2_analyst_payload(
+            session,
+            ["601138"],
+            user_question="组合风险？",
+            model_id="claude-opus-4-6",
+            include_t1_jl4=True,
+            include_radar_nine_dim=True,
+            redis_client=None,
+        )
+    assert payload.get("include_radar_nine_dim") is True
+    env = payload["envelope"]
+    assert env["radar_nine_dim"]["enabled"] is True
+    audit = env["output_contract"]["example"]["symbol_audits"]["601138.SH"]
+    assert "radar_nine_dimensions" in audit
+
+
+@pytest.mark.asyncio
 async def test_assemble_t2_analyst_payload(db_ready):
     session = AsyncMock()
     with patch(

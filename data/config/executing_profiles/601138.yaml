@@ -37,7 +37,7 @@ l3_probes:
     fusion: "旧gb200_iteration_node"
     reading_class: "制造节点"
     cadence: dynamic
-    stale_days: 14
+    stale_days: 90
   fii_gb200_yield:
     label: "GB200良率"
     fusion: "新纯增"

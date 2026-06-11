@@ -364,6 +364,14 @@
       }
     });
 
+    document.body.addEventListener('htmx:responseError', function (ev) {
+      var t = ev.detail && ev.detail.target;
+      if (!t) return;
+      if (t.id === 'opus-t2-panel-slot' || t.id === 't2-analyst-messages') {
+        window._t2AnalystBootRunning = false;
+      }
+    });
+
     document.body.addEventListener('htmx:afterSwap', function (ev) {
       var t = ev.detail && ev.detail.target;
       if (!t || t.id !== 't2-analyst-messages') return;

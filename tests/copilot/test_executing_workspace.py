@@ -86,7 +86,9 @@ def test_probe_labels_chinese_short():
     from apps.copilot.modules.executing.probe_labels import PROBE_LABELS, probe_label
 
     assert probe_label("qmt_atr_trailing") == "ATR止盈"
-    assert len(PROBE_LABELS) == 25
+    assert probe_label("nev_net_margin") == "整体净利率"
+    assert probe_label("r_nev_meta_delay") == "Meta 订单推迟"
+    assert len(PROBE_LABELS) == 66
 
 
 def test_layer_b_collect_gate_banner_no_mock():
