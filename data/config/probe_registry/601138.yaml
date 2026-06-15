@@ -1,5 +1,6 @@
 # Probe 实现注册表 · 601138 工业富联
 # [Ref: 28_ §2.13] — Cursor/CI 实现路由的机器真相源；优先于 Markdown 表格
+# 主指标矩阵 20（§2.2.1）：进攻 A1-A10 · 防守 D1-D10（primary_matrix: true）
 # 读取顺序：本文件 → executing_profiles/601138.yaml（label/UI）→ 代码路由
 
 registry_version: "1.0"
@@ -22,6 +23,8 @@ l3_probes:
     t0_source_id: twse_2317_cloud_revenue
     cadence: monthly
     stale_days: 35
+    primary_matrix: true
+    matrix_slot: A6
 
   fii_odm_direct_ratio:
     signal_type: semantic
@@ -34,6 +37,8 @@ l3_probes:
     model_tier: flash
     cadence: dynamic
     stale_days: 90
+    primary_matrix: true
+    matrix_slot: A10
 
   fii_gb200_milestone:
     signal_type: semantic
@@ -56,6 +61,8 @@ l3_probes:
       - fii_liquid_attach
       - fii_ai_margin_tone
       - r_fii_gb200_flaw
+    primary_matrix: true
+    matrix_slot: A5
 
   fii_gb200_yield:
     signal_type: semantic
@@ -115,6 +122,8 @@ l3_probes:
     t0_source_id: cninfo_quarterly_pdf
     cadence: quarterly
     stale_days: 120
+    primary_matrix: true
+    matrix_slot: A8
 
   fii_inventory_turnover:
     signal_type: hard
@@ -137,6 +146,8 @@ l3_probes:
     t0_source_id: tushare_balance_sheet
     cadence: quarterly
     stale_days: 120
+    primary_matrix: true
+    matrix_slot: A7
 
   fii_quanta_share:
     signal_type: structured
@@ -148,6 +159,8 @@ l3_probes:
     t0_source_id: twse_2382_revenue
     cadence: monthly
     stale_days: 35
+    primary_matrix: true
+    matrix_slot: A9
 
   fii_copper_shfe:
     signal_type: hard
@@ -262,6 +275,64 @@ l3_probes:
     cadence: daily
     stale_days: 7
 
+  fii_order_momentum:
+    signal_type: hybrid
+    t1_pipeline: hybrid_merge
+    update_trigger: cron
+    batch_id: fii-earnings-q
+    cache_group: fii_order_momentum_q
+    job_id: l3-fii-financials-quarterly
+    t0_source_id: tushare_balance_sheet_plus_cninfo_inventory
+    cadence: quarterly
+    stale_days: 120
+    resonance_threshold_pct: 30
+    primary_matrix: true
+    matrix_slot: A1
+
+  fii_revenue_growth:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: fii-earnings-q
+    cache_group: fii_revenue_growth_q
+    job_id: l3-fii-financials-quarterly
+    t0_source_id: tushare_income_plus_twse_peer
+    cadence: quarterly
+    stale_days: 120
+    peer_codes: ["2382.TW", "3231.TW"]
+    primary_matrix: true
+    matrix_slot: A2
+
+  fii_ai_revenue_mix:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: fii-cninfo-dynamic
+    cache_group: fii-cninfo-dynamic
+    job_id: l3-fii-dynamic
+    t0_source_id: cninfo_announcement_feed
+    model_tier: flash
+    cadence: quarterly
+    stale_days: 120
+    primary_matrix: true
+    matrix_slot: A3
+
+  fii_nvl_rack_ship:
+    signal_type: semantic
+    t1_pipeline: deepsea_semantic
+    update_trigger: event_driven
+    batch_id: fii-cninfo-dynamic
+    cache_group: fii-cninfo-dynamic
+    job_id: l3-fii-dynamic
+    t0_source_id: cninfo_announcement_feed
+    model_tier: flash
+    cadence: dynamic
+    stale_days: 90
+    cohort_peers:
+      - fii_gb200_milestone
+    primary_matrix: true
+    matrix_slot: A4
+
   r_fii_gb200_flaw:
     signal_type: semantic
     t1_pipeline: deepsea_semantic
@@ -273,6 +344,27 @@ l3_probes:
     model_tier: pro_required
     cadence: dynamic
     stale_days: 90
+    primary_matrix: true
+    matrix_slot: D5
+
+  r_fii_ai_margin_crush:
+    signal_type: hybrid
+    t1_pipeline: hybrid_merge
+    update_trigger: event_driven
+    batch_id: fii-cninfo-dynamic
+    cache_group: fii-cninfo-dynamic
+    job_id: l3-fii-dynamic
+    t0_source_id: cninfo_announcement_feed
+    model_tier: flash
+    cadence: quarterly
+    stale_days: 120
+    red_flag_threshold:
+      ai_gross_margin_pct_max: 4
+    upstream_probe_keys:
+      - fii_ai_margin
+      - fii_gross_margin
+    primary_matrix: true
+    matrix_slot: D6
 
   r_fii_liquid_fail:
     signal_type: semantic
@@ -285,6 +377,8 @@ l3_probes:
     model_tier: pro_required
     cadence: dynamic
     stale_days: 14
+    primary_matrix: true
+    matrix_slot: D10
 
   r_fii_honhai_tunnel:
     signal_type: structured
@@ -296,6 +390,8 @@ l3_probes:
     t0_source_id: cninfo_quarterly_pdf
     cadence: quarterly
     stale_days: 120
+    primary_matrix: true
+    matrix_slot: D8
 
   r_fii_us_mexico_sanction:
     signal_type: semantic
@@ -308,6 +404,8 @@ l3_probes:
     model_tier: pro_required
     cadence: dynamic
     stale_days: 30
+    primary_matrix: true
+    matrix_slot: D9
 
   r_fii_inventory_write:
     signal_type: structured
@@ -319,6 +417,8 @@ l3_probes:
     t0_source_id: cninfo_semi_annual_pdf
     cadence: semi_annual
     stale_days: 200
+    primary_matrix: true
+    matrix_slot: D4
 
   r_fii_ar_cycle_bad:
     signal_type: hard
@@ -330,6 +430,53 @@ l3_probes:
     t0_source_id: tushare_balance_sheet
     cadence: quarterly
     stale_days: 120
+    primary_matrix: true
+    matrix_slot: D7
+
+  r_fii_order_shrink:
+    signal_type: hard
+    t1_pipeline: python_hard
+    update_trigger: cron
+    batch_id: fii-earnings-q
+    cache_group: tushare_balance_q
+    job_id: l3-fii-financials-quarterly
+    t0_source_id: tushare_balance_sheet
+    cadence: quarterly
+    stale_days: 120
+    red_flag_threshold:
+      contract_liab_qoq_pct_max: -10
+      consecutive_quarters: 2
+    primary_matrix: true
+    matrix_slot: D1
+
+  r_fii_milestone_stall:
+    signal_type: hybrid
+    t1_pipeline: hybrid_merge
+    update_trigger: event_driven
+    batch_id: fii-cninfo-dynamic
+    cache_group: fii-cninfo-dynamic
+    job_id: l3-fii-dynamic
+    t0_source_id: executing_t1_probe_snapshot
+    cadence: dynamic
+    stale_days: 90
+    upstream_probe_key: fii_gb200_milestone
+    stall_days: 90
+    primary_matrix: true
+    matrix_slot: D2
+
+  r_fii_ai_expect_miss:
+    signal_type: hybrid
+    t1_pipeline: hybrid_merge
+    update_trigger: cron
+    batch_id: fii-earnings-q
+    cache_group: fii_ai_expect_miss_q
+    job_id: l3-fii-financials-quarterly
+    t0_source_id: twse_cloud_plus_income_plus_jl2_capex
+    cadence: quarterly
+    stale_days: 120
+    min_deterioration_signals: 2
+    primary_matrix: true
+    matrix_slot: D3
 
 # JL4 · 全 Profile 共享；symbol 维度仍按本 registry 覆盖
 jl4_probes:
@@ -471,6 +618,10 @@ batch_groups:
       - fii_gb200_yield
       - fii_overseas_fdi
       - fii_network_switch
+      - fii_ai_revenue_mix
+      - fii_nvl_rack_ship
+      - r_fii_milestone_stall
+      - r_fii_ai_margin_crush
 
   fii-earnings-q:
     update_trigger: event_driven
@@ -498,6 +649,10 @@ batch_groups:
       - fii_contract_liab
       - fii_cfo_health
       - r_fii_ar_cycle_bad
+      - fii_revenue_growth
+      - fii_order_momentum
+      - r_fii_order_shrink
+      - r_fii_ai_expect_miss
 
   fii-risk-dynamic:
     update_trigger: event_driven

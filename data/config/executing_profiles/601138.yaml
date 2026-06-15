@@ -1,5 +1,5 @@
 # 执行中工作区 · 601138 工业富联
-# JL3 融合定稿 20 项（旧泛化14 × 新靶向14 · §2.1.1）+ JL4 11 = 31
+# JL3 主矩阵 20（§28 §2.2.1 进攻10+防守10）+ 扩展进攻15 + JL4 11 = 46
 # [Ref: 28_ §2.2]
 
 symbol: "601138"
@@ -7,7 +7,6 @@ name: "工业富联"
 profile: "601138"
 
 honhai_twse_code: "2317.TW"
-# 鸿海系对 601138 持股（来源：2025 年报 + 2025-12-31 前十大股东 · 卡片脚注同步）
 honhai_ownership:
   as_of: "2025-12-31"
   controller: "鸿海精密工业股份有限公司"
@@ -18,125 +17,244 @@ peer_quanta_code: "2382.TW"
 sector_index_code: "931071.CSI"
 sector_index_name: "中证人工智能"
 
-# 601138 JL3 · 融合定稿 20 项（非 14+14=28）
+primary_matrix_order:
+  - A1
+  - A2
+  - A3
+  - A4
+  - A5
+  - A6
+  - A7
+  - A8
+  - A9
+  - A10
+  - D1
+  - D2
+  - D3
+  - D4
+  - D5
+  - D6
+  - D7
+  - D8
+  - D9
+  - D10
+
 l3_probes:
+  # --- §2.2.1 进攻主矩阵 10 ---
+  fii_order_momentum:
+    label: "订单备料共振"
+    primary_matrix: true
+    matrix_slot: A1
+    reading_class: "订单前瞻"
+    cadence: quarterly
+    stale_days: 120
+  fii_revenue_growth:
+    label: "营收增速差"
+    primary_matrix: true
+    matrix_slot: A2
+    reading_class: "扩张动能"
+    cadence: quarterly
+    stale_days: 120
+  fii_ai_revenue_mix:
+    label: "AI营收占比"
+    primary_matrix: true
+    matrix_slot: A3
+    reading_class: "业务结构"
+    cadence: quarterly
+    stale_days: 120
+  fii_nvl_rack_ship:
+    label: "NVL机柜交付"
+    primary_matrix: true
+    matrix_slot: A4
+    reading_class: "制造节点"
+    cadence: dynamic
+    stale_days: 90
+  fii_gb200_milestone:
+    label: "GB200量产节点"
+    primary_matrix: true
+    matrix_slot: A5
+    reading_class: "制造节点"
+    cadence: dynamic
+    stale_days: 90
   fii_twse_cloud:
     label: "母公司云端营收"
-    fusion: "旧parent_honhai_revenue+新fii_twse_cloud"
+    primary_matrix: true
+    matrix_slot: A6
     reading_class: "生态传导"
+    cadence: monthly
+    stale_days: 35
+  fii_contract_liab:
+    label: "合同负债"
+    primary_matrix: true
+    matrix_slot: A7
+    reading_class: "订单前瞻"
+    cadence: quarterly
+    stale_days: 120
+  fii_raw_inventory:
+    label: "原材料备料"
+    primary_matrix: true
+    matrix_slot: A8
+    reading_class: "财务运营"
+    cadence: quarterly
+    stale_days: 120
+  fii_quanta_share:
+    label: "广达增速差"
+    primary_matrix: true
+    matrix_slot: A9
+    reading_class: "同业抢单"
     cadence: monthly
     stale_days: 35
   fii_odm_direct_ratio:
     label: "ODM直供占比"
-    fusion: "新纯增"
+    primary_matrix: true
+    matrix_slot: A10
     reading_class: "客户结构"
     cadence: quarterly
     stale_days: 120
-  fii_gb200_milestone:
-    label: "GB200量产节点"
-    fusion: "旧gb200_iteration_node"
-    reading_class: "制造节点"
+  # --- §2.2.1 防守主矩阵 10 ---
+  r_fii_order_shrink:
+    label: "订单前瞻缩量"
+    primary_matrix: true
+    matrix_slot: D1
+    reading_class: "订单萎缩"
+    cadence: quarterly
+    stale_days: 120
+  r_fii_milestone_stall:
+    label: "量产节点停滞"
+    primary_matrix: true
+    matrix_slot: D2
+    reading_class: "技术路线"
     cadence: dynamic
     stale_days: 90
+  r_fii_ai_expect_miss:
+    label: "AI生态不及预期"
+    primary_matrix: true
+    matrix_slot: D3
+    reading_class: "预期落空"
+    cadence: quarterly
+    stale_days: 120
+  r_fii_inventory_write:
+    label: "备料泡沫破裂"
+    primary_matrix: true
+    matrix_slot: D4
+    reading_class: "财务预警"
+    cadence: semi_annual
+    stale_days: 200
+  r_fii_gb200_flaw:
+    label: "GB200设计缺陷"
+    primary_matrix: true
+    matrix_slot: D5
+    reading_class: "技术路线"
+    cadence: dynamic
+    stale_days: 90
+  r_fii_ai_margin_crush:
+    label: "AI毛利击穿"
+    primary_matrix: true
+    matrix_slot: D6
+    reading_class: "盈利质量"
+    cadence: quarterly
+    stale_days: 120
+  r_fii_ar_cycle_bad:
+    label: "资金链承压"
+    primary_matrix: true
+    matrix_slot: D7
+    reading_class: "财务预警"
+    cadence: quarterly
+    stale_days: 120
+  r_fii_honhai_tunnel:
+    label: "母公司利益输送"
+    primary_matrix: true
+    matrix_slot: D8
+    reading_class: "治理风险"
+    cadence: quarterly
+    stale_days: 120
+  r_fii_us_mexico_sanction:
+    label: "美墨工厂审查"
+    primary_matrix: true
+    matrix_slot: D9
+    reading_class: "地缘政治"
+    cadence: dynamic
+    stale_days: 30
+  r_fii_liquid_fail:
+    label: "液冷漏液事故"
+    primary_matrix: true
+    matrix_slot: D10
+    reading_class: "供应链"
+    cadence: dynamic
+    stale_days: 14
+  # --- §2.2.2 进攻扩展 15 ---
   fii_gb200_yield:
     label: "GB200良率"
-    fusion: "新纯增"
     reading_class: "制造良率"
     cadence: dynamic
     stale_days: 14
-  fii_copper_shfe:
-    label: "沪铜成本"
-    fusion: "旧copper_cost_pressure+新fii_copper_shfe"
-    reading_class: "成本因子"
-    cadence: daily
-    stale_days: 1
-  fii_quanta_share:
-    label: "广达增速差"
-    fusion: "旧smci_quanta_share+新fii_quanta_share"
-    reading_class: "同业抢单"
-    cadence: monthly
-    stale_days: 35
-  fii_raw_inventory:
-    label: "原材料备料"
-    fusion: "新纯增"
-    reading_class: "财务运营"
-    cadence: quarterly
-    stale_days: 120
-  fii_inventory_turnover:
-    label: "存货周转"
-    fusion: "旧inventory_turnover"
-    reading_class: "财务运营"
-    cadence: quarterly
-    stale_days: 120
-  fii_contract_liab:
-    label: "合同负债"
-    fusion: "旧contract_liabilities"
-    reading_class: "订单前瞻"
-    cadence: quarterly
-    stale_days: 120
-  fii_gross_margin:
-    label: "整体毛利率"
-    fusion: "旧gross_margin_trend"
+  fii_liquid_attach:
+    label: "液冷渗透率"
     reading_class: "盈利质量"
     cadence: quarterly
     stale_days: 120
   fii_ai_margin:
     label: "AI服务器毛利"
-    fusion: "新纯增"
     reading_class: "盈利质量"
     cadence: quarterly
     stale_days: 120
-  fii_ar_turnover:
-    label: "应收周转"
-    fusion: "新纯增"
+  fii_gross_margin:
+    label: "整体毛利率"
+    reading_class: "盈利质量"
+    cadence: quarterly
+    stale_days: 120
+  fii_inventory_turnover:
+    label: "存货周转"
     reading_class: "财务运营"
     cadence: quarterly
     stale_days: 120
   fii_cfo_health:
     label: "经营现金流"
-    fusion: "新纯增"
+    reading_class: "财务运营"
+    cadence: quarterly
+    stale_days: 120
+  fii_overseas_fdi:
+    label: "海外建厂投资"
+    reading_class: "交付力"
+    cadence: dynamic
+    stale_days: 30
+  fii_network_switch:
+    label: "800G交换机"
+    reading_class: "产品渗透"
+    cadence: dynamic
+    stale_days: 14
+  fii_copper_shfe:
+    label: "沪铜成本"
+    reading_class: "成本因子"
+    cadence: daily
+    stale_days: 1
+  fii_exchange_rate:
+    label: "汇率影响"
+    reading_class: "成本因子"
+    cadence: daily
+    stale_days: 1
+  fii_ar_turnover:
+    label: "应收周转"
     reading_class: "财务运营"
     cadence: quarterly
     stale_days: 120
   fii_labor_auto_capex:
     label: "自动化降本"
-    fusion: "新纯增"
     reading_class: "成本因子"
+    cadence: quarterly
+    stale_days: 120
+  fii_apple_base:
+    label: "消费电子拖累"
+    reading_class: "业务结构"
     cadence: quarterly
     stale_days: 120
   fii_related_pty:
     label: "鸿海关联交易"
-    fusion: "旧related_party_trans+新fii_related_pty"
     reading_class: "治理"
     cadence: quarterly
     stale_days: 120
-  fii_overseas_fdi:
-    label: "海外建厂投资"
-    fusion: "新纯增"
-    reading_class: "交付力"
-    cadence: dynamic
-    stale_days: 30
-  fii_apple_base:
-    label: "消费电子拖累"
-    fusion: "新纯增"
-    reading_class: "业务结构"
-    cadence: quarterly
-    stale_days: 120
-  fii_network_switch:
-    label: "800G交换机"
-    fusion: "新纯增"
-    reading_class: "产品渗透"
-    cadence: dynamic
-    stale_days: 14
-  fii_exchange_rate:
-    label: "汇率影响"
-    fusion: "旧exchange_rate_impact"
-    reading_class: "成本因子"
-    cadence: daily
-    stale_days: 1
   fii_mgmt_stability:
     label: "董监高稳定"
-    fusion: "旧mgmt_and_core_team"
     reading_class: "治理"
     cadence: daily
     stale_days: 7
