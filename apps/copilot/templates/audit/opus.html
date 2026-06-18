@@ -310,7 +310,7 @@
             updateSpinnerLabel();
           }
           var bootChat = function () {
-            upsertRadarSession(radarSid(), '当前对话');
+            // 不在初始加载时向侧栏添加空会话（无数据不显示）
             renderRadarSessionList();
             bindRadarComposer();
             if (typeof htmx !== 'undefined') {
@@ -488,9 +488,13 @@
             swap: 'innerHTML',
             values: { session_id: oldId }
           }).then(function () {
-            localStorage.removeItem(RADAR_SID_KEY);
-            var nid = syncRadarSid();
-            upsertRadarSession(nid, '新对话');
+            // 读服务端生成的 session_id（而非客户端再生成新 ID 造成幻影）
+            var newSidEl = document.getElementById('radar-chat-session-id');
+            var nid = newSidEl ? newSidEl.value : '';
+            if (nid) {
+              localStorage.setItem(RADAR_SID_KEY, nid);
+              // 不添加空会话到侧栏——等用户发送第一条消息后由 htmx:afterSwap 自动加入列表
+            }
           });
         }
       });

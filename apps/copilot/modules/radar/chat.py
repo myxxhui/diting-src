@@ -772,6 +772,15 @@ async def chat_turn(
     try:
         resp = await asyncio.to_thread(_blocking)
     except Exception as exc:  # noqa: BLE001
+        # AI 调用失败：先保存含用户消息的历史，避免刷新后对话丢失
+        try:
+            await save_messages_async(
+                sid, history, redis_client=redis_client, db_session=db_session
+            )
+            if db_session is not None:
+                await db_session.commit()
+        except Exception:
+            pass
         history.pop()
         return {
             "session_id": sid,
@@ -782,6 +791,15 @@ async def chat_turn(
         }
 
     if resp.model == "mock" or (resp.raw or {}).get("_dispatcher_mock"):
+        # AI 返回 mock/不可达：保存用户消息避免丢失
+        try:
+            await save_messages_async(
+                sid, history, redis_client=redis_client, db_session=db_session
+            )
+            if db_session is not None:
+                await db_session.commit()
+        except Exception:
+            pass
         history.pop()
         unreachable = (
             "DeepSeek 调用失败（请检查 DEEPSEEK_API_KEY 有效性或账户余额）"
