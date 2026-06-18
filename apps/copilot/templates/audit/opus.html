@@ -466,6 +466,9 @@
       if (box) box.scrollTop = box.scrollHeight;
       if (input) { input.value = ''; input.style.height = 'auto'; input.focus(); }
       renderRadarSessionList();
+      // 兜底渲染 · 防止 inline <script> 未执行（CDN 延迟等场景）
+      setTimeout(function () { if (typeof window.opusRenderMarkdown === 'function') window.opusRenderMarkdown(); }, 400);
+      setTimeout(function () { if (typeof window.opusBindMsgEdit === 'function') window.opusBindMsgEdit(); }, 600);
     });
     var newBtn = document.getElementById('radar-chat-new-btn');
     if (newBtn) {
@@ -497,14 +500,27 @@
       var raw = contentEl.textContent || '';
       var tail = block.querySelector('script[type="md-tail"]');
       if (raw.trim()) {
-        try { contentEl.innerHTML = marked.parse(raw.trim()); } catch (e) {}
+        try { contentEl.innerHTML = marked.parse(raw.trim()); } catch (e) { /* markdown parse failed, keep original */ }
       }
-      if (tail && tail.textContent) {
-        contentEl.insertAdjacentHTML('beforeend', tail.textContent);
+      if (tail && tail.textContent && tail.textContent.trim()) {
+        // cost pill 插入到气泡内容底部
+        contentEl.insertAdjacentHTML('beforeend', '<div class="flex justify-end mt-2">' + tail.textContent.trim() + '</div>');
         tail.remove();
       }
       block.setAttribute('data-md-rendered', '1');
     });
+    // 补渲染 · 1s 后仍未渲染的块强制处理（兜底 HTMX 异步插入）
+    setTimeout(function () {
+      document.querySelectorAll('.msg-md-block:not([data-md-rendered])').forEach(function (block) {
+        var contentEl = block.querySelector('.msg-md-content');
+        if (!contentEl) return;
+        var raw = contentEl.textContent || '';
+        if (raw.trim()) {
+          try { contentEl.innerHTML = marked.parse(raw.trim()); } catch (e) {}
+        }
+        block.setAttribute('data-md-rendered', '1');
+      });
+    }, 1000);
   };
 
   // ── 消息编辑 · 弹窗模式（支持切换标的+数据开关+数据预览）──
@@ -513,7 +529,7 @@
       btn.setAttribute('data-bound', '1');
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
-        var bubble = btn.closest('.max-w-\\[85\\%\\]');
+        var bubble = btn.closest('.opus-user-bubble');
         if (!bubble) return;
         var span = bubble.querySelector('.msg-text');
         if (!span) return;

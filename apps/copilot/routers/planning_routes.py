@@ -1904,7 +1904,7 @@ def _render_context_meta_banner(payload: dict) -> str:
 
 
 def _render_chat_panel(payload: dict) -> str:
-    """ChatGPT 风格对话区 HTML · 含 Markdown 渲染 + 消息编辑。"""
+    """Opus 风格对话区 HTML · Markdown 渲染 + 消息编辑 + cost 信息集成。"""
     sid = _esc(payload.get("session_id") or new_session_id())
     messages = payload.get("messages") or []
     err = payload.get("error")
@@ -1913,23 +1913,34 @@ def _render_chat_panel(payload: dict) -> str:
     bubbles: list[str] = []
     if not messages and status in ("new", None):
         bubbles.append(
-            "<div class='text-center text-sm text-gray-400 py-12'>"
-            "<p class='mb-2'>💬 开始与 Opus 对话</p>"
-            "<p class='text-xs'>可问产业逻辑、财报解读、估值框架、风险识别等；"
+            "<div class='flex flex-col items-center justify-center py-16 text-center'>"
+            "<div class='w-12 h-12 rounded-full bg-violet-100 flex items-center justify-center mb-4'>"
+            "<span class='text-2xl'>💬</span></div>"
+            "<p class='text-sm font-medium text-gray-700 mb-1'>开始与 Opus 对话</p>"
+            "<p class='text-xs text-gray-400 max-w-[280px] leading-relaxed'>"
+            "可问产业逻辑、财报解读、估值框架、风险识别等；"
             "可选填标的代码以附带最近扫描结论</p></div>"
         )
+
+    prev_role = None
     for i, m in enumerate(messages):
         role = m.get("role")
         content = _esc(m.get("content") or "")
+        is_consecutive = role == prev_role
+        prev_role = role
+
         if role == "user":
             msg_id = f"radar-msg-{i}"
+            gap = "mt-1" if is_consecutive else "mt-4 first:mt-0"
             bubbles.append(
-                f"<div class='flex justify-end group/msg' id='{msg_id}' data-msg-idx='{i}'>"
-                f"<div class='max-w-[85%] rounded-2xl rounded-tr-sm "
-                f"bg-blue-600 text-white px-4 py-2.5 text-sm leading-relaxed shadow-sm relative'>"
+                f"<div class='flex justify-end group/msg {gap}' id='{msg_id}' data-msg-idx='{i}'>"
+                f"<div class='opus-user-bubble max-w-[82%] rounded-2xl rounded-tr-md "
+                f"bg-gradient-to-br from-violet-600 to-purple-700 text-white px-4 py-2.5 text-sm "
+                f"leading-relaxed shadow-[0_2px_8px_rgba(124,58,237,0.18)] relative'>"
                 f"<span class='msg-text'>{content}</span>"
-                f"<button type='button' class='msg-edit-btn absolute top-0.5 right-0.5 opacity-0 group-hover/msg:opacity-100 "
-                f"text-white/70 hover:text-white text-[10px] px-1.5 py-0.5 rounded transition-opacity' "
+                f"<button type='button' class='msg-edit-btn absolute -top-2 -right-2 opacity-0 group-hover/msg:opacity-100 "
+                f"w-6 h-6 rounded-full bg-white text-violet-600 hover:bg-violet-50 shadow text-[13px] "
+                f"flex items-center justify-center transition-opacity' "
                 f"title='编辑' aria-label='编辑消息'>✎</button>"
                 f"</div></div>"
             )
@@ -1938,15 +1949,17 @@ def _render_chat_panel(payload: dict) -> str:
             cost_line = ""
             if meta.get("cost_yuan") is not None:
                 cost_line = (
-                    f"<p class='text-[10px] text-gray-400 mt-1.5 border-t border-gray-100 pt-1'>"
-                    f"本轮 ¥{float(meta['cost_yuan']):.4f} · {_esc(meta.get('model') or '')} · "
-                    f"入{meta.get('tokens_in', 0)}/出{meta.get('tokens_out', 0)} tok</p>"
+                    f"<span class='opus-cost-pill'>"
+                    f"¥{float(meta['cost_yuan']):.4f}"
+                    f"<span class='opus-cost-model'>{_esc(meta.get('model') or '')}</span>"
+                    f"</span>"
                 )
+            gap = "mt-1.5" if is_consecutive else "mt-4 first:mt-0"
             bubbles.append(
-                f"<div class='flex justify-start msg-md-block'>"
-                f"<div class='max-w-[90%] rounded-2xl rounded-tl-sm "
-                f"bg-white border border-gray-200 px-4 py-2.5 text-sm text-gray-800 leading-relaxed "
-                f"shadow-sm msg-md-content prose prose-sm max-w-none'>"
+                f"<div class='flex justify-start msg-md-block {gap}'>"
+                f"<div class='opus-assistant-bubble max-w-[90%] rounded-2xl rounded-tl-md "
+                f"bg-white border border-gray-100 px-5 py-3 text-sm text-gray-800 leading-relaxed "
+                f"shadow-[0_1px_3px_rgba(0,0,0,0.04)] msg-md-content prose prose-sm max-w-none'>"
                 f"{content}</div>"
                 f"<script type='md-tail'>{cost_line}</script>"
                 f"</div>"
@@ -1955,17 +1968,19 @@ def _render_chat_panel(payload: dict) -> str:
     err_html = ""
     if err:
         err_html = (
-            f"<div class='mx-2 mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 "
-            f"text-sm text-red-700'>⚠️ {_esc(err)}</div>"
+            f"<div class='mx-3 mb-3 rounded-xl border border-red-100 bg-red-50 px-4 py-3 "
+            f"text-sm text-red-700 flex items-start gap-2'>"
+            f"<span class='text-base shrink-0 mt-0.5'>⚠️</span>"
+            f"<span>{_esc(err)}</span></div>"
         )
 
     meta_html = ""
     if payload.get("cost_yuan") is not None and status == "ok":
         meta_html = (
-            f"<p class='text-[10px] text-gray-400 text-center mt-2'>"
-            f"本轮 ¥{float(payload['cost_yuan']):.4f} · "
-            f"{_esc(payload.get('model') or '')} · "
-            f"入{payload.get('tokens_in', 0)}/出{payload.get('tokens_out', 0)} tok</p>"
+            f"<div class='flex justify-center mt-3'>"
+            f"<span class='opus-cost-pill'>¥{float(payload['cost_yuan']):.4f}"
+            f"<span class='opus-cost-model'>{_esc(payload.get('model') or '')}</span></span>"
+            f"</div>"
         )
 
     return (
@@ -1973,7 +1988,7 @@ def _render_chat_panel(payload: dict) -> str:
         f"<input type='hidden' name='session_id' id='radar-chat-session-id' value='{sid}'>"
         f"{err_html}"
         f"{_render_context_meta_banner(payload)}"
-        f"<div class='space-y-4 px-2 py-2 min-h-[200px]'>{''.join(bubbles)}</div>"
+        f"<div class='px-2 py-3 min-h-[160px] flex flex-col'>{''.join(bubbles)}</div>"
         f"{meta_html}"
         f"<script>window.opusRenderMarkdown();window.opusBindMsgEdit();</script>"
         f"</div>"

@@ -162,7 +162,7 @@ async def load_messages_async(
     redis_client: Any = None,
     db_session: AsyncSession | None = None,
 ) -> list[dict[str, Any]]:
-    """加载雷达对话：内存 → Redis → PG。"""
+    """加载雷达对话：内存 → Redis → PG（三级回退，PG 故障也尝试 Redis 直读）。"""
     sid = (session_id or "").strip()
     if not sid:
         return []
@@ -177,14 +177,23 @@ async def load_messages_async(
         return list(redis_msgs)
 
     if db_session is not None:
-        row = await db_session.scalar(
-            select(RadarChatSession).where(RadarChatSession.session_id == sid)
-        )
-        if row and row.messages_json:
-            msgs = _trim_messages(list(row.messages_json))
-            _memory_sessions[sid] = msgs
-            _save_messages_to_redis(redis_client, sid, msgs)
-            return list(msgs)
+        try:
+            row = await db_session.scalar(
+                select(RadarChatSession).where(RadarChatSession.session_id == sid)
+            )
+            if row and row.messages_json:
+                msgs = _trim_messages(list(row.messages_json))
+                _memory_sessions[sid] = msgs
+                _save_messages_to_redis(redis_client, sid, msgs)
+                return list(msgs)
+        except Exception as exc:
+            logger.warning("从 PG 加载雷达对话 sid=%s 失败: %s", sid, exc)
+            # PG 失败时再尝试一次 Redis（防止连接池耗尽导致误判 redis 无数据）
+            if redis_client is not None:
+                retry = _load_messages_from_redis(redis_client, sid)
+                if retry is not None:
+                    _memory_sessions[sid] = retry
+                    return list(retry)
 
     return []
 

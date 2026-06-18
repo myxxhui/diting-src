@@ -138,8 +138,56 @@
 
   .opus-messages-scroll {
     grid-area: messages; min-height: 0; overflow-y: auto; overflow-x: hidden;
-    padding: 12px 16px; background: #fafafa;
+    padding: 12px 16px;
+    background: linear-gradient(180deg, #fafbfc 0%, #f5f6f8 100%);
   }
+
+  /* ── 消息气泡 · Opus 风格 ── */
+  .opus-user-bubble {
+    position: relative; word-break: break-word;
+    animation: opus-bubble-in 0.28s ease-out;
+  }
+  .opus-user-bubble .msg-edit-btn {
+    transition: opacity 0.15s, transform 0.15s;
+  }
+  .opus-user-bubble .msg-edit-btn:hover { transform: scale(1.1); }
+  .opus-assistant-bubble {
+    word-break: break-word; line-height: 1.65;
+    animation: opus-bubble-in 0.32s ease-out;
+  }
+  @keyframes opus-bubble-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .opus-cost-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px; border-radius: 999px;
+    font-size: 10px; font-weight: 500;
+    color: #6b7280; background: #f3f4f6; border: 1px solid #e5e7eb;
+    white-space: nowrap; font-variant-numeric: tabular-nums;
+  }
+  .opus-cost-model {
+    color: #9ca3af; font-weight: 400;
+    padding-left: 4px; border-left: 1px solid #d1d5db; margin-left: 2px;
+  }
+
+  /* ── Markdown 渲染后微调（气泡内）── */
+  .opus-assistant-bubble.prose p:first-child { margin-top: 0; }
+  .opus-assistant-bubble.prose p:last-child  { margin-bottom: 0; }
+  .opus-assistant-bubble.prose pre {
+    margin: 0.5em 0; border-radius: 8px; background: #1e1e2e; color: #cdd6f4;
+    font-size: 12px; line-height: 1.5; overflow-x: auto;
+  }
+  .opus-assistant-bubble.prose code {
+    font-size: 12px; background: #f1f5f9; padding: 1px 5px; border-radius: 4px;
+  }
+  .opus-assistant-bubble.prose pre code { background: transparent; padding: 0; }
+  .opus-assistant-bubble.prose table {
+    font-size: 12px; border-collapse: collapse; width: 100%; margin: 0.5em 0;
+  }
+  .opus-assistant-bubble.prose th,
+  .opus-assistant-bubble.prose td { padding: 6px 10px; border: 1px solid #e5e7eb; }
+  .opus-assistant-bubble.prose th { background: #f9fafb; font-weight: 600; color: #374151; }
 
   .opus-bottom-dock { grid-area: footer; flex-shrink: 0; border-top: 1px solid var(--opus-border); background: var(--opus-surface); }
   .opus-templates-inline { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 14px 0; background: #fafafa; }
