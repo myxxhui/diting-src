@@ -174,8 +174,15 @@
     function mergeRadarSessionsFromServer(serverList) {
       var local = getRadarSessions();
       var byId = {};
+      var curSid = radarSid();
       (serverList || []).forEach(function (s) { if (s && s.id) byId[s.id] = s; });
-      local.forEach(function (s) { if (s && s.id && !byId[s.id]) byId[s.id] = s; });
+      // 仅保留当前活跃的本地会话（可能是刚创建、尚未落到服务端的）
+      // 其余服务端不认识的会话一律清除（幻影 ID，无数据）
+      local.forEach(function (s) {
+        if (s && s.id && !byId[s.id] && s.id === curSid) {
+          byId[s.id] = s;
+        }
+      });
       var merged = Object.values(byId).sort(function (a, b) {
         return (b.updatedAt || 0) - (a.updatedAt || 0);
       });
@@ -317,6 +324,21 @@
               htmx.ajax('GET', '/api/radar/chat/' + radarSid(), {
                 target: '#radar-chat-messages',
                 swap: 'innerHTML'
+              }).then(function () {
+                // 当前会话加载后无气泡 → 幻影会话，清理并切换
+                var inner = document.getElementById('radar-chat-inner');
+                if (inner && !inner.querySelector('.opus-user-bubble') && !inner.querySelector('.opus-assistant-bubble')) {
+                  var curSid = radarSid();
+                  localStorage.removeItem(RADAR_SID_KEY);
+                  var list = getRadarSessions().filter(function (s) { return s.id !== curSid; });
+                  saveRadarSessions(list);
+                  syncRadarSid();
+                  renderRadarSessionList();
+                  htmx.ajax('GET', '/api/radar/chat/' + radarSid(), {
+                    target: '#radar-chat-messages',
+                    swap: 'innerHTML'
+                  });
+                }
               });
             }
           };
@@ -347,6 +369,14 @@
         htmx.ajax('GET', '/api/radar/chat/' + id, {
           target: '#radar-chat-messages',
           swap: 'innerHTML'
+        }).then(function () {
+          // 加载的会话无任何气泡 → 幻影/空会话，自动清理
+          var inner = document.getElementById('radar-chat-inner');
+          if (inner && !inner.querySelector('.opus-user-bubble') && !inner.querySelector('.opus-assistant-bubble')) {
+            var list = getRadarSessions().filter(function (s) { return s.id !== id; });
+            saveRadarSessions(list);
+            renderRadarSessionList();
+          }
         });
       }
     });
