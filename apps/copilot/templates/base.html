@@ -140,7 +140,7 @@
     <div class="nav-main">
       {{ nav_link('/', '总览', '🏠', _path == '/') }}
       {{ nav_link('/planning?view=executing', '持仓监护', '🛡️', _path.startswith('/portfolio-guard') or (_path.startswith('/planning') and request.query_params.get('view') == 'executing')) }}
-      {{ nav_link('/planning', '推荐工作台', '📡', _path.startswith('/planning') or _path.startswith('/value') or _path.startswith('/ledger')) }}
+      {{ nav_link('/planning', '工作台', '📡', _path.startswith('/planning') or _path.startswith('/value') or _path.startswith('/ledger')) }}
       {{ nav_link('/graph', '产业图谱', '🕸️', _path.startswith('/graph')) }}
       {{ nav_link('/audit', '审计', '🔍', _path.startswith('/audit')) }}
       {{ nav_link('/opus', 'Opus 分析', '🔬', _path.startswith('/opus')) }}

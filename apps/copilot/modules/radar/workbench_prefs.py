@@ -55,7 +55,7 @@ def _env_int(name: str, default: int) -> int:
 def _env_defaults() -> dict[str, Any]:
     return {
         "version": 1,
-        "enable_t2_default": False,
+        "enable_t2_default": True,
         "enable_t0_default": False,
         "enable_t1_default": False,
         "force_refresh_default": False,

@@ -56,7 +56,7 @@ def client():
 def test_nav_workbench_entry(client):
     r = client.get("/")
     assert r.status_code == 200
-    for label in ("持仓监护", "推荐工作台", "产业图谱"):
+    for label in ("持仓监护", "工作台", "产业图谱"):
         assert label in r.text
     assert "投资工作台" not in r.text
     assert "工作区入口" not in r.text
@@ -76,7 +76,7 @@ def test_planning_nav_highlights_workbench_entry(client):
     for view in ("roadmap", "radar", "planning", "executing", "ledger"):
         r = client.get(f"/planning?view={view}")
         assert r.status_code == 200
-        assert "推荐工作台" in r.text
+        assert "工作台" in r.text
         assert 'class="nav-active"' in r.text
         assert r.text.count('href="/planning"') >= 1
 

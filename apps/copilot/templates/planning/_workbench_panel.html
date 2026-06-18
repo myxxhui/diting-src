@@ -30,14 +30,14 @@
       </div>
       <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:gap-2.5">
         <input type="hidden" name="enable_t0" id="radar-h-t0" value="false">
-        <button type="button" id="radar-btn-t0" data-stage="t0" title="与 T2 组合：T0+T2 或 T0+T1+T2"
-                class="radar-stage-btn shrink-0 px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
+        <button type="button" id="radar-btn-t0" data-stage="t0" title="T0 数据采集：与 T2 组合使用（T0+T2 或 T0+T1+T2）"
+                class="radar-stage-btn cursor-pointer shrink-0 px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
           T0
         </button>
         <input type="hidden" name="enable_t1" id="radar-h-t1" value="false">
         <div class="flex shrink-0 items-center gap-1.5">
-          <button type="button" id="radar-btn-t1" data-stage="t1" title="须 T0+T2：完整链路 T0+T1+T2"
-                  class="radar-stage-btn px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
+          <button type="button" id="radar-btn-t1" data-stage="t1" title="T1 模型压缩：需配合 T0+T2 组成完整链路 T0+T1+T2"
+                  class="radar-stage-btn cursor-pointer px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
             T1
           </button>
           <select name="t1_mode" id="radar-t1-mode" disabled
@@ -680,7 +680,7 @@
       }
     };
 
-    window.RADAR_STAGE_COMBO_MSG = '仅支持三种组合：仅 T2、T0+T2、T0+T1+T2';
+    window.RADAR_STAGE_COMBO_MSG = '请先选择分析阶段：点「T2」标签开启即可开始分析（也可组合 T0+T2 或 T0+T1+T2）';
 
     window.radarStageSet = function (stage, on) {
       var h = document.getElementById('radar-h-' + stage);
@@ -778,7 +778,10 @@
       var on1 = t1 && t1.value === 'true';
       var on2 = t2 && t2.value === 'true';
       if (window.radarStageComboOk(on0, on1, on2)) return true;
-      alert(window.RADAR_STAGE_COMBO_MSG);
+      window.radarShowScanError(
+        '请先选择分析阶段',
+        '点击上方「T2」标签即可开始分析。也支持组合 T0+T2 或 T0+T1+T2。'
+      );
       return false;
     };
 
@@ -800,9 +803,10 @@
         var on1 = !!p.enable_t1_default;
         var on2 = !!p.enable_t2_default;
         if (!window.radarStageComboOk(on0, on1, on2)) {
+          // 无有效组合时回退为仅 T2（让用户有可用的默认起点）
           on0 = false;
           on1 = false;
-          on2 = false;
+          on2 = true;
         }
         var d2 = document.getElementById('radar-t2-details');
         if (d2) {
