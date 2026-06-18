@@ -9,7 +9,11 @@ from apps.copilot.services.queue.constants import (
     QUEUE_PERSIST,
     QUEUE_SEARCH_INDEX,
 )
-from apps.copilot.services.queue.enqueue import enqueue_executing_job, enqueue_radar_job
+from apps.copilot.services.queue.enqueue import (
+    enqueue_executing_job,
+    enqueue_radar_job,
+    enqueue_z0_job,
+)
 
 __all__ = [
     "QUEUE_CRAWL",
@@ -18,4 +22,5 @@ __all__ = [
     "QUEUE_SEARCH_INDEX",
     "enqueue_executing_job",
     "enqueue_radar_job",
+    "enqueue_z0_job",
 ]

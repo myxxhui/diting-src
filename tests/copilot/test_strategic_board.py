@@ -1,6 +1,6 @@
 """M12 战略板块 · 滚动路线图指挥台 pytest。
 
-[Ref: 30_ · step_18 P0]
+[Ref: 33_ · step_18 P0]
 """
 from __future__ import annotations
 
@@ -61,10 +61,10 @@ def test_seed_ai_board_endpoint(client):
 
 def test_roadmap_panel_renders_command_center(client):
     client.post("/api/strategic/boards/seed-ai")
-    r = client.get("/planning/panel?view=roadmap")
+    r = client.get("/planning/panel?view=roadmap&z0_mode=board")
     assert r.status_code == 200
     assert "战略指挥台" in r.text
-    assert "10 年战略时间轴" in r.text or "尚无战略板块" in r.text
+    assert "10 年战略时间轴" in r.text or "CVM" in r.text
 
 
 def test_phase_panel_endpoint(client):

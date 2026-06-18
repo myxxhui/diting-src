@@ -1,6 +1,6 @@
 """step_45：战略板块表 · M12 滚动路线图升维（SQLite 兜底）。
 
-[Ref: 30_战略板块与滚动路线图_前端与数据契约.md §9]
+[Ref: 33_五区工作台_前端区际联动与数据携带契约.md §9]
 """
 from __future__ import annotations
 

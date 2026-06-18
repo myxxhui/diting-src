@@ -30,8 +30,10 @@ _STAGE_ORDER = {s: i for i, s in enumerate(FUNNEL_STAGES)}
 # Tab → 该区展示的 funnel_stage 集合
 VIEW_STAGES: dict[str, tuple[str, ...]] = {
     "radar": ("radar_intake",),
+    "roadmap": (),  # 产业风向台 · 战略指挥台（不按 funnel_stage 列标的）
     "planning": ("roadmap", "planning"),
     "executing": ("executing",),
+    "ledger": ("archived",),
     "archived": ("archived",),
 }
 

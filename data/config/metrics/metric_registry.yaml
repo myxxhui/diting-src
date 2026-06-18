@@ -1,0 +1,122 @@
+# Z0 段 A 指标注册表 · [Ref: 34_ §3.0a · 32_ §2.4.1 · 29_ §5]
+schema_version: "1.3"
+zone: Z0
+segment: A
+source_priority: "tushare > eastmoney:push2delay > deepsea:pg > akshare"
+
+metrics:
+  - metric_id: M.macro.pmi
+    matrix: Z0-M1
+    name: 制造业 PMI
+    tier: T0
+    share_scope: S0
+    history_required: "36个月"
+    source: "tushare:cn_pmi | akshare:macro_china_pmi"
+    cron_job: z0-m1-macro
+  - metric_id: M.macro.cpi_ppi_spread
+    matrix: Z0-M1
+    name: CPI-PPI 剪刀差
+    tier: T0
+    share_scope: S0
+    history_required: "36个月"
+    source: "tushare:cn_cpi+cn_ppi | akshare:macro_china_cpi+ppi"
+    cron_job: z0-m1-macro
+  - metric_id: M.macro.gdp_yoy
+    matrix: Z0-M1
+    name: GDP 同比增速
+    tier: T0
+    share_scope: S0
+    history_required: "12个季度"
+    source: "tushare:cn_gdp | akshare:macro_china_gdp"
+    cron_job: z0-m1-macro
+  - metric_id: M.macro.social_financing
+    matrix: Z0-M1
+    name: 社融增量
+    tier: T0
+    share_scope: S0
+    history_required: "36个月"
+    source: "tushare:sf_month | akshare:macro_china_shrzgm"
+    cron_job: z0-m1-macro
+  - metric_id: M.macro.m2_yoy
+    matrix: Z0-M1
+    name: M2 同比增速
+    tier: T0
+    share_scope: S0
+    history_required: "36个月"
+    source: "tushare:cn_m | akshare:macro_china_money_supply"
+    cron_job: z0-m1-macro
+  - metric_id: M.macro.us10y
+    matrix: Z0-M1
+    name: 美国 10Y 国债收益率
+    tier: T0
+    share_scope: S0
+    history_required: "24个月"
+    source: "akshare:bond_zh_us_rate"
+    cron_job: z0-m1-macro
+  - metric_id: M.macro.vix
+    matrix: Z0-M1
+    name: VIX 恐慌指数
+    tier: T0
+    share_scope: S0
+    history_required: "3年"
+    source: "akshare:index_investing_global | index_option_50etf_qvix:proxy"
+    cron_job: z0-m1-macro
+  - metric_id: M.liq.north_net_20d
+    matrix: Z0-M5
+    name: 北向 20 日滚动
+    tier: T0
+    share_scope: S0
+    history_required: "3年"
+    source: "tushare:moneyflow_hsgt | akshare:stock_hsgt_hist_em"
+    cron_job: z0-m5-liquidity
+  - metric_id: M.liq.margin_balance
+    matrix: Z0-M5
+    name: 两融余额趋势
+    tier: T0
+    share_scope: S0
+    history_required: "3年"
+    source: "tushare:margin | akshare:stock_margin_sse"
+    cron_job: z0-m5-liquidity
+  - metric_id: M.liq.regime_composite
+    matrix: Z0-M5
+    name: 流动性 regime 合成
+    tier: T1
+    cron_job: z0-m5-liquidity
+  - metric_id: M.sector.concept_heat
+    matrix: Z0-M2
+    name: 概念/板块热度（段 A 市场发现支路）
+    tier: T1
+    source: "eastmoney:push2delay_concept | industry_fallback | fund_flow | akshare"
+    cron_job: z0-m2-sector-heat
+  - metric_id: M.sector.policy_direction
+    matrix: Z0-M2
+    name: 政策/产业赛道（DeepSea PG 契约支路）
+    tier: T1
+    source: "deepsea:pg:indicator_state | deepsea:pg:doc_registry"
+    cron_job: z0-m2-sector-heat
+    note: T0 政策 ingest → deepsea_doc_registry；T1 enum → deepsea_indicator_state；禁止 OpenSearch/BM25
+  - metric_id: M0.wind_scan
+    matrix: Z0-M0
+    name: 宏观风口合成
+    tier: T1
+    cron_job: z0-m0-wind-scan
+
+jobs:
+  z0-bootstrap-all:
+    description: 首次全量采集 M1+M5+M2 并合成 wind_scan
+    enqueue_queue: copilot:q:interactive
+  z0-m1-macro:
+    description: 宏观景气 T0
+    cron: "0 7 * * *"
+  z0-m5-liquidity:
+    description: 流动性 T0/T1
+    cron: "30 7 * * 1-5"
+  z0-policy-ingest:
+    description: 政策 T0 ingest + T1 enum → deepsea_doc_registry / indicator_state
+    cron: "45 7 * * 1-5"
+  z0-m2-sector-heat:
+    description: 概念板块 + DeepSea 政策支路 T1（赛道发现）
+    cron: "0 8 * * 1-5"
+  z0-m0-wind-scan:
+    description: M0 合成 wind_scan（依赖 M1/M5；M2 双支路至少其一）
+    cron: "15 8 * * 1-5"

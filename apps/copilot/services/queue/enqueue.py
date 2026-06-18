@@ -69,6 +69,26 @@ async def enqueue_radar_job(
     return jid
 
 
+async def enqueue_z0_job(
+    job_id: str,
+    *,
+    source: str = "cron",
+    run_id: str | None = None,
+) -> str:
+    """CronJob / bootstrap / HTMX 触发的 Z0 段 A 采集。"""
+    pool = await get_arq_pool()
+    job = await pool.enqueue_job(
+        "collect_z0_job",
+        job_id,
+        source,
+        run_id,
+        _job_id=f"z0:{job_id}:{run_id or '*'}",
+    )
+    jid = job.job_id if job else ""
+    logger.info("已入队 Z0 job_id=%s arq_job=%s source=%s", job_id, jid, source)
+    return jid
+
+
 async def enqueue_smoke_ping(message: str = "infra-check") -> str:
     pool = await get_arq_pool()
     job = await pool.enqueue_job("smoke_ping", message)

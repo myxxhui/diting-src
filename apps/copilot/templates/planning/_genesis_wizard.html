@@ -1,0 +1,110 @@
+{# 段 B · genesis 四步向导 [Ref: 33_ §4.4] #}
+<div id="genesis-wizard-root" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+  <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-base font-bold text-gray-900">Genesis 建板 · 步骤 {{ step }}/4</h3>
+      <button type="button" class="text-gray-400 hover:text-gray-600 text-xl"
+              onclick="document.getElementById('genesis-wizard-root').innerHTML=''">×</button>
+    </div>
+
+    {% if error %}
+    <div class="mb-3 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{{ error }}</div>
+    {% endif %}
+
+    <div class="flex gap-1 mb-4 text-[10px]">
+      {% for s in [1,2,3,4] %}
+      <span class="flex-1 text-center py-1 rounded {% if s == step %}bg-indigo-600 text-white{% elif s < step %}bg-indigo-100 text-indigo-800{% else %}bg-gray-100 text-gray-400{% endif %}">
+        {% if s == 1 %}选候选{% elif s == 2 %}时间骨架{% elif s == 3 %}生态位{% else %}确认{% endif %}
+      </span>
+      {% endfor %}
+    </div>
+
+    {% if step == 1 %}
+    <form hx-post="/api/strategic/genesis/wizard?step=2" hx-target="#genesis-wizard-root" hx-swap="innerHTML" class="space-y-3 text-sm">
+      <div>
+        <label class="block text-xs font-medium text-gray-700 mb-1">板块名称</label>
+        <input name="board_title" type="text" required class="w-full border rounded-lg px-3 py-2"
+               placeholder="例：AI 算力基建" value="{{ preview.board_title if preview else '' }}" />
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-700 mb-1">绑定 wind_scan（可选）</label>
+        <input name="wind_scan_id" type="number" class="w-full border rounded-lg px-3 py-2"
+               value="{{ wind_scan.id if wind_scan else '' }}" placeholder="留空则手动建板" />
+      </div>
+      <textarea name="candidates_json" class="hidden">[]</textarea>
+      <label class="flex items-center gap-2 text-xs">
+        <input type="checkbox" name="advisory_ack" value="1" required class="rounded" />
+        本人确认本操作为 advisory · 不触发下单
+      </label>
+      <button type="submit" class="w-full py-2 rounded-lg bg-indigo-600 text-white text-sm">下一步 · 时间骨架</button>
+    </form>
+
+    {% elif step == 2 %}
+    <form hx-post="/api/strategic/genesis/wizard?step=3" hx-target="#genesis-wizard-root" hx-swap="innerHTML" class="space-y-3 text-sm">
+      <input type="hidden" name="board_title" value="{{ preview.board_title }}" />
+      <input type="hidden" name="wind_scan_id" value="{{ preview.source_wind_scan_id or '' }}" />
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-medium mb-1">战略跨度（年）</label>
+          <select name="horizon_years" class="w-full border rounded-lg px-3 py-2">
+            <option value="5">5 年</option>
+            <option value="10" selected>10 年</option>
+            <option value="15">15 年</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium mb-1">起始年</label>
+          <input name="start_year" type="number" value="{{ preview.horizon_start or 2026 }}" class="w-full border rounded-lg px-3 py-2" />
+        </div>
+      </div>
+      <p class="text-xs text-gray-500">预览：{{ preview.horizon_start }}–{{ preview.horizon_end }} · {{ preview.phases|length }} 个 phase</p>
+      {% if preview.phases %}
+      <ul class="text-xs space-y-1 bg-gray-50 rounded-lg p-2">
+        {% for ph in preview.phases %}
+        <li>🌊{{ ph.wave_no }} {{ ph.name }} ({{ ph.start_year }}–{{ ph.end_year }}) · layer={{ ph.layer }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      <button type="submit" class="w-full py-2 rounded-lg bg-indigo-600 text-white text-sm">下一步 · 生态位</button>
+    </form>
+
+    {% elif step == 3 %}
+    <form hx-post="/api/strategic/genesis/wizard?step=4" hx-target="#genesis-wizard-root" hx-swap="innerHTML" class="space-y-3 text-sm">
+      <input type="hidden" name="board_title" value="{{ preview.board_title }}" />
+      <input type="hidden" name="horizon_years" value="10" />
+      <input type="hidden" name="start_year" value="{{ preview.horizon_start }}" />
+      <input type="hidden" name="wind_scan_id" value="{{ preview.source_wind_scan_id or '' }}" />
+      <p class="text-xs text-gray-600">每 phase 默认 E1–E5 权重 0.25/0.2/0.2/0.2/0.15（可在扩展期细调）</p>
+      <label class="flex items-center gap-2 text-xs">
+        <input type="checkbox" name="niche_default" value="1" checked class="rounded" />
+        使用默认生态位模板
+      </label>
+      <button type="submit" class="w-full py-2 rounded-lg bg-indigo-600 text-white text-sm">下一步 · 确认建板</button>
+    </form>
+
+    {% elif step == 4 %}
+    <div class="space-y-3 text-sm">
+      <div class="bg-gray-50 rounded-lg p-3 text-xs space-y-1">
+        <p><strong>板块：</strong>{{ preview.board_title }}</p>
+        <p><strong>跨度：</strong>{{ preview.horizon_start }}–{{ preview.horizon_end }}</p>
+        <p><strong>阶段数：</strong>{{ preview.phases|length }}</p>
+      </div>
+      <form hx-post="/api/strategic/genesis/apply" hx-target="body" hx-swap="beforeend" class="space-y-2">
+        <input type="hidden" name="board_title" value="{{ preview.board_title }}" />
+        <input type="hidden" name="horizon_years" value="10" />
+        <input type="hidden" name="start_year" value="{{ preview.horizon_start }}" />
+        <input type="hidden" name="wind_scan_id" value="{{ preview.source_wind_scan_id or '' }}" />
+        <input type="hidden" name="niche_default" value="1" />
+        <label class="flex items-center gap-2 text-xs">
+          <input type="checkbox" name="advisory_ack" value="1" required class="rounded" />
+          本人确认 advisory · 确认建板
+        </label>
+        <button type="submit" class="w-full py-2 rounded-lg bg-emerald-600 text-white"
+                onclick="document.getElementById('genesis-wizard-root').innerHTML=''">
+          确认建板 · 落库
+        </button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+</div>

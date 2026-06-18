@@ -1,0 +1,62 @@
+# Z0 段 A 政策 T0 源 · DeepSea doc_registry · 全文采集
+# [Ref: 34_ §3.2 · 29_ §5.1 · z0_history_contract.yaml policy_t0]
+# L0 战略锚：gov.cn 政策库 / 十五五专项规划；L1 部委通知公告
+schema_version: "1.2"
+doc_type: policy
+scope: S0
+max_items_per_feed: 80
+lookback_days: 730
+fetch_full_text: true
+full_text_max_chars: 48000
+min_full_text_chars: 200
+feeds:
+  - id: gov_cn_zhengce_index
+    name: 中国政府网-国务院政策文件库
+    kind: html_list
+    url: https://www.gov.cn/zhengce/index.htm
+    source: gov.cn
+    href_contains: zhengce/content/
+    min_title_len: 12
+    tier: L0
+    note: 含十五五专项规划、国发/国办文件
+  - id: gov_cn_zhengce_home
+    name: 中国政府网-首页政策
+    kind: html_list
+    url: https://www.gov.cn/
+    source: gov.cn
+    href_contains: zhengce/content/
+    min_title_len: 12
+    tier: L1
+  - id: ndrc_tzgg
+    name: 发改委-通知公告
+    kind: html_list
+    url: https://www.ndrc.gov.cn/xwdt/tzgg/
+    source: ndrc.gov.cn
+    href_contains: /tzgg/
+    min_title_len: 10
+    tier: L1
+  - id: ndrc_zcfb
+    name: 发改委-政策发布
+    kind: html_list
+    url: https://www.ndrc.gov.cn/xxgk/zcfb/
+    source: ndrc.gov.cn
+    href_contains: zcfb
+    min_title_len: 10
+    tier: L0
+    note: 专项规划/产业政策；若列表空则跳过不 mock
+  - id: miit_xwfb
+    name: 工信部-新闻发布
+    kind: html_list
+    url: https://www.miit.gov.cn/xwfb/index.html
+    source: miit.gov.cn
+    href_contains: /art/
+    min_title_len: 10
+    tier: L1
+  - id: miit_zcwj
+    name: 工信部-政策文件
+    kind: html_list
+    url: https://www.miit.gov.cn/zwgk/zcwj/
+    source: miit.gov.cn
+    href_contains: /art/
+    min_title_len: 10
+    tier: L0

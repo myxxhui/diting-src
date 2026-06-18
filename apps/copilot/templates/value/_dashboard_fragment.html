@@ -1,0 +1,36 @@
+{# 价值指标摘要 · 嵌入决策复盘库 [Ref: 32_ §1.4 Z4] #}
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+  <div class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+    <div class="text-xs text-gray-500 mb-1">系统贡献分（SCS）</div>
+    <div class="text-3xl font-bold text-gray-900">{{ scs.score }}</div>
+    <p class="text-xs text-gray-500 mt-2">
+      基础 {{ scs.base }} + 净贡献 {{ scs.contribution_sum }} − 迟滞 {{ scs.lag_penalty }}
+      （样本 {{ scs.sample_count }}）
+    </p>
+  </div>
+  <div class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+    <div class="text-xs text-gray-500 mb-1">经济价值（EV）</div>
+    <div class="text-3xl font-bold text-gray-900">¥{{ ev.total }}</div>
+    <p class="text-xs text-gray-500 mt-2">
+      避险 ¥{{ ev.hedge_value }} + 增益 ¥{{ ev.gain_value }} − 卖飞 ¥{{ ev.cost_value }}
+    </p>
+  </div>
+</div>
+
+{% if breaker.paused %}
+<div class="rounded-lg bg-red-50 border border-red-100 text-red-800 text-sm px-4 py-3 mb-4">
+  🚨 自我熔断已触发：{{ breaker.reason }}
+</div>
+{% else %}
+<div class="rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-800 text-sm px-4 py-3 mb-4">
+  ✅ 复盘系统正常 · B+H 占比 {{ '%.1f' % (breaker.last_bh_ratio * 100) }}% · 窗口 {{ breaker.last_window_size }}
+</div>
+{% endif %}
+
+<div class="flex flex-wrap gap-3 text-sm">
+  <a class="inline-flex items-center px-3 py-1.5 rounded-lg bg-indigo-600 text-white no-underline hover:bg-indigo-700"
+     href="/api/value/monthly-report/{{ '%04d-%02d' % (year, month) }}?user_id={{ user_id }}">
+    下载本月复盘月报
+  </a>
+  <a class="text-indigo-600 underline" href="/value/dashboard?user_id={{ user_id }}">全屏打开价值复盘 →</a>
+</div>

@@ -66,19 +66,33 @@ async def collect_radar_job(
     return result
 
 
-async def index_document(
+async def collect_z0_job(
     ctx: dict[str, Any],
-    doc: dict[str, Any],
+    job_id: str,
+    source: str = "arq",
+    run_id: str | None = None,
 ) -> dict[str, Any]:
-    """低优先级 ES 索引（旁路 · 不阻塞主链）。"""
-    from apps.copilot.services.search.doc_retriever import index_document as es_index
+    """消费 Z0 段 A 采集 enqueue。"""
+    from apps.copilot.db.database import AsyncSessionLocal, init_db
+    from apps.copilot.metrics.z0_runner import run_z0_job
+    from apps.copilot.services.redis_wait import wait_for_sync_redis
 
-    doc_id = await es_index(doc)
-    return {"status": "ok", "doc_id": doc_id}
+    await init_db()
+    redis_client = wait_for_sync_redis()
+    async with AsyncSessionLocal() as session:
+        try:
+            result = await run_z0_job(session, job_id, redis_client, run_id=run_id)
+            await session.commit()
+        except Exception as exc:  # noqa: BLE001
+            await session.rollback()
+            logger.exception("Z0 job 失败 job_id=%s", job_id)
+            return {"job_id": job_id, "status": "error", "source": source, "error": str(exc)[:300]}
+    result.setdefault("source", source)
+    return result
 
 
 class WorkerSettings:
-    functions = [smoke_ping, collect_executing_job, collect_radar_job, index_document]
+    functions = [smoke_ping, collect_executing_job, collect_radar_job, collect_z0_job]
     redis_settings = redis_settings()
     max_jobs = max_jobs()
     job_timeout = 3600
@@ -90,7 +104,7 @@ async def _check_connections() -> int:
     """§9 #6 · Worker 启动前连通性检查。"""
     import redis.asyncio as aioredis
 
-    from apps.copilot.services.search.doc_retriever import check_opensearch_health
+    from apps.copilot.services.deepsea.policy_reader import check_deepsea_pg_ready
 
     rs = redis_settings()
     dsn = f"redis://{rs.host}:{rs.port}/{rs.database}"
@@ -102,10 +116,10 @@ async def _check_connections() -> int:
     finally:
         await client.aclose()
 
-    os_health = await check_opensearch_health()
-    print(f"  OpenSearch health → {os_health.get('status', 'skipped')}")
-    if os_health.get("error"):
-        print(f"  OpenSearch 说明: {os_health['error']}")
+    ds_health = check_deepsea_pg_ready()
+    print(f"  DeepSea PG → {ds_health.get('status', 'unknown')}")
+    if ds_health.get("error"):
+        print(f"  DeepSea 说明: {ds_health['error']}")
 
     pool = None
     try:

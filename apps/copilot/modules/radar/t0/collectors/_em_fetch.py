@@ -150,6 +150,43 @@ def fetch_industry_boards_pct_3d() -> list[dict[str, Any]]:
     return out
 
 
+def fetch_concept_boards(*, page_size: int = 200) -> list[dict[str, Any]]:
+    """概念板块列表 · push2delay clist（fs=m:90+t:3 · 涨跌幅 f3）。"""
+    data = em_get_json(
+        f"{_PUSH2}/api/qt/clist/get",
+        params={
+            "pn": "1",
+            "pz": str(page_size),
+            "po": "1",
+            "np": "1",
+            "ut": "b2884a393a59ad64002292a3e90d46a5",
+            "fltt": "2",
+            "invt": "2",
+            "fid0": "f3",
+            "fs": "m:90+t:3",
+            "stat": "1",
+            "fields": "f12,f14,f3,f62,f184",
+        },
+        referer="https://data.eastmoney.com/bkzj/gn.html",
+    )
+    if not data:
+        return []
+    diff = (data.get("data") or {}).get("diff") or []
+    out: list[dict[str, Any]] = []
+    for item in diff:
+        if not isinstance(item, dict):
+            continue
+        out.append(
+            {
+                "board_code": item.get("f12"),
+                "board_name": item.get("f14"),
+                "pct_chg": item.get("f3"),
+                "net_inflow": item.get("f62"),
+            }
+        )
+    return out
+
+
 def fetch_industry_boards() -> list[dict[str, Any]]:
     """行业板块列表 · push2delay（涨跌幅 f3）。"""
     data = em_get_json(

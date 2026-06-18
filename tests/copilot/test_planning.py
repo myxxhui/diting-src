@@ -53,18 +53,60 @@ def client():
         yield c
 
 
-def test_nav_4plus1(client):
+def test_nav_workbench_entry(client):
     r = client.get("/")
     assert r.status_code == 200
-    for label in ("持仓监管", "行情解析及规划", "产业图谱"):
+    for label in ("持仓监护", "推荐工作台", "产业图谱"):
         assert label in r.text
+    assert "投资工作台" not in r.text
+    assert "工作区入口" not in r.text
+    # 决策复盘仅在工作台内五区 Tab，不再占顶栏独立入口
+    assert 'href="/planning?view=ledger"' not in r.text
+    assert '">决策复盘</span>' not in r.text
 
 
 def test_planning_page_200(client):
     r = client.get("/planning")
     assert r.status_code == 200
-    for label in ("行情雷达", "规划中", "执行中", "路线图"):
+    for label in ("产业风向", "机会雷达", "买入论证", "持仓监护", "决策复盘"):
         assert label in r.text
+
+
+def test_planning_nav_highlights_workbench_entry(client):
+    for view in ("roadmap", "radar", "planning", "executing", "ledger"):
+        r = client.get(f"/planning?view={view}")
+        assert r.status_code == 200
+        assert "推荐工作台" in r.text
+        assert 'class="nav-active"' in r.text
+        assert r.text.count('href="/planning"') >= 1
+
+
+def test_planning_default_view_is_roadmap(client):
+    r = client.get("/planning")
+    assert r.status_code == 200
+    assert "产业风向台" in r.text
+    # Tab：产业风向须在机会雷达之前出现
+    assert r.text.index("产业风向") < r.text.index("机会雷达")
+
+
+def test_planning_ledger_view(client):
+    r = client.get("/planning?view=ledger")
+    assert r.status_code == 200
+    assert "决策复盘库" in r.text
+
+
+def test_value_redirects_to_ledger_tab(client):
+    r = client.get("/value", follow_redirects=False)
+    assert r.status_code == 302
+    assert "view=ledger" in (r.headers.get("location") or "")
+
+
+def test_ledger_redirects_to_planning_tab(client):
+    r = client.get("/ledger?symbol=601138", follow_redirects=False)
+    assert r.status_code == 302
+    loc = r.headers.get("location") or ""
+    assert "view=ledger" in loc
+    assert "symbol=601138" in loc
 
 
 def test_planning_view_planning_filters(client):
@@ -99,10 +141,13 @@ def test_graph_with_center(client):
     assert "601138" in r.text
 
 
-def test_portfolio_guard_placeholder(client):
-    r = client.get("/portfolio-guard")
-    assert r.status_code == 200
-    assert "持仓监管" in r.text
+def test_portfolio_guard_redirects_to_executing(client):
+    r = client.get("/portfolio-guard", follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers["location"] == "/planning?view=executing"
+    r2 = client.get("/portfolio-guard")
+    assert r2.status_code == 200
+    assert "持仓监护" in r2.text
 
 
 def test_graph_placeholder(client):

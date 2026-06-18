@@ -38,6 +38,13 @@ from apps.copilot.modules.planning.funnel import (
     get_or_create_container,
     hide_symbol_ui,
 )
+from apps.copilot.modules.planning.workspace_registry import (
+    ALLOWED_WORKBENCH_VIEWS,
+    DEFAULT_WORKBENCH_VIEW,
+    get_workspace,
+    workspace_display_name,
+    workbench_tab_items,
+)
 from apps.copilot.modules.planning.sandbox import (
     get_asset_sandbox,
     one_shot_global_deduction,
@@ -135,10 +142,9 @@ def _tpl(request: Request):
 async def _strategic_roadmap_context(session: AsyncSession, request: Request) -> dict:
     """滚动路线图 Tab 战略板块上下文。
 
-    [Ref: 30_ §4]
+    [Ref: 33_ §4]
     """
     from apps.copilot.modules.strategic.render import (
-        render_board_list,
         render_command_center_main,
         render_phase_panel,
     )
@@ -147,37 +153,77 @@ async def _strategic_roadmap_context(session: AsyncSession, request: Request) ->
         get_phase_detail,
         list_boards_summary,
     )
+    from apps.copilot.modules.strategic.z0_render import (
+        render_cvm_matrix_table,
+        render_core_pool_panel,
+        render_left_sidebar_z0,
+        render_p0_regime_banner,
+    )
+    from apps.copilot.modules.strategic.z0_workflow import (
+        get_active_dispatch_for_phase,
+        get_confirmed_core_pool,
+        get_latest_wind_scan,
+        list_cvm_scorecards,
+    )
 
     boards = await list_boards_summary(session)
     board_id_raw = request.query_params.get("board_id")
     phase_id_raw = request.query_params.get("phase_id")
+    z0_mode_raw = request.query_params.get("z0_mode")
     board_id: int | None = None
     phase_id: int | None = None
     if board_id_raw and str(board_id_raw).isdigit():
         board_id = int(board_id_raw)
-    elif boards:
+    elif boards and z0_mode_raw != "wind":
         board_id = boards[0]["id"]
     if phase_id_raw and str(phase_id_raw).isdigit():
         phase_id = int(phase_id_raw)
 
+    z0_mode = z0_mode_raw or ("wind" if not boards else "board")
+    if z0_mode == "wind":
+        board_id = None
+
+    wind_scan = await get_latest_wind_scan(session)
     detail = None
     phase_detail = None
+    cvm_html = ""
+    core_pool_html = ""
     if board_id:
         detail = await get_board_detail(session, board_id)
         pid = phase_id or (detail or {}).get("active_phase_id")
         if pid:
             phase_id = pid
             phase_detail = await get_phase_detail(session, pid)
+            rows = await list_cvm_scorecards(session, pid)
+            dispatch = await get_active_dispatch_for_phase(session, pid)
+            cvm_html = render_cvm_matrix_table(pid, rows, dispatch=dispatch)
+            pool = await get_confirmed_core_pool(session, pid)
+            core_pool_html = render_core_pool_panel(pid, pool, dispatch=dispatch)
+
+    p0 = (wind_scan or {}).get("p0_snapshot") or {}
+    left_html = render_left_sidebar_z0(
+        mode=z0_mode,
+        boards=boards,
+        selected_board_id=board_id,
+        wind_scan=wind_scan,
+    )
 
     return {
         "strategic_boards": boards,
         "strategic_board_id": board_id,
         "strategic_phase_id": phase_id,
-        "strategic_board_list_html": render_board_list(boards, selected_id=board_id),
+        "z0_mode": z0_mode,
+        "wind_scan": wind_scan,
+        "scan": wind_scan,
+        "strategic_left_sidebar_html": left_html,
+        "strategic_p0_banner_html": render_p0_regime_banner(p0),
+        "strategic_board_list_html": left_html,
         "strategic_main_html": render_command_center_main(
             detail, selected_phase_id=phase_id
         ),
         "strategic_panel_html": render_phase_panel(phase_detail) if phase_detail else "",
+        "strategic_cvm_html": cvm_html,
+        "strategic_core_pool_html": core_pool_html,
     }
 
 
@@ -384,15 +430,31 @@ async def opus_chat_page(request: Request):
     )
 
 
+@router.get("/ledger")
+async def ledger_entry(request: Request):
+    """Z4 横切入口 · [Ref: 33_ §3.1] → 投资工作台决策复盘 Tab。"""
+    from urllib.parse import urlencode
+
+    from fastapi.responses import RedirectResponse
+
+    q: dict[str, str] = {"view": "ledger"}
+    for key in ("symbol", "user_id"):
+        val = request.query_params.get(key)
+        if val:
+            q[key] = val
+    return RedirectResponse(url="/planning?" + urlencode(q), status_code=302)
+
+
 @router.get("/planning", response_class=HTMLResponse)
 async def planning_page(
     request: Request,
     session: AsyncSession = Depends(get_db),
 ):
-    from fastapi.responses import RedirectResponse
     from urllib.parse import urlencode
 
-    view = request.query_params.get("view", "radar")
+    from fastapi.responses import RedirectResponse
+
+    view = request.query_params.get("view", DEFAULT_WORKBENCH_VIEW)
     audit_tab = (request.query_params.get("audit_tab") or "data").strip()
     # 旧工作台链接 → 顶栏一级页面
     if view == "radar_chat" or (view in ("audit", "radar_audit") and audit_tab == "chat"):
@@ -402,9 +464,9 @@ async def planning_page(
         return RedirectResponse(url="/audit?" + urlencode(q), status_code=302)
     if view in ("radar_settings",):
         return RedirectResponse(url="/settings#radar-prefs", status_code=302)
-    allowed = ("radar", "planning", "executing", "roadmap")
+    allowed = tuple(ALLOWED_WORKBENCH_VIEWS)
     if view not in allowed:
-        view = "radar"
+        view = DEFAULT_WORKBENCH_VIEW
     from apps.copilot.modules.radar.workbench_prefs import load_prefs
 
     ctx: dict = {
@@ -412,24 +474,27 @@ async def planning_page(
         "workbench_prefs": load_prefs(),
         "radar_chat_models": RADAR_CHAT_MODELS,
         "radar_default_model": DEFAULT_CHAT_MODEL,
+        **_workbench_template_context(view),
     }
     if view == "roadmap":
         ctx.update(await _strategic_roadmap_context(session, request))
     if view in ("planning", "executing"):
         ctx["workspace_symbols_html"] = await build_workspace_symbols_html(session, view=view)
+    if view == "ledger":
+        ctx.update(await _load_ledger_page_context(session, request))
     return _tpl(request).TemplateResponse(request, "planning/workbench.html", ctx)
 
 
 @router.get("/planning/panel", response_class=HTMLResponse)
 async def planning_panel(
     request: Request,
-    view: str = "radar",
+    view: str = DEFAULT_WORKBENCH_VIEW,
     session: AsyncSession = Depends(get_db),
 ):
     """工作台内容区片段（HTMX 切换 Tab · 避免整页刷新）。"""
-    allowed = ("radar", "planning", "executing", "roadmap")
+    allowed = tuple(ALLOWED_WORKBENCH_VIEWS)
     if view not in allowed:
-        view = "radar"
+        view = DEFAULT_WORKBENCH_VIEW
     from apps.copilot.modules.radar.workbench_prefs import load_prefs
 
     ctx: dict = {
@@ -437,11 +502,14 @@ async def planning_panel(
         "workbench_prefs": load_prefs(),
         "radar_chat_models": RADAR_CHAT_MODELS,
         "radar_default_model": DEFAULT_CHAT_MODEL,
+        **_workbench_template_context(view),
     }
     if view == "roadmap":
         ctx.update(await _strategic_roadmap_context(session, request))
     if view in ("planning", "executing"):
         ctx["workspace_symbols_html"] = await build_workspace_symbols_html(session, view=view)
+    if view == "ledger":
+        ctx.update(await _load_ledger_page_context(session, request))
     return _tpl(request).TemplateResponse(
         request,
         "planning/_workbench_panel.html",
@@ -451,7 +519,10 @@ async def planning_panel(
 
 @router.get("/portfolio-guard", response_class=HTMLResponse)
 async def guard_page(request: Request):
-    return _tpl(request).TemplateResponse(request, "guard/workbench.html", {})
+    """兼容旧入口 · Z3 持仓监护室在投资工作台内。"""
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(url="/planning?view=executing", status_code=302)
 
 
 @router.get("/graph", response_class=HTMLResponse)
@@ -483,6 +554,77 @@ async def system_page(request: Request):
     if request.url.query:
         return RedirectResponse(url=f"/settings?{request.url.query}#radar-prefs", status_code=302)
     return RedirectResponse(url="/settings#radar-prefs", status_code=302)
+
+
+async def _load_ledger_page_context(
+    session: AsyncSession,
+    request: Request,
+    *,
+    user_id: str = "default",
+) -> dict[str, Any]:
+    """决策复盘库（Z4）：价值指标 + 归档标的 SSR。"""
+    from datetime import date, datetime, timezone
+
+    symbols = await list_workspace_symbols(session, view="ledger")
+    await session.commit()
+    from apps.copilot.modules.planning.workspace_render import render_archived_symbol_list
+
+    ledger_symbols_html = render_archived_symbol_list(symbols)
+
+    today = date.today()
+    start = datetime(today.year, today.month, 1, tzinfo=timezone.utc)
+    end_year, end_month = (
+        (today.year + 1, 1) if today.month == 12 else (today.year, today.month + 1)
+    )
+    end = datetime(end_year, end_month, 1, tzinfo=timezone.utc)
+
+    scs = type(
+        "SCS",
+        (),
+        {"score": 0, "base": 0, "contribution_sum": 0, "lag_penalty": 0, "sample_count": 0},
+    )()
+    ev = type(
+        "EV",
+        (),
+        {"total": 0, "hedge_value": 0, "gain_value": 0, "cost_value": 0},
+    )()
+    breaker = type(
+        "Breaker",
+        (),
+        {"paused": False, "reason": "", "last_window_size": 0, "last_bh_ratio": 0.0},
+    )()
+
+    ledger = getattr(request.app.state, "ledger", None)
+    if ledger:
+        try:
+            scs_co = await ledger["scs"].calculate(user_id=user_id, start=start, end=end)
+            ev_co = await ledger["ev"].calculate(user_id=user_id, start=start, end=end)
+            breaker_state = await ledger["breaker"].evaluate(user_id)
+            scs = scs_co
+            ev = ev_co
+            breaker = breaker_state
+        except Exception:
+            pass  # 复盘指标不可用时仍展示归档区
+
+    return {
+        "user_id": user_id,
+        "scs": scs,
+        "ev": ev,
+        "breaker": breaker,
+        "year": today.year,
+        "month": today.month,
+        "ledger_symbols_html": ledger_symbols_html,
+    }
+
+
+def _workbench_template_context(view: str) -> dict[str, Any]:
+    w = get_workspace(view)
+    return {
+        "workspace_tabs": workbench_tab_items(),
+        "workspace_display_name": w.display_name,
+        "workspace_tagline": w.tagline,
+        "workspace_zone": w.zone_code,
+    }
 
 
 async def _load_workspace_symbols_bundle(
@@ -530,7 +672,12 @@ async def _load_workspace_symbols_bundle(
 
 
 async def build_workspace_symbols_html(session: AsyncSession, *, view: str) -> str:
-    """工作台规划/执行区首屏 SSR · 与 /api/campaigns HTML 同构。"""
+    """工作台规划/执行/复盘区首屏 SSR · 与 /api/campaigns HTML 同构。"""
+    if view == "ledger":
+        symbols = await list_workspace_symbols(session, view="ledger")
+        from apps.copilot.modules.planning.workspace_render import render_archived_symbol_list
+
+        return render_archived_symbol_list(symbols)
     if view not in ("planning", "executing"):
         return ""
     (
@@ -563,8 +710,17 @@ async def api_list_campaigns(
 ):
     accept = request.headers.get("accept", "")
     want_html = "text/html" in accept or request.headers.get("hx-request")
-    # 标的级漏斗：planning/executing 视图按 funnel_stage 渲染标的卡（四区联动）
-    if view in ("planning", "executing"):
+    # 标的级漏斗：planning/executing/ledger 视图按 funnel_stage 渲染
+    if view in ("planning", "executing", "ledger"):
+        if view == "ledger":
+            symbols = await list_workspace_symbols(session, view="ledger")
+            if want_html:
+                from apps.copilot.modules.planning.workspace_render import (
+                    render_archived_symbol_list,
+                )
+
+                return HTMLResponse(render_archived_symbol_list(symbols))
+            return symbols
         (
             symbols,
             container_id,
@@ -1360,7 +1516,8 @@ async def api_promote_candidate(
             session,
             flash=(
                 f"✓ {display_name_for_symbol(sym, result.get('name'), allow_network=False)} "
-                f"({sym}) 已晋级到「规划中」· 可切到 📝 规划中 Tab"
+                f"({sym}) 已晋级到「{workspace_display_name('planning')}」· "
+                f"可切到 📝 {get_workspace('planning').tab_label} Tab"
             ),
         )
     return result
@@ -1787,8 +1944,9 @@ def _render_workspace_symbols_html(
     jl_summaries = jl_summaries or {}
     if not items:
         hint = {
-            "planning": "规划区暂无标的 · 从行情雷达晋级，或导入持仓",
-            "executing": "执行区暂无标的 · 在规划区人工确认晋级执行",
+            "planning": f"{workspace_display_name('planning')}暂无标的 · 从机会雷达晋级，或导入持仓",
+            "executing": f"{workspace_display_name('executing')}暂无标的 · 在买入论证台人工确认晋级",
+            "ledger": f"{workspace_display_name('ledger')}暂无归档标的",
         }.get(view, "暂无标的")
         return HTMLResponse(f"<p class='text-sm text-gray-500 py-6 text-center'>{hint}</p>")
 
@@ -2911,7 +3069,7 @@ async def api_promote_executing(
         return HTMLResponse(
             f"<div class='p-3 rounded-lg bg-green-50 text-green-700 text-sm'>"
             f"✓ 已人工确认晋级执行：{syms}（{mode_label}）。"
-            f"切到 🚀 执行中 Tab 查看仓位指导。</div>"
+            f"切到 🚀 {get_workspace('executing').tab_label} Tab 查看仓位指导。</div>"
         )
     return result
 

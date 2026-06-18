@@ -1,16 +1,22 @@
 {% extends "base.html" %}
-{% block title %}行情解析及规划 · AI 投资副驾驶{% endblock %}
+{% block title %}{{ workspace_display_name|default('投资工作台') }} · AI 投资副驾驶{% endblock %}
 {% block content %}
-{% set active = view|default('radar') %}
+{% set active = view|default('roadmap') %}
 
 {# ── 页头区块 ─────────────────────────────────────── #}
-<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-5">
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-4">
   <div class="flex items-center justify-between gap-3 flex-wrap">
     <div class="flex items-center gap-3">
       <span class="text-2xl">📡</span>
       <div>
-        <h1 class="text-xl font-bold text-gray-900 leading-tight">行情解析与规划工作台</h1>
-        <p class="text-sm text-gray-500 mt-0.5">四区漏斗 · 战略板块标签 · 6 维档案 · 三支柱监控</p>
+        <h1 class="text-xl font-bold text-gray-900 leading-tight">投资工作台</h1>
+        <p class="text-sm text-gray-500 mt-0.5" id="workbench-workspace-subtitle">
+          <span id="workbench-workspace-name">{{ workspace_display_name|default('产业风向台') }}</span>
+          <span class="text-gray-300 mx-1">·</span>
+          <span id="workbench-workspace-tagline">{{ workspace_tagline|default('五区并列 · 战略标签 · 证据链') }}</span>
+          <span class="text-gray-300 mx-1">·</span>
+          <span id="workbench-workspace-zone" class="font-mono text-[11px] text-gray-400">{{ workspace_zone|default('Z0') }}</span>
+        </p>
       </div>
     </div>
     <button type="button"
@@ -36,22 +42,21 @@
 
 <div id="strategic-promote-modal-root"></div>
 
-{# ── 四 Tab 导航（HTMX 局部切换 · 不整页刷新） ─────── #}
+{# ── 五区并列 Tab（HTMX 局部切换） ─────── #}
 <div class="flex gap-2 mb-5 flex-wrap">
-  {% for key, icon, label in [
-      ('radar',   '🔭', '行情雷达'),
-      ('planning','📝', '规划中'),
-      ('executing','🚀','执行中'),
-      ('roadmap', '🗓️', '滚动路线图')
-  ] %}
+  {% for key, icon, label, full, tagline, zone in workspace_tabs %}
   <a href="/planning?view={{ key }}"
-     class="workbench-tab flex-1 min-w-[120px] text-center no-underline rounded-xl px-4 py-3 text-sm font-semibold transition-all duration-150
+     class="workbench-tab flex-1 min-w-[108px] text-center no-underline rounded-xl px-3 py-3 text-sm font-semibold transition-all duration-150
             {% if active == key %}
-              bg-blue-600 text-white shadow-md ring-2 ring-blue-400 ring-offset-1
+              {% if key == 'ledger' %}bg-violet-600 text-white shadow-md ring-2 ring-violet-400 ring-offset-1
+              {% else %}bg-blue-600 text-white shadow-md ring-2 ring-blue-400 ring-offset-1{% endif %}
             {% else %}
               bg-white text-gray-700 border border-gray-200 shadow-sm hover:bg-gray-50 hover:text-gray-900 hover:border-gray-300
             {% endif %}"
      data-view="{{ key }}"
+     data-display-name="{{ full }}"
+     data-tagline="{{ tagline }}"
+     data-zone="{{ zone }}"
      hx-get="/planning/panel?view={{ key }}"
      hx-target="#workbench-panel"
      hx-swap="innerHTML"
@@ -74,7 +79,6 @@
 <div id="workbench-panel" data-view="{{ active }}" class="relative min-h-[12rem]">
   {% include "planning/_workbench_panel.html" %}
 </div>
-
 <style>
   .executing-fold-summary { display: block; }
   .executing-fold-summary::-webkit-details-marker { display: none; }
@@ -83,8 +87,10 @@
 
   <script>
     (function () {
-    var TAB_ON = 'bg-blue-600 text-white shadow-md ring-2 ring-blue-400 ring-offset-1';
+    var TAB_ON_BLUE = 'bg-blue-600 text-white shadow-md ring-2 ring-blue-400 ring-offset-1';
+    var TAB_ON_VIOLET = 'bg-violet-600 text-white shadow-md ring-2 ring-violet-400 ring-offset-1';
     var TAB_OFF = 'bg-white text-gray-700 border border-gray-200 shadow-sm hover:bg-gray-50 hover:text-gray-900 hover:border-gray-300';
+    var TAB_BASE = 'workbench-tab flex-1 min-w-[108px] text-center no-underline rounded-xl px-3 py-3 text-sm font-semibold transition-all duration-150 ';
 
     window.workbenchAbortRadarPolls = function () {
       ['radar-scan-progress', 'radar-candidates-list', 'radar-scan-result'].forEach(function (id) {
@@ -93,13 +99,39 @@
       });
     };
 
+    window.workbenchResolveView = function () {
+      try {
+        var fromUrl = new URLSearchParams(window.location.search).get('view');
+        if (fromUrl) return fromUrl;
+      } catch (e) { /* ignore */ }
+      var panel = document.getElementById('workbench-panel');
+      return (panel && panel.getAttribute('data-view')) || 'roadmap';
+    };
+
+    window.workbenchUpdateHeader = function (activeView) {
+      var tab = document.querySelector('.workbench-tab[data-view="' + activeView + '"]');
+      var nameEl = document.getElementById('workbench-workspace-name');
+      var tagEl = document.getElementById('workbench-workspace-tagline');
+      var zoneEl = document.getElementById('workbench-workspace-zone');
+      if (!tab || !nameEl) return;
+      var name = tab.getAttribute('data-display-name') || '';
+      var tagline = tab.getAttribute('data-tagline') || '';
+      var zone = tab.getAttribute('data-zone') || '';
+      nameEl.textContent = name;
+      if (tagEl) tagEl.textContent = tagline;
+      if (zoneEl) zoneEl.textContent = zone;
+      document.title = (name || '投资工作台') + ' · AI 投资副驾驶';
+    };
+
     window.workbenchSyncTabs = function (activeView) {
       document.querySelectorAll('.workbench-tab').forEach(function (a) {
         var on = a.getAttribute('data-view') === activeView;
-        a.className = 'workbench-tab flex-1 min-w-[120px] text-center no-underline rounded-xl px-4 py-3 text-sm font-semibold transition-all duration-150 ' + (on ? TAB_ON : TAB_OFF);
+        var onCls = a.getAttribute('data-view') === 'ledger' ? TAB_ON_VIOLET : TAB_ON_BLUE;
+        a.className = TAB_BASE + (on ? onCls : TAB_OFF);
       });
       var panel = document.getElementById('workbench-panel');
       if (panel) panel.setAttribute('data-view', activeView || '');
+      window.workbenchUpdateHeader(activeView);
     };
 
     /** 切换 Tab 后仅 process 带显式 hx-trigger 的节点（禁止 process 整 panel · 防误触发） */
@@ -137,7 +169,9 @@
       if (typeof htmx === 'undefined') return false;
       var panel = document.getElementById('workbench-panel');
       if (!panel) return false;
-      window.workbenchInitPanel(panel.getAttribute('data-view') || '');
+      var view = window.workbenchResolveView();
+      window.workbenchSyncTabs(view);
+      window.workbenchInitPanel(view);
       return true;
     };
 
@@ -145,7 +179,7 @@
       if (view === 'radar' && typeof window.radarBootRadarPanel === 'function') {
         window.radarBootRadarPanel();
       }
-      if (view === 'executing' || view === 'planning') {
+      if (view === 'executing' || view === 'planning' || view === 'ledger') {
         if (typeof window.executingBootCampaignsList === 'function') {
           window.executingBootCampaignsList();
         }
@@ -466,7 +500,7 @@
     document.body.addEventListener('htmx:afterSwap', function (ev) {
       var t = ev.detail && ev.detail.target;
       if (!t || t.id !== 'workbench-panel') return;
-      var view = t.getAttribute('data-view') || '';
+      var view = window.workbenchResolveView();
       window.executingDetailInflight = {};
       window.workbenchSyncTabs(view);
       window.workbenchInitPanel(view);

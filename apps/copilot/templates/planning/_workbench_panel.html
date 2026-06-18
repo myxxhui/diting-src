@@ -1,9 +1,9 @@
-{% set active = view|default('radar') %}
+{% set active = view|default('roadmap') %}
 {% if active == 'radar' %}
 <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-5">
   <div class="flex items-center gap-2 mb-4">
     <span class="text-lg">🔭</span>
-    <h2 class="text-base font-semibold text-gray-900">推理分析 · 行情雷达</h2>
+    <h2 class="text-base font-semibold text-gray-900">推理分析 · 机会雷达</h2>
   </div>
   <form id="radar-scan-form" class="mb-4"
         hx-post="/api/radar/scans"
@@ -1170,6 +1170,9 @@
 {% elif active == 'roadmap' %}
 {% include "planning/_roadmap_command_center.html" %}
 
+{% elif active == 'ledger' %}
+{% include "planning/_ledger_workspace.html" %}
+
 {% else %}
 <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
   <div class="px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
@@ -1177,7 +1180,7 @@
       <div class="flex items-center gap-2">
         <span class="text-lg">{% if active == 'planning' %}📝{% else %}🚀{% endif %}</span>
         <h2 class="text-base font-semibold text-gray-900">
-          {% if active == 'planning' %}规划中{% else %}执行中{% endif %}
+          {% if active == 'planning' %}买入论证台{% else %}持仓监护室{% endif %}
         </h2>
       </div>
       <p class="text-[11px] text-gray-400">

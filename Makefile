@@ -1594,6 +1594,68 @@ copilot-funnel-audit:
 copilot-funnel-all: copilot-funnel-migrate copilot-funnel-test copilot-funnel-audit
 	@echo "✅ [copilot-funnel-all] 四区漏斗标的级重构本机验收（清空重建用 copilot-funnel-cleanup 单独执行）"
 
+# ───────────── step_18 · 五区工作台 P0（33_ §12）─────────────────────────────
+.PHONY: copilot-step18-migrate copilot-step18-seed-ai-board copilot-step18-test copilot-step18-all
+
+copilot-step18-migrate:
+	@echo "▶ [copilot-step18-migrate] init_db（含 migrate_step18/45 战略表）"
+	$(RUNPY) -c "import asyncio; from apps.copilot.db.database import init_db; asyncio.run(init_db()); print('✅ step18 migrate ok')"
+
+copilot-step18-seed-ai-board:
+	@echo "▶ [copilot-step18-seed-ai-board] 附录 A · AI 产业生态样板"
+	@$(RUNPY) <<-'PY'
+	import asyncio
+	from apps.copilot.db.database import AsyncSessionLocal
+	from apps.copilot.modules.strategic.service import seed_ai_ecosystem_board
+
+	async def main():
+	    async with AsyncSessionLocal() as s:
+	        b = await seed_ai_ecosystem_board(s)
+	        await s.commit()
+	        print("✅ seed ok ·", b.name)
+
+	asyncio.run(main())
+	PY
+
+copilot-step18-test: _ensure-deps
+	@echo "▶ [copilot-step18-test] 五区 Tab + 战略指挥台 + 区际注册表（33_ §12 P0）"
+	$(RUNPY) -m pytest \
+		tests/copilot/test_strategic_board.py \
+		tests/copilot/test_workspace_registry.py \
+		tests/copilot/test_planning.py::test_planning_page_200 \
+		tests/copilot/test_planning.py::test_planning_ledger_view \
+		tests/copilot/test_planning.py::test_value_redirects_to_ledger_tab \
+		tests/copilot/test_planning.py::test_ledger_redirects_to_planning_tab \
+		-q
+
+copilot-step18-all: copilot-step18-migrate copilot-step18-seed-ai-board copilot-step18-test
+	@echo "✅ [copilot-step18-all] 五区工作台 P0 本机验收完成"
+	@echo "▶ 生产部署+HTTP 验收：cd ../diting-infra && make copilot-step18-deploy"
+
+# ───────────── Z0 段 A · 宏观风向标采集（34_ §3.0b · 29_ ARQ）────────────────
+.PHONY: copilot-zone-z0-collect copilot-zone-z0-collect-enqueue copilot-zone-z0-status \
+        copilot-zone-z0-wind-scan copilot-zone-z0-test
+
+copilot-zone-z0-collect:
+	@echo "▶ [copilot-zone-z0-collect] 首次/全量 M1→M5→M2→M0（直跑 · 无 Worker 时可用）"
+	PYTHONPATH=. python3 -m apps.copilot.jobs.z0_t0 z0-bootstrap-all
+
+copilot-zone-z0-collect-enqueue:
+	@echo "▶ [copilot-zone-z0-collect-enqueue] 入队 ARQ（Cron 轻量模式 · 需 Worker）"
+	PYTHONPATH=. python3 -m apps.copilot.jobs.z0_t0 z0-bootstrap-all --enqueue
+
+copilot-zone-z0-status:
+	@echo "▶ [copilot-zone-z0-status] 段 A 指标就绪状态"
+	PYTHONPATH=. python3 -m apps.copilot.jobs.z0_t0 --status
+
+copilot-zone-z0-wind-scan:
+	@echo "▶ [copilot-zone-z0-wind-scan] 仅 M0 合成 wind_scan"
+	PYTHONPATH=. python3 -m apps.copilot.jobs.z0_t0 z0-m0-wind-scan
+
+copilot-zone-z0-test: _ensure-deps
+	@echo "▶ [copilot-zone-z0-test] Z0 段 A + DeepSea 政策支路"
+	PYTHONPATH=. python3 -m pytest tests/copilot/test_z0_metrics.py tests/copilot/test_m2_policy_deepsea.py tests/copilot/test_policy_ingest.py -q
+
 # ─── 波次四 · 持久化 + 漏斗操作 + 采集数据 + 对话模型 ─────────────────────────
 .PHONY: copilot-wave4-prep copilot-wave4-test copilot-wave4-all copilot-wave4-tier2-verify
 

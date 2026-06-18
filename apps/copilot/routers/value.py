@@ -98,6 +98,14 @@ async def monthly_report(
 
 @view_router.get("", response_class=HTMLResponse)
 async def value_page(request: Request, user_id: str = Query("default")):
+    """兼容旧 /value 入口 → 决策复盘库 Tab。"""
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(url=f"/planning?view=ledger&user_id={user_id}", status_code=302)
+
+
+@view_router.get("/dashboard", response_class=HTMLResponse)
+async def value_dashboard_full(request: Request, user_id: str = Query("default")):
     svc = _services(request)
     templates = request.app.state.templates
     today = date.today()

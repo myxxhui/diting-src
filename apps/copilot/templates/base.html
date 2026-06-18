@@ -138,10 +138,9 @@
     <span class="nav-brand"><span class="nav-ico" aria-hidden="true">✈️</span> AI 投资副驾驶</span>
     <div class="nav-main">
       {{ nav_link('/', '总览', '🏠', _path == '/') }}
-      {{ nav_link('/portfolio-guard', '持仓监管', '🛡️', _path.startswith('/portfolio-guard')) }}
-      {{ nav_link('/planning', '行情解析及规划', '📡', _path.startswith('/planning')) }}
+      {{ nav_link('/planning?view=executing', '持仓监护', '🛡️', _path.startswith('/portfolio-guard') or (_path.startswith('/planning') and request.query_params.get('view') == 'executing')) }}
+      {{ nav_link('/planning', '推荐工作台', '📡', _path.startswith('/planning') or _path.startswith('/value') or _path.startswith('/ledger')) }}
       {{ nav_link('/graph', '产业图谱', '🕸️', _path.startswith('/graph')) }}
-      {{ nav_link('/value', '价值账本', '📒', _path.startswith('/value')) }}
       {{ nav_link('/audit', '审计', '🔍', _path.startswith('/audit')) }}
       {{ nav_link('/opus', 'Opus 分析', '🔬', _path.startswith('/opus')) }}
     </div>

@@ -1291,7 +1291,7 @@ class ProbeResult(Base):
 class StrategicBoard(Base):
     """5～10 年生态战略板块。
 
-    [Ref: 30_战略板块与滚动路线图_前端与数据契约.md]
+    [Ref: 33_五区工作台_前端区际联动与数据携带契约.md]
     """
 
     __tablename__ = "strategic_boards"
@@ -1303,6 +1303,7 @@ class StrategicBoard(Base):
     qualitative_md: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     barbell_config_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
     color_token: Mapped[str] = mapped_column(String(32), nullable=False, default="indigo")
+    source_wind_scan_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
@@ -1332,6 +1333,10 @@ class StrategicPhase(Base):
     playbook_md: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     cso_barbell_pct_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    layer: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    s_curve_position: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    concurrent_with_json: Mapped[Optional[list]] = mapped_column(JSON_TYPE, nullable=True)
+    niche_template_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
 
     board: Mapped["StrategicBoard"] = relationship(back_populates="phases")
     watch_symbols: Mapped[list["StrategicPhaseSymbol"]] = relationship(
@@ -1436,6 +1441,178 @@ class StrategicPhaseReview(Base):
     )
     review_md: Mapped[str] = mapped_column(Text, nullable=False)
     trigger_summary_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+# ─── Z0 指标先行（33_ §9.1a · wind_scan / CVM / scan_dispatch）────────────────
+
+
+class Z0MetricSnapshot(Base):
+    """Z0 段 A 指标快照 · metric_store 底库。"""
+
+    __tablename__ = "z0_metric_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    metric_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    as_of: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    payload_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ok")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class DeepSeaDocRegistry(Base):
+    """DeepSea 文档注册表 · 对象湖指针 + 血缘标签。"""
+
+    __tablename__ = "deepsea_doc_registry"
+
+    doc_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    symbol: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    doc_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    object_uri: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    parsed_uri: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    lineage_tags: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    content_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class DeepSeaIndicatorConfig(Base):
+    """DeepSea 指标 YAML 物化 · probe_registry 同步。"""
+
+    __tablename__ = "deepsea_indicator_config"
+
+    probe_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    signal_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    t1_pipeline: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    update_trigger: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    batch_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    cache_group: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    job_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    t0_source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    state_machine: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    lineage_filter: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    tier: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    cadence: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    config_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class DeepSeaIndicatorState(Base):
+    """DeepSea T1 状态快照 · 动量记忆 + 溯源 doc_id。"""
+
+    __tablename__ = "deepsea_indicator_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    probe_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    symbol: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    scope: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    signal_status: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    evidence_quote: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    momentum_delta: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    snapshot: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    doc_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    inferred_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class WindScan(Base):
+    """段 A · 宏观风口扫描快照。"""
+
+    __tablename__ = "wind_scans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    as_of: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    p0_snapshot_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    candidates_json: Mapped[Optional[list]] = mapped_column(JSON_TYPE, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="empty")
+    blocker: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class CvmScorecard(Base):
+    """段 C · CVM 核心池矩阵行。"""
+
+    __tablename__ = "cvm_scorecards"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    phase_id: Mapped[int] = mapped_column(
+        ForeignKey("strategic_phases.id"), nullable=False, index=True
+    )
+    niche_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    scores_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    anchor_path: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    role_suggested: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    pool_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    dispatch_selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    provisional: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    human_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    role_override: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    override_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("phase_id", "symbol", name="uq_cvm_phase_symbol"),
+    )
+
+
+class ScanDispatch(Base):
+    """Z0→Z1 扫描派单。"""
+
+    __tablename__ = "scan_dispatches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    board_id: Mapped[int] = mapped_column(
+        ForeignKey("strategic_boards.id"), nullable=False, index=True
+    )
+    phase_id: Mapped[int] = mapped_column(
+        ForeignKey("strategic_phases.id"), nullable=False, index=True
+    )
+    layer: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    theme: Mapped[str] = mapped_column(String(256), nullable=False)
+    symbols_json: Mapped[list] = mapped_column(JSON_TYPE, nullable=False, default=list)
+    symbol_roles_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    cvm_scorecard_ref: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    ecosystem_e1_e5_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    p0_snapshot_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    genesis_ref_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    supersedes_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    human_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    dispatched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
+class ScanDispatchAudit(Base):
+    """派单审计。"""
+
+    __tablename__ = "scan_dispatch_audit"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dispatch_id: Mapped[int] = mapped_column(
+        ForeignKey("scan_dispatches.id"), nullable=False, index=True
+    )
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    actor: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    reason_md: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )

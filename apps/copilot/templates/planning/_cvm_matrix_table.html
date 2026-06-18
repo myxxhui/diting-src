@@ -1,0 +1,95 @@
+{# 段 C · CVM 矩阵 [Ref: 33_ §4.6] #}
+<div id="cvm-matrix-panel" class="mt-6 border-t border-gray-100 pt-4">
+  <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+    <h3 class="text-sm font-semibold text-gray-800">CVM 核心池圈定 · 段 C</h3>
+    <div class="flex gap-2">
+      <button type="button"
+              class="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50"
+              hx-post="/api/strategic/phases/{{ phase_id }}/cvm/run"
+              hx-target="#cvm-matrix-panel"
+              hx-swap="outerHTML">
+        运行 CVM 评分
+      </button>
+    </div>
+  </div>
+
+  {% if error %}
+  <div class="text-xs text-red-700 bg-red-50 rounded-lg px-3 py-2 mb-2">{{ error }}</div>
+  {% endif %}
+
+  {% if not rows %}
+  <p class="text-xs text-gray-500 py-4 text-center border border-dashed rounded-lg">
+    尚未评分 · 请先配置阶段猎物池，再「运行 CVM 评分」
+  </p>
+  {% else %}
+  <form hx-post="/api/strategic/phases/{{ phase_id }}/cvm/confirm"
+        hx-target="#cvm-matrix-panel"
+        hx-swap="outerHTML"
+        class="overflow-x-auto">
+    <table class="min-w-full text-[11px] border border-gray-100 rounded-lg">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-2 py-2 text-left">dispatch</th>
+          <th class="px-2 py-2 text-left">symbol</th>
+          <th class="px-2 py-2">C1</th>
+          <th class="px-2 py-2">C2</th>
+          <th class="px-2 py-2">C3</th>
+          <th class="px-2 py-2">C4</th>
+          <th class="px-2 py-2">C5</th>
+          <th class="px-2 py-2">C6</th>
+          <th class="px-2 py-2">C7</th>
+          <th class="px-2 py-2 text-left">anchor</th>
+          <th class="px-2 py-2 text-left">role</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        {% set c7 = r.scores.c7.pass if r.scores and r.scores.c7 else true %}
+        <tr class="border-t {% if not c7 %}opacity-50 bg-gray-50{% endif %}">
+          <td class="px-2 py-2">
+            {% if r.pool_eligible and c7 %}
+            <input type="checkbox" name="symbols" value="{{ r.symbol }}"
+                   {% if r.dispatch_selected %}checked{% endif %} class="rounded" />
+            {% else %}—{% endif %}
+          </td>
+          <td class="px-2 py-2 font-mono">{{ r.symbol }}
+            {% if r.provisional %}<span class="text-amber-600" title="T1 覆盖不足">⚠️</span>{% endif %}
+          </td>
+          {% for dim in ['c1','c2','c3','c4','c5','c6'] %}
+          <td class="px-2 py-2 text-center">
+            {% set s = r.scores[dim] if r.scores else {} %}
+            {% set band = s.band or s.bypass_risk or '—' %}
+            <span class="px-1 rounded {% if band in ['high','mid_high'] %}bg-emerald-100 text-emerald-800{% elif band == 'low' %}bg-red-100{% else %}bg-gray-100{% endif %}">{{ band }}</span>
+          </td>
+          {% endfor %}
+          <td class="px-2 py-2 text-center">{% if c7 %}🟢{% else %}🔴{% endif %}</td>
+          <td class="px-2 py-2">{{ r.anchor_path or '—' }}</td>
+          <td class="px-2 py-2">{{ r.role_effective or r.role_suggested or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="flex flex-wrap gap-2 mt-3">
+      <button type="submit" class="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white">
+        确认核心池
+      </button>
+      <button type="button"
+              class="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white"
+              hx-post="/api/strategic/phases/{{ phase_id }}/dispatch"
+              hx-target="#dispatch-toast"
+              hx-swap="innerHTML"
+              {% if not rows|selectattr('human_confirmed')|list %}disabled title="须先确认核心池"{% endif %}>
+        派单至机会雷达
+      </button>
+    </div>
+  </form>
+  {% endif %}
+
+  {% if dispatch and dispatch.status == 'active' %}
+  <div class="mt-2 text-xs text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">
+    ✓ 已派单 #{{ dispatch.id }} · {{ dispatch.theme }} · {{ dispatch.symbols|join(', ') }}
+    <a href="/planning?view=radar" class="underline ml-2">前往机会雷达 →</a>
+  </div>
+  {% endif %}
+  <div id="dispatch-toast"></div>
+</div>

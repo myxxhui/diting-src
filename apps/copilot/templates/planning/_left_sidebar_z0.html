@@ -1,0 +1,58 @@
+{# 左栏 · 风口/板块双模式 [Ref: 33_ §4.1] #}
+<div class="px-2 py-2 border-b border-gray-100 flex gap-1 text-[10px]">
+  <a href="/planning?view=roadmap&z0_mode=wind"
+     class="flex-1 text-center py-1 rounded {% if mode == 'wind' %}bg-sky-100 text-sky-800 font-semibold{% else %}text-gray-500 hover:bg-gray-100{% endif %}">
+    宏观风向标
+  </a>
+  <a href="/planning?view=roadmap&z0_mode=board{% if selected_board_id %}&board_id={{ selected_board_id }}{% endif %}"
+     class="flex-1 text-center py-1 rounded {% if mode == 'board' %}bg-indigo-100 text-indigo-800 font-semibold{% else %}text-gray-500 hover:bg-gray-100{% endif %}">
+    战略板块
+  </a>
+</div>
+
+{% if mode == 'wind' %}
+<div class="p-2 text-xs text-gray-600 space-y-2">
+  <p class="text-gray-500">段 A · 指标先行 · 无 board 时从此开始</p>
+  {% if wind_scan and wind_scan.candidates %}
+  <ul class="space-y-1">
+    {% for c in wind_scan.candidates[:5] %}
+    <li class="truncate">· {{ c.sector }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="text-gray-400">运行风向标后显示 Top-N</p>
+  {% endif %}
+  <button type="button"
+          class="w-full mt-2 text-xs px-2 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+          hx-get="/api/strategic/genesis/wizard?step=1"
+          hx-target="#genesis-wizard-root"
+          hx-swap="innerHTML">
+    从候选建板
+  </button>
+</div>
+{% else %}
+<div id="strategic-board-list-inner">
+  {% if boards %}
+    {% for b in boards %}
+    <div role="button" tabindex="0"
+         class="block px-3 py-3 cursor-pointer border-l-4 {% if b.id == selected_board_id %}border-indigo-500 bg-indigo-50{% else %}border-transparent hover:bg-gray-50{% endif %}"
+         hx-get="/api/strategic/command-center?board_id={{ b.id }}"
+         hx-target="#strategic-command-main"
+         hx-swap="innerHTML"
+         hx-push-url="/planning?view=roadmap&z0_mode=board&board_id={{ b.id }}">
+      <div class="font-semibold text-gray-900 text-sm">{{ b.name }}</div>
+      <div class="text-xs text-gray-500">{{ b.horizon_start }}–{{ b.horizon_end }}</div>
+      <div class="text-xs text-gray-600 truncate">▶ {{ b.active_phase_name or '—' }}</div>
+    </div>
+    {% endfor %}
+  {% else %}
+  <div class="p-4 text-center text-sm text-gray-500">
+    <p class="mb-2">尚无战略板块</p>
+    <button type="button" class="text-indigo-600 underline text-xs"
+            hx-get="/api/strategic/genesis/wizard?step=1"
+            hx-target="#genesis-wizard-root"
+            hx-swap="innerHTML">genesis 建板</button>
+  </div>
+  {% endif %}
+</div>
+{% endif %}

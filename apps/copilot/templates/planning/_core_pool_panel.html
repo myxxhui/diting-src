@@ -1,0 +1,43 @@
+{# 右栏 · 已确认核心猎物池 [Ref: 33_ §4.6] #}
+<div class="border-t border-gray-100 pt-3 mt-3">
+  <h4 class="text-xs font-semibold text-gray-700 mb-2">【段 C】核心猎物池（已确认）</h4>
+  {% if pool %}
+  <ul class="space-y-1.5 max-h-48 overflow-y-auto">
+    {% for r in pool %}
+    <li class="flex items-center justify-between gap-2 text-xs py-1 border-b border-gray-50">
+      <span>
+        <span class="font-mono font-medium">{{ r.symbol }}</span>
+        <span class="text-gray-500 ml-1">{{ r.role_effective or r.role_suggested }}</span>
+        {% if r.role_suggested == 'representative' %}<span class="text-gray-400">仅对照</span>{% endif %}
+        {% if r.provisional %}<span class="text-amber-600" title="T1 覆盖不足">⚠️</span>{% endif %}
+      </span>
+      <span class="text-[10px] text-gray-400">{{ r.anchor_path }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="text-xs text-gray-400">CVM 确认后显示 · C7 pass 标的</p>
+  {% endif %}
+
+  {% if dispatch and dispatch.status == 'active' %}
+  <div class="mt-2 flex flex-wrap gap-2">
+    <span class="text-[10px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-800">
+      已派单 Z1
+    </span>
+    <button type="button" class="text-[10px] text-red-600 underline"
+            hx-post="/api/strategic/dispatches/{{ dispatch.id }}/revoke"
+            hx-target="#strategic-phase-panel"
+            hx-swap="innerHTML">
+      撤销派单
+    </button>
+  </div>
+  {% elif pool %}
+  <button type="button"
+          class="mt-2 w-full text-xs px-2 py-1.5 rounded-lg bg-violet-600 text-white"
+          hx-post="/api/strategic/phases/{{ phase_id }}/dispatch"
+          hx-target="#strategic-phase-panel"
+          hx-swap="innerHTML">
+    派单至机会雷达
+  </button>
+  {% endif %}
+</div>

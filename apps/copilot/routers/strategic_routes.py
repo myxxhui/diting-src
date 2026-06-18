@@ -59,21 +59,20 @@ async def api_strategic_boards_list(
 
 @router.post("/api/strategic/boards/seed-ai", response_class=HTMLResponse)
 async def api_seed_ai_board(session: AsyncSession = Depends(get_db)):
+    from apps.copilot.modules.strategic.z0_render import render_left_sidebar_z0
+    from apps.copilot.routers.strategic_z0_routes import _command_main_bundle, _phase_panel_bundle
+
     board = await seed_ai_ecosystem_board(session)
     await session.commit()
     boards = await list_boards_summary(session)
     detail = await get_board_detail(session, board.id)
     active_pid = detail.get("active_phase_id") if detail else None
-    panel = ""
-    if active_pid:
-        phase = await get_phase_detail(session, active_pid)
-        if phase:
-            panel = render_phase_panel(phase)
+    main, cvm_html = await _command_main_bundle(session, board.id, active_pid)
+    panel = await _phase_panel_bundle(session, active_pid) if active_pid else ""
+    left = render_left_sidebar_z0(mode="board", boards=boards, selected_board_id=board.id)
     return HTMLResponse(
-        f"<div id='strategic-board-list' hx-swap-oob='innerHTML'>"
-        f"{render_board_list(boards, selected_id=board.id)}</div>"
-        f"<div id='strategic-command-main' hx-swap-oob='innerHTML'>"
-        f"{render_command_center_main(detail, selected_phase_id=active_pid)}</div>"
+        f"<div id='strategic-left-sidebar' hx-swap-oob='innerHTML'>{left}</div>"
+        f"<div id='strategic-command-main' hx-swap-oob='innerHTML'>{main}{cvm_html}</div>"
         f"<div id='strategic-phase-panel' hx-swap-oob='innerHTML'>{panel}</div>"
         f"<div class='p-2 text-xs text-emerald-700'>✓ 已加载 AI 产业生态样板</div>"
     )
@@ -104,16 +103,15 @@ async def api_create_board(
     boards = await list_boards_summary(session)
     detail = await get_board_detail(session, board.id)
     active_pid = detail.get("active_phase_id") if detail else None
-    panel = ""
-    if active_pid:
-        phase = await get_phase_detail(session, active_pid)
-        if phase:
-            panel = render_phase_panel(phase)
+    from apps.copilot.modules.strategic.z0_render import render_left_sidebar_z0
+    from apps.copilot.routers.strategic_z0_routes import _command_main_bundle, _phase_panel_bundle
+
+    main, cvm_html = await _command_main_bundle(session, board.id, active_pid)
+    panel = await _phase_panel_bundle(session, active_pid) if active_pid else ""
+    left = render_left_sidebar_z0(mode="board", boards=boards, selected_board_id=board.id)
     return HTMLResponse(
-        f"<div id='strategic-board-list' hx-swap-oob='innerHTML'>"
-        f"{render_board_list(boards, selected_id=board.id)}</div>"
-        f"<div id='strategic-command-main' hx-swap-oob='innerHTML'>"
-        f"{render_command_center_main(detail, selected_phase_id=active_pid)}</div>"
+        f"<div id='strategic-left-sidebar' hx-swap-oob='innerHTML'>{left}</div>"
+        f"<div id='strategic-command-main' hx-swap-oob='innerHTML'>{main}{cvm_html}</div>"
         f"<div id='strategic-phase-panel' hx-swap-oob='innerHTML'>{panel}</div>"
         f"<div class='p-2 text-xs text-emerald-700'>✓ 已创建「{_esc(board.name)}」</div>"
     )
@@ -125,28 +123,30 @@ async def api_command_center(
     phase_id: Optional[int] = None,
     session: AsyncSession = Depends(get_db),
 ):
+    from apps.copilot.routers.strategic_z0_routes import _command_main_bundle, _phase_panel_bundle
+
     detail = await get_board_detail(session, board_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="板块不存在")
     sel = phase_id or detail.get("active_phase_id")
-    main = render_command_center_main(detail, selected_phase_id=sel)
+    main, cvm_html = await _command_main_bundle(session, board_id, sel)
     oob_panel = ""
     if sel:
-        phase = await get_phase_detail(session, sel)
-        if phase:
-            oob_panel = (
-                f"<div id='strategic-phase-panel' hx-swap-oob='innerHTML'>"
-                f"{render_phase_panel(phase)}</div>"
-            )
-    return HTMLResponse(oob_panel + main)
+        oob_panel = (
+            f"<div id='strategic-phase-panel' hx-swap-oob='innerHTML'>"
+            f"{await _phase_panel_bundle(session, sel)}</div>"
+        )
+    return HTMLResponse(oob_panel + main + cvm_html)
 
 
 @router.get("/api/strategic/phases/{phase_id}/panel", response_class=HTMLResponse)
 async def api_phase_panel(phase_id: int, session: AsyncSession = Depends(get_db)):
+    from apps.copilot.routers.strategic_z0_routes import _phase_panel_bundle
+
     phase = await get_phase_detail(session, phase_id)
     if phase is None:
         raise HTTPException(status_code=404, detail="阶段不存在")
-    return HTMLResponse(render_phase_panel(phase))
+    return HTMLResponse(await _phase_panel_bundle(session, phase_id))
 
 
 @router.get("/api/strategic/phases/{phase_id}/expand", response_class=HTMLResponse)

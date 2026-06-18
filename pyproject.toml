@@ -46,7 +46,7 @@ copilot = [
     "feedparser>=6.0",
     "jieba>=0.42",
     "arq>=0.26",
-    "opensearch-py>=2.4",
+    "psycopg2-binary>=2.9",
     "pytesseract>=0.3",
     "playwright>=1.40",
 ]

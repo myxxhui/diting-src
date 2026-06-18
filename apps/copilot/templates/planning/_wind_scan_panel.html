@@ -1,0 +1,84 @@
+{# 段 A · 宏观风向标 [Ref: 33_ §4.3] #}
+<div id="wind-scan-panel" class="space-y-4">
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <h3 class="text-sm font-semibold text-gray-800">宏观风向标 · wind_scan</h3>
+    <div class="flex flex-wrap gap-2">
+      <button type="button"
+              class="text-xs px-3 py-1.5 rounded-lg border border-sky-200 text-sky-800 hover:bg-sky-50"
+              hx-post="/api/strategic/z0/collect/run?job_id=z0-bootstrap-all"
+              hx-target="#wind-scan-panel"
+              hx-swap="outerHTML">
+        采集宏观指标
+      </button>
+      <button type="button"
+              class="text-xs px-3 py-1.5 rounded-lg bg-sky-600 text-white hover:bg-sky-700"
+              hx-post="/api/strategic/wind-scan/run"
+              hx-target="#wind-scan-panel"
+              hx-swap="outerHTML">
+        刷新风向标
+      </button>
+    </div>
+  </div>
+
+  {% if scan and scan.status == 'ready' %}
+  <div class="rounded-lg border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs text-emerald-900 space-y-1">
+    <p>段 A 就绪 · {{ scan.candidates|length }} 个候选赛道 · advisory_only</p>
+    <p class="text-emerald-800/90">说明：启动期为<strong>政策标题关键词 + 概念热度</strong>规则合成，<strong>不是</strong>未来 5～10 年「最具潜力板块」排名；扩展期接规划纲要与 LLM T2 再升维。</p>
+  </div>
+  {% elif scan and scan.status == 'error' %}
+  <div class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+    {{ scan.blocker or '采集失败' }}
+  </div>
+  {% elif scan and scan.status == 'empty' %}
+  <div class="rounded-lg border border-amber-100 bg-amber-50/80 px-3 py-2 text-xs text-amber-900">
+    暂无显著风口偏移 · {{ scan.blocker or '待宏观采集就绪' }}
+  </div>
+  {% elif scan and scan.candidates %}
+  <div class="overflow-x-auto border border-gray-100 rounded-lg">
+    <table class="min-w-full text-xs">
+      <thead class="bg-gray-50 text-gray-600">
+        <tr>
+          <th class="px-2 py-2 text-left w-8">#</th>
+          <th class="px-2 py-2 text-left">赛道</th>
+          <th class="px-2 py-2 text-left w-24">wind_score</th>
+          <th class="px-2 py-2 text-left">证据摘要</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in scan.candidates %}
+        <tr class="border-t border-gray-50">
+          <td class="px-2 py-2">{{ loop.index }}</td>
+          <td class="px-2 py-2 font-medium">{{ c.sector }}</td>
+          <td class="px-2 py-2">
+            {% if c.wind_score is not none %}
+            <div class="h-1.5 bg-gray-100 rounded-full"><div class="h-full bg-sky-500 rounded-full" style="width: {{ (c.wind_score * 100)|int }}%"></div></div>
+            {% else %}—{% endif %}
+          </td>
+          <td class="px-2 py-2 text-gray-500 truncate max-w-[200px]">{{ c.evidence_summary or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-500">
+    尚未运行风向标 · 点击「刷新风向标」开始段 A
+  </div>
+  {% endif %}
+
+  <div class="flex flex-wrap gap-2 pt-2 border-t border-gray-100">
+    <button type="button"
+            class="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
+            hx-get="/api/strategic/genesis/wizard?step=1"
+            hx-target="#genesis-wizard-root"
+            hx-swap="innerHTML">
+      从候选建板（genesis）
+    </button>
+    {% if scan and scan.p0_snapshot %}
+    <span class="text-[10px] text-gray-500 self-center">
+      P0: {{ scan.p0_snapshot.macro_regime or 'pending' }} ·
+      流动性: {{ scan.p0_snapshot.liquidity_regime or 'pending' }}
+    </span>
+    {% endif %}
+  </div>
+</div>

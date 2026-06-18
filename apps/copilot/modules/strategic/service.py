@@ -1,6 +1,6 @@
 """战略板块服务层。
 
-[Ref: 30_战略板块与滚动路线图_前端与数据契约.md]
+[Ref: 33_五区工作台_前端区际联动与数据携带契约.md]
 """
 from __future__ import annotations
 
@@ -241,6 +241,10 @@ async def get_phase_detail(session: AsyncSession, phase_id: int) -> Optional[dic
         "situation_md": ph.situation_md,
         "playbook_md": ph.playbook_md,
         "cso_barbell_pct_json": ph.cso_barbell_pct_json,
+        "layer": ph.layer,
+        "s_curve_position": ph.s_curve_position,
+        "niche_template_json": ph.niche_template_json,
+        "concurrent_with_json": ph.concurrent_with_json,
         "progress_pct": phase_progress_pct(ph.start_year, ph.end_year),
         "probes": probes,
         "symbols": symbols,

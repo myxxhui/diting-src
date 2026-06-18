@@ -1,8 +1,9 @@
 {% extends "base.html" %}
-{% block title %}价值账本 · AI 投资副驾驶{% endblock %}
+{% block title %}决策复盘库 · AI 投资副驾驶{% endblock %}
 {% block content %}
 <div class="page-value" x-data="{ }">
-  <h1>价值账本（本月）</h1>
+  <p class="text-sm text-gray-500 mb-3"><a href="/planning?view=ledger" class="text-indigo-600 underline">← 返回投资工作台 · 决策复盘 Tab</a></p>
+  <h1>决策复盘库（本月）</h1>
 
   {% if breaker.paused %}
   <div class="banner banner-red" style="background:#fee2e2;color:#991b1b;padding:12px;border-radius:8px;margin-bottom:16px;">

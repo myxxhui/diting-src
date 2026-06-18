@@ -43,6 +43,8 @@ COPY scripts ./scripts
 # DeepSea probe_registry · Cursor 路由真相源（[Ref: 28_ §2.13 · 29_ §5.4]）
 COPY data/config/probe_registry ./data/config/probe_registry
 COPY data/config/executing_profiles ./data/config/executing_profiles
+# Z0 宏观风向标 · metric_registry / 政策 RSS / 关键词（[Ref: 29_ §5.1 · 34_ §3.2]）
+COPY data/config/metrics ./data/config/metrics
 
 RUN mkdir -p /data /data/reports /config
 

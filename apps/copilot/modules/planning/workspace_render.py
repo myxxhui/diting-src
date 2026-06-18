@@ -1,12 +1,14 @@
 """规划/执行工作区标的卡片 HTML。
 
 [Ref: 24_行情解析与规划工作台_需求实现表.md]
-[Ref: 30_战略板块与滚动路线图_前端与数据契约.md]
+[Ref: 32_五区漏斗工作流与数据工程标准化规约.md §1.4]
 """
 from __future__ import annotations
 
 import html as _html
 from typing import Any, Callable, Optional
+
+from apps.copilot.modules.planning.workspace_registry import workspace_list_label, workspace_tab_label
 
 _PHASE_LABEL = {
     "expectation": ("📈 炒预期", "bg-blue-50 text-blue-700 border-blue-100"),
@@ -216,7 +218,7 @@ def render_planning_symbol_card(
         f"<span class='font-semibold text-gray-900'>{name}</span>"
         f"<span class='text-gray-400 text-xs font-mono'>{sym_esc}</span>"
         f"<span class='text-[10px] px-1.5 py-0.5 rounded border border-indigo-200 "
-        f"bg-indigo-50 text-indigo-700 font-medium'>规划中</span>"
+        f"bg-indigo-50 text-indigo-700 font-medium'>{_esc(workspace_tab_label('planning'))}</span>"
         f"</div>"
         f"<div class='flex flex-wrap items-center gap-2 mt-1.5'>{phase}{tag_hint}</div>"
         f"<p class='text-[11px] text-gray-400 mt-1'>展开 · 战略归属 · 晋级 · 证伪 · 沙盒</p>"
@@ -376,8 +378,14 @@ def render_workspace_symbol_list(
     view: str,
     count: int,
 ) -> str:
-    label = "规划中" if view == "planning" else "执行中"
-    count_cls = "text-indigo-700" if view == "planning" else "text-emerald-700"
+    label = workspace_list_label(view)
+    count_cls = (
+        "text-indigo-700"
+        if view == "planning"
+        else "text-emerald-700"
+        if view == "executing"
+        else "text-violet-700"
+    )
     header = (
         f"<div class='flex items-center justify-between gap-2 mb-3 px-1'>"
         f"<span class='text-xs font-medium {count_cls}'>{label} · {count} 只标的</span>"
@@ -385,3 +393,39 @@ def render_workspace_symbol_list(
     )
     body = "".join(cards)
     return f"<div class='workspace-symbol-list space-y-0' onclick='event.stopPropagation()'>{header}{body}</div>"
+
+
+def render_archived_symbol_card(s: dict[str, Any]) -> str:
+    sym = s.get("symbol", "")
+    name = _esc(s.get("name", sym))
+    sym_esc = _esc(sym)
+    return (
+        f"<div class='archived-symbol-card border border-gray-200 rounded-xl bg-white px-4 py-3 mb-2 "
+        f"flex flex-wrap items-center justify-between gap-2'>"
+        f"<div>"
+        f"<span class='font-semibold text-gray-900'>{name}</span>"
+        f"<span class='text-gray-400 text-xs font-mono ml-2'>{sym_esc}</span>"
+        f"<span class='text-[10px] ml-2 px-1.5 py-0.5 rounded border border-violet-200 "
+        f"bg-violet-50 text-violet-700'>已归档</span>"
+        f"</div>"
+        f"<form hx-post='/api/funnel/symbols/{sym_esc}/demote' hx-swap='none' class='inline'>"
+        f"<button type='submit' class='text-xs text-indigo-600 hover:underline'>"
+        f"恢复到持仓监护</button></form>"
+        f"</div>"
+    )
+
+
+def render_archived_symbol_list(symbols: list[dict[str, Any]]) -> str:
+    if not symbols:
+        return (
+            "<p class='text-sm text-gray-500 py-6 text-center'>"
+            "暂无归档标的 · 执行波次完成后可从路线图归档，或在本波结束时标记归档</p>"
+        )
+    cards = [render_archived_symbol_card(s) for s in symbols]
+    header = (
+        f"<div class='flex items-center justify-between gap-2 mb-3 px-1'>"
+        f"<span class='text-xs font-medium text-violet-700'>"
+        f"{workspace_list_label('ledger')} · {len(symbols)} 只标的</span>"
+        f"<span class='text-[11px] text-gray-400'>归档后可在此复盘 · 可恢复至监护</span></div>"
+    )
+    return f"<div class='archived-symbol-list'>{header}{''.join(cards)}</div>"

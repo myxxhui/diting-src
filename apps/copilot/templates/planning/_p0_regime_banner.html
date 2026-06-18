@@ -1,0 +1,10 @@
+{# P0/P0′ 广播条 [Ref: 33_ §4.5] #}
+<div class="rounded-lg border border-gray-100 bg-slate-50 px-3 py-2 text-xs text-slate-700 mb-3">
+  <div class="font-medium text-slate-800 mb-1">P0 / P0′ 全局态</div>
+  <div class="flex flex-wrap gap-3">
+    <span>宏观 regime: <strong>{{ p0.macro_regime or '⚪ pending' }}</strong></span>
+    <span>流动性: <strong>{{ p0.liquidity_regime or '⚪ pending' }}</strong></span>
+    {% if p0.p0_prime %}<span>P0′: {{ p0.p0_prime }}</span>{% endif %}
+  </div>
+  <p class="text-[10px] text-gray-500 mt-1">Living Z0 · 全 Tab 广播（advisory）</p>
+</div>

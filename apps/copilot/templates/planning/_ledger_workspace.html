@@ -1,0 +1,61 @@
+{# Z4 决策复盘库 · [Ref: 32_ §1.4] #}
+<div class="space-y-5">
+  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+    <div class="flex items-start justify-between gap-3 flex-wrap">
+      <div>
+        <div class="flex items-center gap-2 mb-1">
+          <span class="text-lg">📊</span>
+          <h2 class="text-base font-semibold text-gray-900">决策复盘库</h2>
+        </div>
+        <p class="text-sm text-gray-500">验过去对错，校系统规则 · 影子账本 · 探针体检 · 归档标的</p>
+      </div>
+      <span class="text-[11px] px-2 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-100">
+        横切工作区 · 不占漏斗主链
+      </span>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+    <h3 class="text-sm font-semibold text-gray-800 mb-3">① 价值复盘（本月）</h3>
+    {% include "value/_dashboard_fragment.html" %}
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    <div class="px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-violet-50/80 to-white">
+      <h3 class="text-sm font-semibold text-gray-900">② 归档标的</h3>
+      <p class="text-[11px] text-gray-500 mt-1">本波已了结 · 可恢复至持仓监护继续跟踪</p>
+    </div>
+    <div class="p-4">
+      <div id="ledger-archived-loader"
+           data-campaigns-view="ledger"
+           {% if ledger_symbols_html %}
+           data-loaded="1"
+           {% else %}
+           hx-get="/api/campaigns?view=ledger"
+           hx-trigger="load once"
+           hx-swap="innerHTML"
+           {% endif %}>
+        {% if ledger_symbols_html %}
+          {{ ledger_symbols_html|safe }}
+        {% else %}
+        <div class="text-gray-400 text-sm py-6 flex items-center justify-center gap-2">
+          <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+          </svg>
+          加载归档列表…
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+    <h3 class="text-sm font-semibold text-gray-800 mb-2">③ 复盘提醒（规划）</h3>
+    <ul class="text-sm text-gray-600 space-y-1.5 list-disc pl-5">
+      <li>逻辑正确但影子组合跑输 → 规则重建建议</li>
+      <li>探针 precision 月检 → 误报/漏报校准</li>
+      <li>季审反吃灰 → 停采无决策终点的指标</li>
+    </ul>
+  </div>
+</div>

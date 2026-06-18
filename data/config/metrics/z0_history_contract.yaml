@@ -1,0 +1,58 @@
+# Z0 段 A T0 历史回填合约 · 对齐 34_ §2.2 / §3.1～§3.4
+# [Ref: 34_五区指标矩阵与T0-T2集成规约.md]
+schema_version: "1.0"
+segment: A
+
+metrics:
+  M.macro.gdp_yoy:
+    history_required: "12个季度"
+    min_points: 8
+    share_scope: S0
+  M.macro.pmi:
+    history_required: "36个月"
+    min_points: 24
+    share_scope: S0
+  M.macro.cpi_ppi_spread:
+    history_required: "36个月"
+    min_points: 24
+    share_scope: S0
+  M.macro.social_financing:
+    history_required: "36个月"
+    min_points: 24
+    share_scope: S0
+  M.macro.m2_yoy:
+    history_required: "36个月"
+    min_points: 24
+    share_scope: S0
+  M.macro.us10y:
+    history_required: "24个月"
+    min_points: 200
+    share_scope: S0
+  M.macro.vix:
+    history_required: "3年"
+    min_points: 200
+    share_scope: S0
+  M.liq.north_net_20d:
+    history_required: "3年"
+    min_points: 200
+    share_scope: S0
+  M.liq.margin_balance:
+    history_required: "3年"
+    min_points: 200
+    share_scope: S0
+  M.sector.concept_heat:
+    history_required: "当日快照"
+    min_points: 1
+    share_scope: S0
+  M.sector.policy_direction:
+    history_required: "滚动24个月"
+    min_points: 1
+    share_scope: S0
+    note: "T0=DeepSea doc_registry 全文+元数据；T1 enum 后续"
+
+policy_t0:
+  lookback_days: 730
+  max_items_per_feed: 80
+  fetch_full_text: true
+  full_text_max_chars: 48000
+  min_full_text_chars: 200

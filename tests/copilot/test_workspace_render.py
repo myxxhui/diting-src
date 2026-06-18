@@ -71,4 +71,4 @@ def test_workspace_tag_oob_fragments():
 
 def test_workspace_list_header():
     html = render_workspace_symbol_list(["<div>x</div>"], view="executing", count=3)
-    assert "执行中 · 3 只标的" in html
+    assert "持仓监护室 · 3 只标的" in html
