@@ -704,12 +704,12 @@ def render_margin_short_skew_card(
             ("融资余额(元)", rm.get("margin_balance"), "neutral"),
             ("融券余额(元)", rm.get("short_balance"), "outline"),
             ("融资买入额(元)", rm.get("margin_purchase_today"), "positive"),
-            ("杠杆占流通盘", rm.get("margin_to_float_ratio"), "highlight"),
+            ("两融占流通盘", rm.get("margin_to_float_ratio"), "highlight"),
             ("250日均占盘比", rm.get("250d_mean_ratio"), "outline"),
             ("披露滞后(日)", rm.get("settlement_lag_days"), "outline"),
         ],
         metric_formatters={
-            "杠杆占流通盘": _ratio_fmt,
+            "两融占流通盘": _ratio_fmt,
             "250日均占盘比": _ratio_fmt,
         },
         alert_html=alert,
@@ -776,13 +776,13 @@ def render_turnover_acceleration_card(
         calculation_logic=str(node.get("calculation_logic") or ""),
         source=str(node.get("source") or ""),
         metric_items=[
-            ("今日换手(小数)", rm.get("current_turnover_f"), "highlight"),
+            ("今日换手率", rm.get("current_turnover_f"), "highlight"),
             ("20日均换手", rm.get("20d_mean_turnover_f"), "outline"),
             ("120日加速分位", rm.get("120d_accel_percentile"), "neutral"),
             ("量比", rm.get("volume_ratio"), "outline"),
         ],
         metric_formatters={
-            "今日换手(小数)": _pct_fmt,
+            "今日换手率": _pct_fmt,
             "20日均换手": _pct_fmt,
             "120日加速分位": lambda v: f"{float(v):.1f}%",
         },
@@ -1699,29 +1699,61 @@ def wrap_executing_probe_card(
     probe_key: str,
     default_open: bool = False,
     summary_value: str = "",
+    timing: ProbeCardTiming | None = None,
 ) -> str:
-    """单张 JL4 指标卡 · 默认折叠 · 摘要行展示当前读数。"""
+    """单张 JL4 指标卡 · 默认折叠 · 左侧：名称/短标签 · 右侧：关键读数 + T0 标签 + 展开/收起。"""
     open_attr = " open" if default_open else ""
     title = probe_indicator_name(probe_key) or probe_label(probe_key) or probe_key
     short = probe_label(probe_key) or title
     gid = probe_key.replace("_", "-")
-    val_chip = ""
+    
+    # ── 右侧：关键大指标读数 ──
+    val_chip_right = ""
     if summary_value:
-        val_chip = (
-            f'<span class="text-xs font-semibold tabular-nums text-gray-800 ml-2">'
+        val_chip_right = (
+            f'<span class="text-sm font-bold tabular-nums text-gray-900 mr-1.5">'
             f"{_esc(summary_value)}</span>"
         )
+    
+    # ── T0 新鲜度标签 ──
+    t0_badge = ""
+    if timing is not None:
+        health = timing.health
+        badge_map = {
+            "ok":      ("text-[10px] px-2 py-0.5 rounded-full font-medium bg-emerald-50 text-emerald-700 border border-emerald-200", "✓"),
+            "stale":   ("text-[10px] px-2 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700 border border-amber-200",   "⚠"),
+            "failed":  ("text-[10px] px-2 py-0.5 rounded-full font-medium bg-rose-50 text-rose-700 border border-rose-200",     "✕"),
+            "missing": ("text-[10px] px-2 py-0.5 rounded-full font-medium bg-gray-50 text-gray-500 border border-gray-200",     "—"),
+        }
+        badge_cls, badge_icon = badge_map.get(health, badge_map["missing"])
+        t0_badge = (
+            f'<span class="{badge_cls} shrink-0" '
+            f'title="T0水位: {_esc(timing.t0_collected_label or timing.alert or health)}">'
+            f'{badge_icon} T0</span>'
+        )
+    
+    # ── 右侧整体：读数 | T0 | 展开 ▾ ──
+    fold_toggle = (
+        '<span class="text-[10px] text-gray-400 shrink-0 group-open/' + gid + ':hidden">▾</span>'
+        '<span class="text-[10px] text-gray-400 shrink-0 hidden group-open/' + gid + ':inline">▴</span>'
+    )
+    right_section = (
+        f'<div class="flex items-center gap-1.5 shrink-0">'
+        f'{val_chip_right}'
+        f'{t0_badge}'
+        f'{fold_toggle}'
+        f'</div>'
+    )
+    
     return f"""
 <details class="executing-probe-fold group/{gid} mb-3 border border-gray-200 rounded-xl overflow-hidden bg-white{open_attr}">
-  <summary class="executing-fold-summary cursor-pointer list-none block select-none px-4 py-2.5 flex items-center justify-between gap-2 bg-gray-50/90 hover:bg-gray-100 [&::-webkit-details-marker]:hidden"{_EXECUTING_FOLD_SUMMARY_STOP}>
-    <div class="min-w-0 flex items-center gap-1 flex-wrap">
+  <summary class="executing-fold-summary cursor-pointer list-none select-none px-4 py-2.5 bg-gray-50/90 hover:bg-gray-100 [&::-webkit-details-marker]:hidden" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem"{_EXECUTING_FOLD_SUMMARY_STOP}>
+    <div class="min-w-0 flex items-center gap-1.5 flex-wrap">
       <span class="text-[10px] font-semibold uppercase tracking-wide text-orange-700/80">JL4</span>
       <span class="text-sm font-medium text-gray-900">{_esc(title)}</span>
-      <span class="text-[10px] text-gray-400">{_esc(short)}</span>
-      {val_chip}
+      <span class="text-[10px] text-gray-400 hidden sm:inline">{_esc(short)}</span>
     </div>
-    <span class="text-[10px] text-gray-400 shrink-0 group-open/{gid}:hidden">展开 ▾</span>
-    <span class="text-[10px] text-gray-400 shrink-0 hidden group-open/{gid}:inline">收起 ▴</span>
+    {right_section}
   </summary>
   <div class="border-t border-gray-100">{card_html}</div>
 </details>"""
@@ -1756,12 +1788,14 @@ def render_probe_domain(
     cards: list[str] = []
 
     def _append_card(probe_key: str, card_html: str, node: dict[str, Any] | None = None) -> None:
+        timing = timing_map.get(probe_key)
         cards.append(
             wrap_executing_probe_card(
                 card_html,
                 probe_key=probe_key,
                 default_open=False,
                 summary_value=_probe_node_summary_value(node) if node else "",
+                timing=timing,
             )
         )
 

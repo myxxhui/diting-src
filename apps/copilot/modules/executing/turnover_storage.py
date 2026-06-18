@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from datetime import date
 from typing import Any
 
@@ -84,10 +85,19 @@ async def upsert_turnover_rows(
     now = utc_now_naive()
     n = 0
     for r in rows:
+        rate = r.get("turnover_rate_f")
+        if rate is None:
+            continue
+        try:
+            rate_f = float(rate)
+        except (TypeError, ValueError):
+            continue
+        if math.isnan(rate_f) or rate_f <= 0:
+            continue
         td = _parse_trade_date(str(r.get("trade_date", "")))
         existing = await session.get(ExecutingTurnoverDaily, {"symbol": sym, "trade_date": td})
-        payload = {
-            "turnover_rate_f": float(r.get("turnover_rate_f") or 0),
+        payload: dict[str, Any] = {
+            "turnover_rate_f": rate_f,
             "volume_ratio": r.get("volume_ratio"),
             "source": source,
             "collected_at": now,

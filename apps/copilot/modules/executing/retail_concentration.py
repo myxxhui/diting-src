@@ -1,4 +1,4 @@
-"""#22 户均持股集中度 · AkShare 股东户数快照 + T1 分位/时效性净化。
+"""#22 户均持股集中度 · Tushare stk_holdernumber 股东户数快照 + T1 分位/时效性净化。
 
 [Ref: 28_ §3.2.6]
 """
@@ -25,7 +25,7 @@ from apps.copilot.modules.executing.smart_money_flow import symbol_to_ts_code, t
 
 logger = logging.getLogger(__name__)
 
-SOURCE_RETAIL = "AkShare Interactive Platform Scraper (Event-Driven)"
+SOURCE_RETAIL = "Tushare stk_holdernumber (A股股东户数 · 定期披露)"
 STALE_DAYS_THRESHOLD = 30
 RETAIL_DANGER_PERCENTILE = 20.0
 _WAN_SHARES = 10_000
@@ -95,51 +95,41 @@ def _nearest_free_float(ff_map: dict[str, float], end_date: str) -> float | None
 
 
 def fetch_holder_snapshots_api(symbol: str) -> list[dict[str, Any]]:
-    """AkShare stock_zh_a_gdhs_detail_em · 全量股东户数快照。"""
-    try:
-        import akshare as ak  # type: ignore
-    except ImportError as exc:
-        raise RuntimeError("akshare 不可用") from exc
+    """Tushare stk_holdernumber · 全量股东户数快照（定期披露窗口）。"""
+    from math import isnan
 
-    sym = symbol.zfill(6)[-6:]
-    df = ak.stock_zh_a_gdhs_detail_em(symbol=sym)
+    ts_code = symbol_to_ts_code(symbol)
+    try:
+        pro = _pro_api()
+    except RuntimeError as exc:
+        raise RuntimeError("Tushare 不可用") from exc
+
+    df = pro.stk_holdernumber(ts_code=ts_code)
     if df is None or df.empty:
         return []
 
     rows: list[dict[str, Any]] = []
     for _, r in df.iterrows():
-        end_raw = r.get("股东户数统计截止日")
+        end_raw = r.get("end_date")
         if end_raw is None:
             continue
-        end_dt = end_raw if isinstance(end_raw, date) else None
-        if end_dt is None:
-            try:
-                import pandas as pd  # type: ignore
+        end_s = str(end_raw)[:8]
+        if not end_s.isdigit() or len(end_s) < 8:
+            continue
 
-                end_dt = pd.to_datetime(end_raw).date()
-            except Exception:
-                continue
-        end_s = end_dt.strftime("%Y%m%d")
+        ann_raw = r.get("ann_date")
+        ann_s = str(ann_raw)[:8] if ann_raw is not None else ""
 
-        ann_raw = r.get("股东户数公告日期")
-        ann_s = ""
-        if ann_raw is not None:
-            try:
-                import pandas as pd  # type: ignore
-
-                ann_s = pd.to_datetime(ann_raw).strftime("%Y%m%d")
-            except Exception:
-                ann_s = str(ann_raw)[:10].replace("-", "")
-
-        holder = r.get("股东户数-本次")
-        prev = r.get("股东户数-上次")
-        chg = r.get("股东户数-增减比例")
-        if holder is None:
+        holder = r.get("holder_num")
+        prev = r.get("pre_holder_num")
+        if holder is None or (isinstance(holder, float) and isnan(float(holder))):
             continue
         holder_f = float(holder)
-        prev_f = float(prev) if prev is not None else None
-        chg_f = _parse_pct(chg)
-        if chg_f is None and prev_f and prev_f > 0:
+        prev_f = float(prev) if prev is not None and not (isinstance(prev, float) and isnan(float(prev))) else None
+
+        # 计算变化率
+        chg_f = None
+        if prev_f and prev_f > 0:
             chg_f = (holder_f - prev_f) / prev_f
 
         rows.append(
@@ -158,7 +148,7 @@ def fetch_holder_snapshots_api(symbol: str) -> list[dict[str, Any]]:
 
     min_end = date(int(rows[0]["end_date"][:4]), int(rows[0]["end_date"][4:6]), int(rows[0]["end_date"][6:8]))
     max_end = date(int(rows[-1]["end_date"][:4]), int(rows[-1]["end_date"][4:6]), int(rows[-1]["end_date"][6:8]))
-    ff_map = fetch_free_share_map(sym, start=min_end - timedelta(days=30), end=max_end + timedelta(days=5))
+    ff_map = fetch_free_share_map(symbol, start=min_end - timedelta(days=30), end=max_end + timedelta(days=5))
 
     for row in rows:
         ff = _nearest_free_float(ff_map, row["end_date"])

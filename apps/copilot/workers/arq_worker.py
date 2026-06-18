@@ -18,18 +18,99 @@ async def smoke_ping(ctx: dict[str, Any], message: str = "pong") -> dict[str, An
     return {"status": "ok", "message": message}
 
 
+# 日频 EOD job → 对应 backfill job 映射（缺交易日时自动补跑）
+_GAP_BACKFILL_MAP: dict[str, str] = {
+    "l4-smart-money-eod": "l4-smart-money-backfill",
+    "l2-super-order-eod": "l2-super-order-backfill",
+}
+# 日频 job 的容忍间隔（工作日）：超过此天数视为 gap
+_GAP_GRACE_DAYS: int = 2
+
+
+async def _detect_and_backfill_gaps(
+    session,
+    job_id: str,
+    symbols: list[str],
+    source: str,
+) -> list[dict[str, Any]]:
+    """检测 watermark gap 并自动入队回填任务。
+
+    对日频 EOD job，若 last_success_at 距今超过 2 个工作日，
+    自动 enqueue 对应的 backfill job 补跑缺失数据。
+    [Ref: 29_ §2 · scheduler gap recovery]
+    """
+    from datetime import date, datetime, timedelta
+
+    from apps.copilot.db.models import ExecutingT0SyncWatermark
+
+    backfill_job = _GAP_BACKFILL_MAP.get(job_id)
+    if not backfill_job:
+        return []
+
+    results: list[dict[str, Any]] = []
+    now = datetime.utcnow()
+    for sym in symbols:
+        wm = await session.get(ExecutingT0SyncWatermark, (job_id, sym))
+        if wm is None or wm.last_success_at is None:
+            continue
+        days_since = (now - wm.last_success_at).days
+        if days_since <= _GAP_GRACE_DAYS:
+            continue
+
+        logger.info(
+            "gap 检测 job_id=%s symbol=%s 上次成功=%s 距今%d天 → 自动回填 %s",
+            job_id, sym,
+            wm.last_success_at.strftime("%Y-%m-%d") if wm.last_success_at else "?",
+            days_since,
+            backfill_job,
+        )
+        from apps.copilot.services.queue.enqueue import close_arq_pool, enqueue_executing_job
+
+        try:
+            arq_jid = await enqueue_executing_job(backfill_job, symbol=sym, source=f"{source}:gap")
+            results.append(
+                {
+                    "action": "gap_backfill",
+                    "backfill_job": backfill_job,
+                    "symbol": sym,
+                    "arq_job_id": arq_jid,
+                    "days_since_last": days_since,
+                }
+            )
+        except Exception:
+            logger.exception("gap enqueue 失败 job=%s sym=%s", backfill_job, sym)
+        finally:
+            await close_arq_pool()
+
+    return results
+
+
 async def collect_executing_job(
     ctx: dict[str, Any],
     job_id: str,
     symbol: str | None = None,
     source: str = "arq",
 ) -> dict[str, Any]:
-    """消费 executing_t0 Cron enqueue。"""
+    """消费 executing_t0 任务 · 含自动 gap 检测与回填。
+
+    [Ref: 29_ §1.4 · §6.2]
+    """
     from apps.copilot.db.database import AsyncSessionLocal, init_db
     from apps.copilot.modules.executing.jobs_runner import run_job
+    from apps.copilot.modules.executing.universe import load_executing_collect_symbols
 
     await init_db()
+    gap_results: list[dict[str, Any]] = []
     async with AsyncSessionLocal() as session:
+        # 1. gap 检测（仅日频 job）
+        try:
+            syms = [symbol.zfill(6)[-6:]] if symbol else await load_executing_collect_symbols(session)
+            gap_results = await _detect_and_backfill_gaps(session, job_id, syms, source)
+        except Exception:
+            logger.exception("gap 检测失败 job_id=%s（非阻塞）", job_id)
+            await session.rollback()
+
+        # 2. 执行主任务
         try:
             result = await run_job(session, job_id, symbol=symbol)
             await session.commit()
@@ -37,7 +118,10 @@ async def collect_executing_job(
             await session.rollback()
             logger.exception("executing job 失败 job_id=%s", job_id)
             return {"job_id": job_id, "status": "error", "source": source, "error": str(exc)[:300]}
+
     result.setdefault("source", source)
+    if gap_results:
+        result["gap_backfills"] = gap_results
     return result
 
 

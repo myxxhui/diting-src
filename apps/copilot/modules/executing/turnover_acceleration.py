@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import date, timedelta
 from typing import Any
 
@@ -45,14 +46,14 @@ def _pro_api():
 
 
 def _normalize_turnover_rate(raw: Any) -> float | None:
-    """Tushare turnover_rate_f 单位为 %，落库为小数（0.1625 = 16.25%）。"""
+    """Tushare turnover_rate_f 单位为 %，落库为小数（0.1625 = 16.25%）。NaN/非正数 → None。"""
     if raw is None:
         return None
     try:
         v = float(raw)
     except (TypeError, ValueError):
         return None
-    if v < 0:
+    if math.isnan(v) or v <= 0:
         return None
     return v / 100.0
 
@@ -166,13 +167,16 @@ async def load_turnover_acceleration_payload(
 
 def compute_turnover_acceleration_metrics(payload: dict[str, Any]) -> dict[str, Any]:
     rows = list(payload.get("turnover_rows") or [])
-    if len(rows) < TURNOVER_MIN_TRADING_DAYS + TURNOVER_BASELINE_DAYS:
+    # 剔除 NaN/None 换手率行（Tushare 当日偶尔返回 NaN）
+    clean_rows = [r for r in rows if r.get("turnover_rate_f") is not None and not (
+        isinstance(r.get("turnover_rate_f"), float) and math.isnan(r["turnover_rate_f"]))]
+    if len(clean_rows) < TURNOVER_MIN_TRADING_DAYS + TURNOVER_BASELINE_DAYS:
         raise ValueError(
-            f"换手率序列不足 {TURNOVER_MIN_TRADING_DAYS + TURNOVER_BASELINE_DAYS}"
-            f"（当前 {len(rows)}）"
+            f"有效换手率序列不足 {TURNOVER_MIN_TRADING_DAYS + TURNOVER_BASELINE_DAYS}"
+            f"（原始 {len(rows)} 行 · 清洗后 {len(clean_rows)} 行）"
         )
 
-    accel = _accel_series(rows)
+    accel = _accel_series(clean_rows)
     if len(accel) < TURNOVER_BASELINE_DAYS:
         raise ValueError(f"加速倍数序列不足（有效 {len(accel)}）")
 
@@ -180,10 +184,10 @@ def compute_turnover_acceleration_metrics(payload: dict[str, Any]) -> dict[str, 
     trade_date, today_accel = accel[-1]
     pct = percentile_rank(today_accel, [a for _, a in window])
 
-    prior = rows[-(TURNOVER_BASELINE_DAYS + 1) : -1]
+    prior = clean_rows[-(TURNOVER_BASELINE_DAYS + 1) : -1]
     mean20 = sum(float(r["turnover_rate_f"]) for r in prior) / len(prior)
-    current = float(rows[-1]["turnover_rate_f"])
-    volume_ratio = rows[-1].get("volume_ratio")
+    current = float(clean_rows[-1]["turnover_rate_f"])
+    volume_ratio = clean_rows[-1].get("volume_ratio")
 
     cur_pct = current * 100
     mean_pct = mean20 * 100

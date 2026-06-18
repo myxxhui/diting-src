@@ -419,13 +419,29 @@ async def audit_page(
 
 
 @router.get("/opus", response_class=HTMLResponse)
-async def opus_chat_page(request: Request):
+async def opus_chat_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    from apps.copilot.modules.executing.t2_analyst import DEFAULT_JL13_DATA_TEMPLATE
+    from apps.copilot.modules.planning.service import list_workspace_symbols
+
+    symbols: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in await list_workspace_symbols(session, view="executing"):
+        sym = str(item.get("symbol") or "").strip()
+        if sym and sym not in seen:
+            seen.add(sym)
+            symbols.append({"symbol": sym, "name": item.get("name") or item.get("stock_name") or ""})
+
     return _tpl(request).TemplateResponse(
         request,
         "audit/opus.html",
         {
             "chat_models": RADAR_CHAT_MODELS,
             "default_model": DEFAULT_CHAT_MODEL,
+            "default_jl13_data_template": DEFAULT_JL13_DATA_TEMPLATE,
+            "workspace_symbols": symbols,
         },
     )
 
@@ -1343,18 +1359,35 @@ async def api_radar_chat(
     session_id: str = Form(""),
     symbol: str = Form(""),
     model_id: str = Form(""),
+    jl13_data_prompt: str = Form(""),
+    force_base: str = Form(""),
+    force_jl13: str = Form(""),
+    force_jl4: str = Form(""),
+    force_9d: str = Form(""),
 ):
-    """Opus 多轮日常对话（HTMX 返回聊天气泡 HTML）。"""
+    """Opus 多轮日常对话（HTMX 返回聊天气泡 HTML）。
+    首轮自动携带 JL/JL4 全量数据；后续轮仅轻量 system 省 token。
+    勾选「基础/JL1-3/JL4/9维」可在任意轮次强制重取对应数据。
+    """
+    import logging
+
+    log = logging.getLogger(__name__)
+
     redis_client = _sync_redis()
     sym: str | None = (symbol or "").strip() or None
-    scan_ctx = None
     if sym:
         try:
             sym, _ = resolve_radar_query(sym)
         except RadarSymbolResolveError:
             sym = sym.zfill(6)[-6:] if sym.isdigit() else None
-        if sym:
-            scan_ctx = await _latest_scan_context(session, sym)
+
+    force_flags = {
+        "base": bool((force_base or "").strip() == "1"),
+        "jl13": bool((force_jl13 or "").strip() == "1"),
+        "jl4": bool((force_jl4 or "").strip() == "1"),
+        "9d": bool((force_9d or "").strip() == "1"),
+    }
+    log.info("radar_chat sym=%s force=%s", sym, force_flags)
 
     try:
         result = await chat_turn(
@@ -1362,9 +1395,10 @@ async def api_radar_chat(
             session_id=session_id,
             user_message=message,
             symbol=sym,
-            scan_context=scan_ctx,
+            jl13_data_prompt=jl13_data_prompt,
             model_id=model_id or None,
             db_session=session,
+            force_refresh=force_flags,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1389,6 +1423,84 @@ async def api_radar_chat_new(
     if request.headers.get("hx-request"):
         return HTMLResponse(_render_chat_panel(payload))
     return payload
+
+
+@router.post("/api/radar/chat/edit")
+async def api_radar_chat_edit(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    session_id: str = Form(""),
+    message_idx: str = Form("0"),
+    new_text: str = Form(""),
+    symbol: str = Form(""),
+    force_base: str = Form(""),
+    force_jl13: str = Form(""),
+    force_jl4: str = Form(""),
+    force_9d: str = Form(""),
+):
+    """编辑已发送消息并重新生成回复。截断指定消息后的内容，替换为新文本+可选标的+数据开关后重发 AI。"""
+    import logging
+    from apps.copilot.modules.radar.chat import (
+        chat_turn,
+        load_messages_async,
+        save_messages_async,
+    )
+
+    log = logging.getLogger(__name__)
+    redis_client = _sync_redis()
+    sid = (session_id or "").strip()
+    idx = int(message_idx) if message_idx.isdigit() else 0
+    text = (new_text or "").strip()
+    sym = (symbol or "").strip() or None
+    if not sid or not text:
+        raise HTTPException(status_code=400, detail="缺少 session_id 或 new_text")
+
+    existing = await load_messages_async(sid, redis_client=redis_client, db_session=session)
+    # 截断 idx 及之后的消息（不提前 append user msg，chat_turn 会自己加）
+    truncated = existing[:idx]
+    await save_messages_async(sid, truncated, redis_client=redis_client, db_session=session)
+
+    force_refresh: dict[str, bool] = {}
+    for k, v in {"base": force_base, "jl13": force_jl13, "jl4": force_jl4, "9d": force_9d}.items():
+        if v and v.lower() in ("on", "true", "1", "yes"):
+            force_refresh[k] = True
+
+    try:
+        result = await chat_turn(
+            redis_client,
+            session_id=sid,
+            user_message=text,
+            symbol=sym,
+            model_id=None,
+            db_session=session,
+            force_refresh=force_refresh if force_refresh else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
+        return HTMLResponse(_render_chat_panel(result))
+    return result
+
+
+@router.post("/api/radar/chat/delete")
+async def api_radar_chat_delete(
+    session_id: str = Form(""),
+    session: AsyncSession = Depends(get_db),
+):
+    """删除一个聊天会话（Redis + PG）。"""
+    from apps.copilot.modules.radar.chat import clear_session_async
+
+    sid = (session_id or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="缺少 session_id")
+    await clear_session_async(sid, redis_client=_sync_redis(), db_session=session)
+    await session.commit()
+    return {"deleted": sid}
+
+    if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
+        return HTMLResponse(_render_chat_panel(result))
+    return result
 
 
 @router.get("/api/radar/chat/sessions")
@@ -1758,8 +1870,41 @@ def _render_collect_progress_panel(state: dict) -> str:
     )
 
 
+def _render_context_meta_banner(payload: dict) -> str:
+    cm = payload.get("context_meta") or {}
+    if not cm:
+        return ""
+    mode = cm.get("context_mode") or "none"
+    if mode == "none":
+        return ""
+    sym = _esc(cm.get("symbol") or "—")
+    lines: list[str]
+    tone: str
+    if mode == "cached_context":
+        lines = [f"上下文 · {sym} · 沿用首轮缓存", _esc(cm.get("note") or "")]
+        tone = "border-blue-200 bg-blue-50 text-blue-800"
+    elif mode == "t1_envelope":
+        lines = [
+            f"上下文 · {sym} · 模式 t1_envelope",
+            f"JL4 指标 {cm.get('jl4_indicator_count', 0)} 个 · "
+            f"system {cm.get('system_prompt_chars', 0)} 字",
+        ]
+        tone = "border-emerald-200 bg-emerald-50 text-emerald-800"
+    elif mode in ("radar_scan_fallback", "symbol_only"):
+        lines = [f"上下文 · {sym} · 模式 {mode}", _esc(cm.get("note") or "")]
+        tone = "border-amber-200 bg-amber-50 text-amber-900"
+    else:
+        lines = [f"上下文 · {sym} · 模式 {mode}", _esc(cm.get("note") or "")]
+        tone = "border-gray-200 bg-gray-50 text-gray-700"
+    body = " · ".join(lines)
+    return (
+        f"<div class='mx-2 mb-2 rounded-lg border px-3 py-1.5 text-[10px] {tone}'>"
+        f"{body}</div>"
+    )
+
+
 def _render_chat_panel(payload: dict) -> str:
-    """ChatGPT 风格对话区 HTML。"""
+    """ChatGPT 风格对话区 HTML · 含 Markdown 渲染 + 消息编辑。"""
     sid = _esc(payload.get("session_id") or new_session_id())
     messages = payload.get("messages") or []
     err = payload.get("error")
@@ -1773,14 +1918,20 @@ def _render_chat_panel(payload: dict) -> str:
             "<p class='text-xs'>可问产业逻辑、财报解读、估值框架、风险识别等；"
             "可选填标的代码以附带最近扫描结论</p></div>"
         )
-    for m in messages:
+    for i, m in enumerate(messages):
         role = m.get("role")
         content = _esc(m.get("content") or "")
         if role == "user":
+            msg_id = f"radar-msg-{i}"
             bubbles.append(
-                f"<div class='flex justify-end'><div class='max-w-[85%] rounded-2xl rounded-tr-sm "
-                f"bg-blue-600 text-white px-4 py-2.5 text-sm leading-relaxed shadow-sm'>"
-                f"{content}</div></div>"
+                f"<div class='flex justify-end group/msg' id='{msg_id}' data-msg-idx='{i}'>"
+                f"<div class='max-w-[85%] rounded-2xl rounded-tr-sm "
+                f"bg-blue-600 text-white px-4 py-2.5 text-sm leading-relaxed shadow-sm relative'>"
+                f"<span class='msg-text'>{content}</span>"
+                f"<button type='button' class='msg-edit-btn absolute top-0.5 right-0.5 opacity-0 group-hover/msg:opacity-100 "
+                f"text-white/70 hover:text-white text-[10px] px-1.5 py-0.5 rounded transition-opacity' "
+                f"title='编辑' aria-label='编辑消息'>✎</button>"
+                f"</div></div>"
             )
         elif role == "assistant":
             meta = m.get("meta") or {}
@@ -1792,9 +1943,13 @@ def _render_chat_panel(payload: dict) -> str:
                     f"入{meta.get('tokens_in', 0)}/出{meta.get('tokens_out', 0)} tok</p>"
                 )
             bubbles.append(
-                f"<div class='flex justify-start'><div class='max-w-[90%] rounded-2xl rounded-tl-sm "
+                f"<div class='flex justify-start msg-md-block'>"
+                f"<div class='max-w-[90%] rounded-2xl rounded-tl-sm "
                 f"bg-white border border-gray-200 px-4 py-2.5 text-sm text-gray-800 leading-relaxed "
-                f"shadow-sm whitespace-pre-wrap'>{content}{cost_line}</div></div>"
+                f"shadow-sm msg-md-content prose prose-sm max-w-none'>"
+                f"{content}</div>"
+                f"<script type='md-tail'>{cost_line}</script>"
+                f"</div>"
             )
 
     err_html = ""
@@ -1817,8 +1972,11 @@ def _render_chat_panel(payload: dict) -> str:
         f"<div id='radar-chat-inner' data-session-id='{sid}'>"
         f"<input type='hidden' name='session_id' id='radar-chat-session-id' value='{sid}'>"
         f"{err_html}"
+        f"{_render_context_meta_banner(payload)}"
         f"<div class='space-y-4 px-2 py-2 min-h-[200px]'>{''.join(bubbles)}</div>"
-        f"{meta_html}</div>"
+        f"{meta_html}"
+        f"<script>window.opusRenderMarkdown();window.opusBindMsgEdit();</script>"
+        f"</div>"
     )
 
 
