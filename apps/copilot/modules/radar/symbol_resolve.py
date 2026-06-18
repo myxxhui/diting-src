@@ -260,10 +260,8 @@ def suggest_radar_symbols(query: str, *, limit: int = 8) -> list[dict[str, Any]]
 
     # 简称模糊：仅索引已预热时扫全表；否则仅 SoT 精确/包含
     if market_name_index_ready():
-        from_market = _resolve_from_akshare_name(raw)
-        if from_market:
-            _put(from_market[0], from_market[1], 1.0)
-
+        # 不调用 _resolve_from_akshare_name（会同步触发 akshare 阻塞 >2.5s 超时）
+        # 下方 _iter_symbol_entries 循环已覆盖 exact/prefix/contains/fuzzy 全部匹配
         for sym, (s, nm) in _iter_symbol_entries():
             if nm == raw:
                 _put(s, nm, 1.0)
@@ -314,24 +312,28 @@ def _resolve_from_sot(raw: str) -> tuple[str, str] | None:
 
 @lru_cache(maxsize=1)
 def _a_share_name_index() -> dict[str, tuple[str, str]]:
-    """全 A 股 简称→(symbol,name)；进程内缓存。"""
-    with without_outbound_proxy():
-        import akshare as ak
+    """全 A 股 简称→(symbol,name)；进程内缓存（含失败缓存，避免反复重试 akshare）。"""
+    try:
+        with without_outbound_proxy():
+            import akshare as ak
 
-        df = ak.stock_zh_a_spot_em()
-    if df is None or df.empty:
-        return {}
-    name_col = "名称" if "名称" in df.columns else ("name" if "name" in df.columns else None)
-    code_col = "代码" if "代码" in df.columns else ("symbol" if "symbol" in df.columns else None)
-    if not name_col or not code_col:
-        return {}
-    out: dict[str, tuple[str, str]] = {}
-    for _, row in df.iterrows():
-        nm = str(row.get(name_col) or "").strip()
-        sym = re.sub(r"\D", "", str(row.get(code_col) or ""))[-6:]
-        if nm and len(sym) == 6:
-            out[nm] = (sym, nm)
-    return out
+            df = ak.stock_zh_a_spot_em()
+        if df is None or df.empty:
+            return {}
+        name_col = "名称" if "名称" in df.columns else ("name" if "name" in df.columns else None)
+        code_col = "代码" if "代码" in df.columns else ("symbol" if "symbol" in df.columns else None)
+        if not name_col or not code_col:
+            return {}
+        out: dict[str, tuple[str, str]] = {}
+        for _, row in df.iterrows():
+            nm = str(row.get(name_col) or "").strip()
+            sym = re.sub(r"\D", "", str(row.get(code_col) or ""))[-6:]
+            if nm and len(sym) == 6:
+                out[nm] = (sym, nm)
+        return out
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("akshare 简称索引失败: %s", exc)
+        return {}  # 返回值也会被 lru_cache 缓存，避免反复重试
 
 
 def _resolve_from_akshare_name(raw: str) -> tuple[str, str] | None:
