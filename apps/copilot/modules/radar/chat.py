@@ -207,15 +207,18 @@ async def persist_radar_session(
     if not sid:
         return
     trimmed = _trim_messages(messages)
-    row = await db_session.scalar(
-        select(RadarChatSession).where(RadarChatSession.session_id == sid)
-    )
-    if row is None:
-        row = RadarChatSession(session_id=sid, messages_json=trimmed)
-        db_session.add(row)
-    else:
-        row.messages_json = trimmed
-    await db_session.flush()
+    try:
+        row = await db_session.scalar(
+            select(RadarChatSession).where(RadarChatSession.session_id == sid)
+        )
+        if row is None:
+            row = RadarChatSession(session_id=sid, messages_json=trimmed)
+            db_session.add(row)
+        else:
+            row.messages_json = trimmed
+        await db_session.flush()
+    except Exception as exc:
+        logger.warning("PG 持久化雷达对话 sid=%s 失败: %s", sid, exc)
 
 
 async def save_messages_async(
@@ -232,7 +235,10 @@ async def save_messages_async(
     _memory_sessions[sid] = trimmed
     _save_messages_to_redis(redis_client, sid, trimmed)
     if db_session is not None:
-        await persist_radar_session(db_session, sid, trimmed)
+        try:
+            await persist_radar_session(db_session, sid, trimmed)
+        except Exception as exc:
+            logger.warning("PG 持久化雷达对话 sid=%s 异常: %s（已落 Redis，下次加载会重试 PG）", sid, exc)
 
 
 def save_messages(
