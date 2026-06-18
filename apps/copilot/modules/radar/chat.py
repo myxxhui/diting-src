@@ -231,6 +231,10 @@ async def save_messages_async(
     sid = (session_id or "").strip()
     if not sid:
         return
+    if not messages:
+        # 禁止写入空消息列表（防内容丢失）
+        logger.warning("save_messages_async sid=%s 拒绝写入空消息列表", sid)
+        return
     trimmed = _trim_messages(messages)
     _memory_sessions[sid] = trimmed
     _save_messages_to_redis(redis_client, sid, trimmed)
@@ -305,16 +309,23 @@ async def list_radar_chat_sessions(
     out: list[dict[str, Any]] = []
     for row in rows:
         msgs = row.messages_json or []
-        if not msgs:
-            continue
         ts = int(row.updated_at.timestamp() * 1000) if row.updated_at else 0
-        out.append(
-            {
-                "id": row.session_id,
-                "title": title_from_messages(msgs, default="新对话"),
-                "updatedAt": ts,
-            }
-        )
+        if not msgs:
+            out.append(
+                {
+                    "id": row.session_id,
+                    "title": "(空对话)",
+                    "updatedAt": ts,
+                }
+            )
+        else:
+            out.append(
+                {
+                    "id": row.session_id,
+                    "title": title_from_messages(msgs, default="新对话"),
+                    "updatedAt": ts,
+                }
+            )
     return out
 
 

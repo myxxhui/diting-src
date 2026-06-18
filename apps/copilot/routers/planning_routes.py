@@ -1456,9 +1456,11 @@ async def api_radar_chat_edit(
         raise HTTPException(status_code=400, detail="缺少 session_id 或 new_text")
 
     existing = await load_messages_async(sid, redis_client=redis_client, db_session=session)
-    # 截断 idx 及之后的消息（不提前 append user msg，chat_turn 会自己加）
+    # 截断 idx 及之后的消息（不提前 save，chat_turn 成功后自己会存）
     truncated = existing[:idx]
-    await save_messages_async(sid, truncated, redis_client=redis_client, db_session=session)
+    # 注入内存缓存让 chat_turn 读到截断后的历史（防 race）
+    from apps.copilot.modules.radar import chat as radar_chat_mod
+    radar_chat_mod._memory_sessions[sid] = truncated
 
     force_refresh: dict[str, bool] = {}
     for k, v in {"base": force_base, "jl13": force_jl13, "jl4": force_jl4, "9d": force_9d}.items():

@@ -196,21 +196,28 @@
       if (!id) return;
       var list = getRadarSessions();
       var t = title || '';
-      // 自动截取前 30 字符作为话题名
       var autoName = t.replace(/[\/\\:*?"<>|]/g, '').trim().slice(0, 30) || '新对话';
       var now = Date.now();
       var found = false;
+      var changed = false;
       list = list.map(function (item) {
         if (item.id === id) {
           found = true;
-          // 只在新会话或标题为空时更新标题
           var keep = item.title && !item.title.match(/^(新对话|对话中…|对话)$/) ? item.title : autoName;
-          return { id: id, title: keep, updatedAt: now };
+          // 只有标题变更或用户发送新内容才更新时间（防止仅查看就跳到最上）
+          if (item.title !== keep || (t && t !== '对话' && t !== '当前对话')) {
+            changed = true;
+            return { id: id, title: keep, updatedAt: now };
+          }
+          return item;
         }
         return item;
       });
       if (!found) list.unshift({ id: id, title: autoName, updatedAt: now });
-      list.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+      else if (changed) {
+        // 有真实变更才重新排序
+        list.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+      }
       saveRadarSessions(list);
       renderRadarSessionList();
     }
