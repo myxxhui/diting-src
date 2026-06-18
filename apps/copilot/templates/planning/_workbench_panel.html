@@ -46,10 +46,10 @@
             <option value="deepseek">DeepSeek</option>
           </select>
         </div>
-        <input type="hidden" name="enable_t2" id="radar-h-t2" value="false">
-        <details id="radar-t2-details" class="radar-t2-details shrink-0">
+        <input type="hidden" name="enable_t2" id="radar-h-t2" value="true">
+        <details id="radar-t2-details" class="radar-t2-details shrink-0" open>
           <summary id="radar-t2-summary" title="必选其一：仅 T2 / T0+T2 / T0+T1+T2"
-                   class="radar-stage-btn list-none cursor-pointer px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                   class="radar-stage-btn radar-stage-on list-none cursor-pointer px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
             T2
           </summary>
           <select name="t2_model" id="radar-t2-model"
