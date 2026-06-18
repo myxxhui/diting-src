@@ -218,19 +218,127 @@ def build_opus_messages_from_t0(
 
 
 # ── 解析 Opus 输出 ────────────────────────────────────────────────────────────
+def _repair_llm_json(text: str) -> str:
+    """对 LLM 常见 JSON 语法错误做容忍性修复。
+    返回修复后的 JSON 文本（可直接 json.loads），失败时抛异常。
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+
+    # 0. 基础清洗：剥离 markdown 代码块；定位 JSON 区间
+    raw = (text or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```[a-zA-Z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw).strip()
+    l, r = raw.find("{"), raw.rfind("}")
+    if l < 0 or r <= l:
+        raise ValueError(f"文本不含 JSON 对象: {raw[:120]}")
+    js = raw[l : r + 1]
+
+    def _try_parse(s: str) -> str | None:
+        try:
+            json.loads(s)
+            return s
+        except Exception:
+            return None
+
+    # 按修复策略逐一尝试（先轻量后重量）
+    strategies: list[tuple[str, str]] = [
+        # 策略 0：原文直接解析
+        ("raw", js),
+        # 策略 1：修复尾部多余逗号 ,}   ,]
+        ("trailing-comma", re.sub(r",(\s*[}\]])", r"\1", js)),
+        # 策略 2：对象/数组之间补逗号（最常见: "key":"val"\n  "key2":）
+        ("missing-comma", re.sub(
+            r'([}\]"0-9eE.+\-])\s*\n\s*(")',
+            r"\1,\n  \2",
+            js,
+        )),
+        # 策略 3：补全被截断的括号（max_tokens 截断）
+        ("close-brackets", _close_unclosed_brackets(js)),
+    ]
+
+    for name, candidate in strategies:
+        if candidate == js and name != "raw":
+            continue  # 无变化，跳过
+        result = _try_parse(candidate)
+        if result is not None:
+            _log.info("Opus JSON 修复成功（%s）", name)
+            return result
+        # 组合策略：策略2+策略3
+        if name == "missing-comma":
+            combined = _close_unclosed_brackets(candidate)
+            if combined != candidate:
+                result = _try_parse(combined)
+                if result is not None:
+                    _log.info("Opus JSON 修复成功（missing-comma+close-brackets）")
+                    return result
+
+    # 全部失败：记录首尾用于调试
+    _log.warning(
+        "Opus JSON 修复失败，原文尾 400 字符: %s",
+        js[-400:],
+    )
+    raise ValueError(f"JSON 修复失败（{len(js)} 字符）：{js[-160:]}")
+
+
+def _close_unclosed_brackets(s: str) -> str:
+    """统计 {} [] 未闭合数，在末尾补全括号（截断恢复）。"""
+    stack: list[str] = []
+    in_string = False
+    escape = False
+    for ch in s:
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in "{[":
+            stack.append(ch)
+        elif ch == "}":
+            if stack and stack[-1] == "{":
+                stack.pop()
+        elif ch == "]":
+            if stack and stack[-1] == "[":
+                stack.pop()
+    if not stack:
+        return s
+    close = ""
+    for op in reversed(stack):
+        close += "}" if op == "{" else "]"
+    return s + close
+
+
 def _extract_json(text: str) -> dict[str, Any]:
+    """解析 Opus JSON 输出，内置 LLM 常见语法容错修复。"""
     text = (text or "").strip()
+
+    # 先尝试直接解析
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
         text = re.sub(r"\n?```$", "", text).strip()
-    # 直接解析；失败则截取首个 { 到末个 }
     try:
         return json.loads(text)
     except Exception:  # noqa: BLE001
-        l, r = text.find("{"), text.rfind("}")
-        if l >= 0 and r > l:
+        pass
+
+    # 截取首个 { 到末个 } 再试
+    l, r = text.find("{"), text.rfind("}")
+    if l >= 0 and r > l:
+        try:
             return json.loads(text[l : r + 1])
-        raise
+        except Exception:  # noqa: BLE001
+            pass
+
+    # 进入容错修复流程
+    repaired = _repair_llm_json(text)
+    return json.loads(repaired)
 
 
 def parse_opus_verdict(
