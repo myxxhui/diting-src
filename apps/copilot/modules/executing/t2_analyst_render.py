@@ -342,7 +342,7 @@ def _render_radar_nine_dimensions_block(radar: dict[str, Any] | None) -> str:
             continue
         verdict = (dim.get("verdict") or "—").strip() or "—"
         if key == "market_phase" and verdict in MARKET_PHASE_LABELS:
-            verdict = f"{MARKET_PHASE_LABELS[verdict]}（{verdict}）"
+            verdict = MARKET_PHASE_LABELS[verdict]
         reasoning = (dim.get("reasoning") or "").strip()
         cards.append(
             f"<details class='t2-nine-dim-card'>"

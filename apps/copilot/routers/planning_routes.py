@@ -2405,7 +2405,7 @@ def _render_dimension_card(meta: dict, dim: dict) -> str:
     key = meta["key"]
     verdict = dim.get("verdict") or "—"
     if key == "market_phase" and verdict in MARKET_PHASE_LABELS:
-        verdict = f"{MARKET_PHASE_LABELS[verdict]}（{verdict}）"
+        verdict = MARKET_PHASE_LABELS[verdict]
 
     missing = dim.get("status") == "missing"
     custom_tag = (

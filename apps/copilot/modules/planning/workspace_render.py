@@ -11,9 +11,10 @@ from typing import Any, Callable, Optional
 from apps.copilot.modules.planning.workspace_registry import workspace_list_label, workspace_tab_label
 
 _PHASE_LABEL = {
-    "expectation": ("📈 炒预期", "bg-blue-50 text-blue-700 border-blue-100"),
-    "realization": ("💰 炒业绩", "bg-amber-50 text-amber-800 border-amber-100"),
-    "exhaustion": ("🍂 利好出尽", "bg-gray-50 text-gray-600 border-gray-200"),
+    "concept":     ("炒概念",   "bg-sky-50 text-sky-700 border-sky-100"),
+    "expectation": ("炒预期",   "bg-blue-50 text-blue-700 border-blue-100"),
+    "realization": ("炒业绩",   "bg-amber-50 text-amber-800 border-amber-100"),
+    "exhaustion":  ("利好出尽", "bg-gray-50 text-gray-600 border-gray-200"),
 }
 
 
