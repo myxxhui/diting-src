@@ -1,5 +1,5 @@
 <style>
-  /* Opus 全视口布局 · CSS 变量体系 */
+  /* ── Opus 全视口布局 · CSS 变量体系 · 响应式断点: <768px 移动端 / >=768px PC端 ── */
   #opus-workspace-root {
     --opus-primary:        #7c3aed;
     --opus-primary-hover:  #6d28d9;
@@ -15,11 +15,12 @@
     --opus-text-muted:     #9ca3af;
     --opus-shadow-sm:      0 1px 3px rgba(0,0,0,0.06);
     --opus-shadow-md:      0 4px 16px rgba(0,0,0,0.08);
+    --opus-shadow-lg:      0 10px 40px rgba(0,0,0,0.12);
     --opus-radius-sm:      6px;
     --opus-radius-md:      10px;
     --opus-radius-lg:      14px;
     --opus-radius-round:   999px;
-    --opus-sidebar-w:      192px;
+    --opus-sidebar-w:      240px;
     --opus-text-xs:        11px;
     --opus-text-sm:        12px;
     --opus-text-base:      13px;
@@ -27,22 +28,23 @@
 
     flex: 1; min-height: 0; width: 100%;
     display: flex; flex-direction: column;
-    background: var(--opus-surface);
+    background: var(--opus-bg);
     overflow: hidden;
     isolation: isolate;
   }
 
   body:has(#opus-workspace-root) { overflow: hidden; height: 100dvh; }
   body:has(#opus-workspace-root) {
-    --opus-nav-h: 52px;  /* ⚠️ 变量须在祖先层定义，body main 才能访问 */
+    --opus-nav-h: 52px;
   }
   body:has(#opus-workspace-root) main {
     width: 100%; min-width: 0; max-width: none; margin: 0; padding: 0;
     height: calc(100dvh - var(--opus-nav-h)); min-height: 0;
     display: flex; flex-direction: column; box-sizing: border-box;
-    overflow: hidden; background: var(--opus-surface);
+    overflow: hidden; background: var(--opus-bg);
   }
 
+  /* ── Header Strip · 汉堡按钮 ── */
   .opus-header-strip {
     flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center;
     gap: 8px 16px; padding: 6px 16px;
@@ -69,58 +71,93 @@
   .opus-mode-tab.is-active {
     background: var(--opus-primary); color: #fff; box-shadow: var(--opus-shadow-sm);
   }
+  .opus-hamburger {
+    display: none; flex-shrink: 0; width: 32px; height: 32px;
+    align-items: center; justify-content: center;
+    border: 1px solid var(--opus-border); border-radius: var(--opus-radius-sm);
+    background: var(--opus-surface); cursor: pointer; color: var(--opus-text-secondary);
+    margin-right: auto; font-size: 16px; line-height: 1;
+  }
+  .opus-hamburger:hover { background: var(--opus-bg-alt); }
 
-  /* ── 面板：flex 列，由 min-height:0+overflow:hidden 阻止撑破 ── */
+  /* ── 面板 ── */
   .opus-panel-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
   .opus-chat-shell {
     flex: 1; min-height: 0; min-width: 0; width: 100%;
-    display: flex; flex-direction: row; overflow: hidden; background: var(--opus-bg);
+    display: flex; flex-direction: row; overflow: hidden;
   }
 
+  /* ── 侧边栏 ── */
   .opus-sidebar {
     width: var(--opus-sidebar-w); flex-shrink: 0; min-height: 0;
     display: flex; flex-direction: column;
-    border-right: 1px solid var(--opus-border); background: var(--opus-bg-alt);
+    border-right: 1px solid var(--opus-border); background: var(--opus-surface);
   }
   .opus-sidebar-head {
-    flex-shrink: 0; padding: 8px 10px;
+    flex-shrink: 0; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
     border-bottom: 1px solid var(--opus-border);
-    display: flex; align-items: center; justify-content: space-between; gap: 6px;
   }
   .opus-sidebar-title { font-size: var(--opus-text-sm); font-weight: 600; color: var(--opus-text-secondary); }
+  .opus-sidebar-new-btn {
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+    width: 100%; padding: 7px 12px; border: 1px solid var(--opus-primary);
+    border-radius: var(--opus-radius-sm); background: var(--opus-primary);
+    color: #fff; font-size: 12px; font-weight: 600; cursor: pointer;
+    transition: all 0.15s; box-shadow: 0 1px 3px rgba(124,58,237,0.2);
+  }
+  .opus-sidebar-new-btn:hover {
+    background: var(--opus-primary-hover); border-color: var(--opus-primary-hover);
+    box-shadow: 0 2px 6px rgba(124,58,237,0.35); transform: translateY(-1px);
+  }
   .opus-sidebar-list {
-    flex: 1; min-height: 0; overflow-y: auto; padding: 6px;
+    flex: 1; min-height: 0; overflow-y: auto; padding: 6px 8px;
     display: flex; flex-direction: column; gap: 2px;
   }
   .opus-session-item {
-    display: block; width: 100%; text-align: left;
-    padding: 8px 10px; border-radius: var(--opus-radius-sm);
-    border: 1px solid transparent; background: transparent; cursor: pointer;
-    font-size: var(--opus-text-sm); color: var(--opus-text-secondary);
-    line-height: 1.35; transition: background 0.12s, border-color 0.12s;
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; text-align: left; padding: 8px 10px;
+    border-radius: var(--opus-radius-sm); border: 1px solid transparent;
+    background: transparent; cursor: pointer; gap: 4px;
+    transition: background 0.12s, border-color 0.12s;
   }
-  .opus-session-item:hover { background: var(--opus-border); }
+  .opus-session-item:hover { background: var(--opus-bg); }
   .opus-session-item.is-active {
     background: var(--opus-primary-light); border-color: var(--opus-primary-border);
+  }
+  .opus-session-item .opus-session-title {
+    flex: 1; min-width: 0; font-size: var(--opus-text-sm);
+    color: var(--opus-text-secondary); line-height: 1.35;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    display: block;
+  }
+  .opus-session-item.is-active .opus-session-title {
     color: var(--opus-primary-hover); font-weight: 600;
   }
   .opus-session-meta {
-    display: block; font-size: var(--opus-text-xs); color: var(--opus-text-muted);
-    font-weight: 400; margin-top: 2px;
+    display: block; font-size: 10px; color: var(--opus-text-muted);
+    font-weight: 400; margin-top: 1px;
   }
+  /* 删除按钮在 session item 内 */
+  .opus-session-del {
+    flex-shrink: 0; font-size: 10px; color: var(--opus-text-muted);
+    padding: 2px 4px; border-radius: 4px; border: none; background: transparent; cursor: pointer;
+    line-height: 1; opacity: 0; transition: opacity 0.12s, color 0.12s;
+  }
+  .opus-session-item:hover .opus-session-del { opacity: 1; }
+  .opus-session-del:hover { color: #ef4444; background: #fef2f2; }
 
-  /* ── 主列：Grid 不要在 flex 子项上设 height:100% ── */
+  /* ── 主列 Grid ── */
   .opus-main-column {
     flex: 1; min-width: 0; min-height: 0;
     display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
     grid-template-areas: "toolbar" "messages" "footer";
-    overflow: hidden; background: var(--opus-surface);
+    overflow: hidden; background: var(--opus-bg);
   }
 
   .opus-toolbar {
-    grid-area: toolbar; flex-shrink: 0; padding: 4px 14px;
-    border-bottom: 1px solid var(--opus-border-light); background: var(--opus-surface);
+    grid-area: toolbar; flex-shrink: 0; padding: 6px 14px;
+    border-bottom: 1px solid var(--opus-border); background: var(--opus-surface);
   }
   .opus-toolbar-details { margin: 0; border: none; background: transparent; }
   .opus-toolbar-details summary {
@@ -136,11 +173,40 @@
     font-size: var(--opus-text-xs); color: var(--opus-text-secondary);
   }
 
+  /* ── 消息区 · 空状态 ── */
   .opus-messages-scroll {
     grid-area: messages; min-height: 0; overflow-y: auto; overflow-x: hidden;
     padding: 12px 16px;
-    background: linear-gradient(180deg, #fafbfc 0%, #f5f6f8 100%);
   }
+  .opus-empty-state {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 60vh; text-align: center; gap: 24px; padding: 20px;
+  }
+  .opus-empty-state-logo {
+    font-size: 36px; line-height: 1; opacity: 0.85;
+  }
+  .opus-empty-state-title {
+    font-size: 18px; font-weight: 700; color: var(--opus-text); margin: 0;
+  }
+  .opus-empty-state-sub {
+    font-size: var(--opus-text-sm); color: var(--opus-text-muted); max-width: 320px; line-height: 1.5;
+  }
+  .opus-empty-prompts {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px; width: 100%; max-width: 600px;
+  }
+  .opus-empty-prompt-card {
+    padding: 14px 16px; border: 1px solid var(--opus-border);
+    border-radius: var(--opus-radius-md); background: var(--opus-surface);
+    text-align: left; cursor: pointer; transition: all 0.15s;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .opus-empty-prompt-card:hover {
+    border-color: var(--opus-primary-border); background: var(--opus-primary-light);
+    box-shadow: 0 2px 8px rgba(124,58,237,0.08); transform: translateY(-1px);
+  }
+  .opus-empty-prompt-icon { font-size: 14px; margin-bottom: 6px; }
+  .opus-empty-prompt-text { font-size: var(--opus-text-sm); color: var(--opus-text-secondary); line-height: 1.4; font-weight: 500; }
 
   /* ── 消息气泡 · Opus 风格 ── */
   .opus-user-bubble {
@@ -171,7 +237,7 @@
     padding-left: 4px; border-left: 1px solid #d1d5db; margin-left: 2px;
   }
 
-  /* ── Markdown 渲染后微调（气泡内）── */
+  /* ── Markdown 渲染微调 ── */
   .opus-assistant-bubble.prose p:first-child { margin-top: 0; }
   .opus-assistant-bubble.prose p:last-child  { margin-bottom: 0; }
   .opus-assistant-bubble.prose pre {
@@ -189,228 +255,270 @@
   .opus-assistant-bubble.prose td { padding: 6px 10px; border: 1px solid #e5e7eb; }
   .opus-assistant-bubble.prose th { background: #f9fafb; font-weight: 600; color: #374151; }
 
-  .opus-bottom-dock { grid-area: footer; flex-shrink: 0; border-top: 1px solid var(--opus-border); background: var(--opus-surface); }
-  .opus-templates-inline { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 14px 0; background: #fafafa; }
-  details.opus-tpl-chip {
-    flex: 1 1 auto; min-width: 160px; margin: 0;
-    border: 1px solid var(--opus-border); border-radius: var(--opus-radius-sm);
-    background: var(--opus-surface); font-size: var(--opus-text-xs);
+  /* ── 底部输入区 ── */
+  .opus-bottom-dock {
+    grid-area: footer; flex-shrink: 0;
+    padding: 8px 14px 12px; background: var(--opus-bg);
   }
-  details.opus-tpl-chip summary {
-    cursor: pointer; padding: 4px 10px; color: var(--opus-text-secondary);
-    list-style: none; user-select: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  .opus-composer {
+    background: var(--opus-surface); border-radius: var(--opus-radius-lg);
+    box-shadow: var(--opus-shadow-lg); border: 1px solid var(--opus-border);
+    overflow: hidden;
   }
-  details.opus-tpl-chip summary::-webkit-details-marker { display: none; }
-  details.opus-tpl-chip[open] { border-color: var(--opus-primary-border); }
-  details.opus-tpl-chip[open] summary {
-    color: var(--opus-primary-hover); font-weight: 600; border-bottom: 1px solid var(--opus-border-light);
+  .opus-composer-tool-strip {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+    padding: 6px 14px 0; font-size: 10px; color: var(--opus-text-muted);
+    border-bottom: 1px solid var(--opus-border-light);
   }
-  .opus-tpl-body { padding: 6px 8px 8px; }
-  .opus-tpl-body textarea {
+  .opus-composer-tool-strip details {
+    margin: 0; border: none; background: transparent; font-size: 10px;
+  }
+  .opus-composer-tool-strip summary {
+    cursor: pointer; color: var(--opus-text-muted); list-style: none;
+    padding: 2px 8px; border-radius: 4px; border: 1px solid transparent;
+    transition: all 0.12s;
+  }
+  .opus-composer-tool-strip summary:hover { color: var(--opus-primary-hover); background: var(--opus-primary-light); border-color: var(--opus-primary-border); }
+  .opus-composer-tool-strip summary::-webkit-details-marker { display: none; }
+  .opus-composer-tool-strip details[open] summary { color: var(--opus-primary-hover); font-weight: 600; background: var(--opus-primary-light); border-color: var(--opus-primary-border); }
+  .opus-composer-jl13-body { padding: 6px 8px 8px; }
+  .opus-composer-jl13-body textarea {
     width: 100%; border: 1px solid var(--opus-border); border-radius: var(--opus-radius-sm);
-    padding: 6px 10px; font-size: var(--opus-text-sm); line-height: 1.4;
-    resize: vertical; min-height: 48px; max-height: 100px; box-sizing: border-box; background: #fafafa;
+    padding: 6px 10px; font-size: 11px; line-height: 1.4; resize: vertical;
+    min-height: 44px; max-height: 100px; box-sizing: border-box; background: #fafafa;
   }
-  .opus-tpl-hint { font-size: var(--opus-text-xs); color: var(--opus-text-muted); margin-top: 3px; }
-
-  .opus-composer { padding: 8px 14px 10px; background: var(--opus-surface); }
   .opus-composer-box {
-    display: flex; align-items: flex-end; gap: 6px; width: 100%;
-    padding: 2px 3px 2px 14px; border: 1.5px solid var(--opus-border);
-    border-radius: var(--opus-radius-lg); background: var(--opus-bg);
-    transition: border-color 0.15s, box-shadow 0.15s;
-  }
-  .opus-composer-box:focus-within {
-    border-color: var(--opus-primary);
-    box-shadow: 0 0 0 3px rgba(124,58,237,0.1); background: var(--opus-surface);
+    display: flex; align-items: flex-end; gap: 8px; width: 100%;
+    padding: 6px 10px 6px 16px; background: var(--opus-surface);
   }
   .opus-composer-box textarea {
     flex: 1; border: none; outline: none; resize: none;
     padding: 7px 0; font-size: var(--opus-text-base); line-height: 1.5;
-    max-height: 120px; min-height: 22px; background: transparent; color: var(--opus-text);
+    max-height: 200px; min-height: 24px; background: transparent; color: var(--opus-text);
   }
   .opus-composer-box textarea::placeholder { color: var(--opus-text-muted); }
   .opus-composer-send {
     flex-shrink: 0; width: 34px; height: 34px; border-radius: 50%; border: none;
     background: var(--opus-primary); color: #fff; cursor: pointer;
-    display: flex; align-items: center; justify-content: center; transition: background 0.12s;
+    display: flex; align-items: center; justify-content: center; transition: background 0.12s, transform 0.12s;
   }
-  .opus-composer-send:hover { background: var(--opus-primary-hover); }
+  .opus-composer-send:hover { background: var(--opus-primary-hover); transform: scale(1.05); }
 
-  .opus-assistant-bubble { position: relative; }
-  .opus-msg-menu { position: relative; }
-  .opus-msg-menu-trigger {
-    list-style: none; cursor: pointer; width: 28px; height: 28px;
-    border-radius: var(--opus-radius-sm); border: 1px solid transparent;
-    background: transparent; color: var(--opus-text-muted);
-    display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+  /* ── 标的输入行（PC 横向 / 移动端含触发按钮）── */
+  .opus-symbol-row {
+    display: inline-flex; align-items: center; gap: 4px;
   }
-  .opus-msg-menu-trigger::-webkit-details-marker { display: none; }
-  .opus-msg-menu-trigger:hover,
-  .opus-msg-menu[open] .opus-msg-menu-trigger {
-    background: var(--opus-bg-alt); border-color: var(--opus-border); color: var(--opus-text-secondary);
+  .opus-symbol-sheet-btn {
+    display: none; /* PC 默认隐藏，移动端通过 JS 展示 */
+    flex-shrink: 0; width: 34px; height: 34px; border-radius: var(--opus-radius-sm);
+    border: 1px solid var(--opus-border); background: var(--opus-bg);
+    cursor: pointer; font-size: 16px; line-height: 1;
+    align-items: center; justify-content: center;
+    color: var(--opus-text-secondary);
   }
-  .opus-msg-menu-panel {
-    position: absolute; right: 0; top: calc(100% + 4px); z-index: 1;
-    min-width: 176px; padding: 6px; border-radius: var(--opus-radius-md);
-    border: 1px solid var(--opus-border); background: var(--opus-surface); box-shadow: var(--opus-shadow-md);
-  }
-  .opus-msg-menu-item {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
-    width: 100%; padding: 8px 10px; border: none; border-radius: 7px;
-    background: transparent; color: var(--opus-text-secondary);
-    font-size: var(--opus-text-sm); text-align: left; text-decoration: none; cursor: pointer; line-height: 1.3;
-  }
-  .opus-msg-menu-item:hover:not(.is-disabled) {
-    background: var(--opus-primary-light); color: var(--opus-primary-hover);
-  }
-  .opus-msg-menu-item.is-disabled { opacity: 0.4; cursor: not-allowed; }
-  .opus-msg-menu-icon { flex-shrink: 0; width: 1.1em; text-align: center; }
-  .opus-msg-menu-hint { flex: 1 1 100%; font-size: var(--opus-text-xs); color: var(--opus-text-muted); padding-left: 1.6em; font-weight: 400; }
-  .opus-pin-toast:not(.hidden) { animation: opus-toast-in 0.2s ease; }
-  @keyframes opus-toast-in { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+  .opus-symbol-sheet-btn:hover { background: var(--opus-primary-light); border-color: var(--opus-primary-border); }
 
-  /* ── 面板显隐（不用 height:100%，让 flex:1 计算）── */
+  /* ── 面板显隐 ── */
   #opus-panel-chat.hidden { display: none; }
   #opus-panel-chat:not(.hidden) { flex: 1; min-height: 0; display: flex; }
   #opus-panel-t2.hidden { display: none; }
   #opus-panel-t2:not(.hidden) {
     flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; width: 100%;
-    overflow: hidden;  /* ⚠️ 阻止 HTMX 注入的 T2 内容撑破视口 */
+    overflow: hidden;
   }
   #opus-t2-panel-slot {
     flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; width: 100%;
-    overflow: hidden;  /* ⚠️ 同上 */
+    overflow: hidden;
   }
 
-  @media (max-width: 768px) {
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     📱 移动端 (< 768px)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media (max-width: 767px) {
     body:has(#opus-workspace-root) { position: fixed; inset: 0; width: 100%; }
     body:has(#opus-workspace-root) main {
       height: calc(100dvh - var(--opus-nav-h)); max-height: calc(100dvh - var(--opus-nav-h));
     }
-    .opus-header-strip { padding: 4px 10px; gap: 6px 10px; }
+
+    /* ── 修复 iOS 自动放大 · 所有表单元素 ≥16px ── */
+    #opus-workspace-root input,
+    #opus-workspace-root select,
+    #opus-workspace-root textarea {
+      font-size: 16px !important;
+    }
+
+    .opus-header-strip {
+      padding: 4px 10px; gap: 6px 10px;
+      justify-content: space-between;
+    }
     .opus-header-strip h1 { font-size: var(--opus-text-base); }
-    .opus-chat-shell { flex-direction: column; }
+    .opus-hamburger { display: flex; }
 
-    /* ── 移动端侧边栏：展开为标的 + 话题双模式（高度自适应）── */
+    /* 侧边栏 → Drawer */
     .opus-sidebar {
-      width: 100%; max-height: none; flex-direction: column; align-items: stretch;
-      border-right: none; border-bottom: 1px solid var(--opus-border); flex-shrink: 0;
-      min-height: auto;
+      position: fixed; top: 0; left: -280px; z-index: 150;
+      width: 270px; height: 100dvh; max-height: 100dvh;
+      border-right: 1px solid var(--opus-border);
+      background: var(--opus-surface); box-shadow: var(--opus-shadow-lg);
+      transition: left 0.25s ease;
     }
-    .opus-sidebar-head { border-bottom: 1px solid var(--opus-border); border-right: none; flex-shrink: 0; padding: 6px 10px; }
-    .opus-sidebar-head .opus-sidebar-title { display: inline; }
-    .opus-sidebar-list {
-      flex-direction: row; gap: 4px; overflow-x: auto; overflow-y: hidden;
-      flex: 0 0 auto; min-height: 0; padding: 6px 8px; max-height: 58px;
-    }
-    .opus-session-item { flex: 0 0 auto; width: auto; min-width: 72px; max-width: 120px; white-space: nowrap; }
-    .opus-session-meta { display: none; }
-    .opus-main-column { flex: 1; min-height: 0; }
-    .opus-bottom-dock { padding-bottom: env(safe-area-inset-bottom,0px); box-shadow: 0 -2px 8px rgba(0,0,0,0.06); }
-    .opus-composer-box textarea { max-height: 80px; }
-    .opus-templates-inline { flex-direction: column; }
-    details.opus-tpl-chip[open] { flex: 1 1 100%; }
+    .opus-sidebar.is-open { left: 0; }
 
-    /* ── 移动端工具栏：标的复选框列表始终展开、触控友好 ── */
+    /* Drawer Overlay */
+    .opus-sidebar-overlay {
+      display: none; position: fixed; inset: 0; z-index: 140;
+      background: rgba(0,0,0,0.35);
+    }
+    .opus-sidebar-overlay.is-active { display: block; }
+
+    .opus-chat-shell { flex-direction: column; }
+    .opus-main-column { flex: 1; min-height: 0; }
+
     .opus-toolbar { padding: 6px 10px; }
     .opus-toolbar-details summary { padding: 4px 0; font-size: var(--opus-text-sm); }
-    .opus-toolbar-details[open] { padding-bottom: 4px; }
+    /* ── 移动端表单：上下结构 + 满宽触控 ── */
     .opus-toolbar-inline {
-      gap: 6px 10px; font-size: 9px;
-      flex-direction: column; align-items: flex-start;
+      gap: 8px 0; font-size: 12px;
+      flex-direction: column; align-items: stretch;
     }
-    /* 标的复选框网格 · 移动端 2 列自适应 · 触控尺寸 ≥44px */
-    .t2-symbol-check-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-      gap: 6px; max-height: 160px; overflow-y: auto; padding-right: 4px;
+    .opus-toolbar-inline > label {
+      display: flex; flex-direction: column; gap: 3px;
+      width: 100%; padding: 6px 0;
     }
-    .t2-symbol-check-grid label {
-      padding: 6px 8px !important; gap: 5px !important;
-      font-size: 11px !important; border-radius: 8px !important;
-      min-height: 40px; align-items: center;
+    .opus-toolbar-inline > label > input,
+    .opus-toolbar-inline > label > select {
+      width: 100%; min-height: 38px; box-sizing: border-box;
+      font-size: 16px !important; /* iOS zoom fix */
     }
-    .t2-symbol-check-grid input[type="checkbox"] {
-      width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--opus-primary);
+    /* ── 数据开关复选框 → 卡片式网格 ── */
+    .opus-toolbar-inline .opus-force-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+      width: 100%; padding: 4px 0;
     }
-    .t2-symbol-check-grid .t2-sym-name {
-      max-width: none !important; white-space: normal; word-break: break-word;
-      line-height: 1.3; font-size: 10px;
+    .opus-toolbar-inline .opus-force-grid .opus-force-card {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 10px 8px; border: 1px solid var(--opus-border);
+      border-radius: var(--opus-radius-sm); background: var(--opus-bg);
+      cursor: pointer; user-select: none; transition: all 0.12s;
+      min-height: 36px; font-size: 13px; font-weight: 500; color: var(--opus-text-secondary);
+      -webkit-tap-highlight-color: transparent;
     }
+    .opus-toolbar-inline .opus-force-grid .opus-force-card.is-checked {
+      border-color: var(--opus-primary); background: var(--opus-primary-light);
+      color: var(--opus-primary-hover); font-weight: 600;
+    }
+    .opus-toolbar-inline .opus-force-grid .opus-force-card input {
+      display: none; /* hidden native checkbox */
+    }
+    /* ── 标的输入行 + 底部面板触发按钮 ── */
+    .opus-symbol-row {
+      display: flex; align-items: center; gap: 4px;
+    }
+    .opus-symbol-row input { flex: 1; }
+    .opus-symbol-sheet-btn {
+      flex-shrink: 0; width: 38px; height: 38px; border-radius: var(--opus-radius-sm);
+      border: 1px solid var(--opus-border); background: var(--opus-bg);
+      cursor: pointer; font-size: 18px; line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--opus-text-secondary); -webkit-tap-highlight-color: transparent;
+    }
+    .opus-symbol-sheet-btn:hover { background: var(--opus-primary-light); border-color: var(--opus-primary-border); }
 
-    /* ── 移动端气泡回复内容 · 卡片缩窄 ── */
     .opus-messages-scroll { padding: 8px 10px; }
     .opus-assistant-bubble { font-size: 12px; }
     .opus-user-bubble { font-size: 12px; }
-    /* T2 回复英雄区 · 移动端换行 */
-    .t2-reply-hero { padding: 10px 12px; gap: 6px 10px; }
-    .t2-reply-summary { font-size: var(--opus-text-base); line-height: 1.45; }
-    .t2-reply-action-badge { font-size: 10px; padding: 4px 10px; }
-    .t2-reply-section { padding: 8px 12px; }
-    .t2-reply-section-title { font-size: 10px; }
-    .t2-reply-section-body { font-size: 11px; }
-    /* 目标筹码 · 移动端 2 列 */
-    .t2-target-chips { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
-    .t2-target-chip { padding: 6px 8px; }
-    .t2-target-sym { font-size: 10px; }
-    .t2-target-rat { font-size: 10px; line-height: 1.35; }
-    /* 九维网格 · 移动端 1 列 */
-    .t2-nine-dim-grid { grid-template-columns: 1fr; gap: 4px; }
-    .t2-nine-dim-card { font-size: 10px; }
-    .t2-nine-dim-summary { padding: 5px 6px; }
-    .t2-nine-dim-body { padding: 0 6px 6px; font-size: 10px; }
-    /* 标的卡片 · 移动端优化 */
-    .t2-symbol-card { margin-bottom: 6px; }
-    .t2-symbol-summary { padding: 8px 10px; gap: 6px; }
-    .t2-symbol-title { font-size: 12px; }
-    .t2-symbol-body { padding: 0 10px 10px; }
-    /* 分段 */
-    .t2-segment { padding: 6px 8px; }
-    .t2-segment-title { font-size: 11px; }
-    .t2-segment-body { font-size: 11px; }
-    /* 移动端消息菜单面板 · 避免超出屏幕 */
-    .opus-msg-menu-panel { right: auto; left: 0; min-width: 150px; }
-    /* 移动端费用药丸 */
-    .opus-cost-pill { font-size: 9px; padding: 2px 6px; }
-    /* 移动端代码块微调 */
+
+    .opus-empty-prompts { grid-template-columns: 1fr; gap: 8px; }
+    .opus-empty-prompt-card { padding: 12px 14px; }
+    .opus-empty-prompt-text { font-size: 11px; }
+
+    .opus-bottom-dock {
+      padding: 6px 10px calc(6px + env(safe-area-inset-bottom, 0px));
+      /* ⚠️ 移动端键盘不遮挡：不使用 fixed，跟随文档流 */
+    }
+    .opus-composer { box-shadow: 0 -2px 12px rgba(0,0,0,0.08); }
+    .opus-composer-box { padding: 4px 8px 4px 12px; }
+    .opus-composer-box textarea { max-height: 120px; font-size: 16px !important; /* 防止 iOS 缩放 */ }
+    .opus-composer-tool-strip { padding: 4px 10px 0; gap: 4px 8px; }
+
     .opus-assistant-bubble.prose pre { font-size: 10px; max-height: 200px; overflow-y: auto; }
     .opus-assistant-bubble.prose code { font-size: 10px; }
     .opus-assistant-bubble.prose table { font-size: 10px; display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .opus-assistant-bubble.prose th,
     .opus-assistant-bubble.prose td { padding: 4px 6px; }
 
-    /* ── 移动端 T2 标的列表侧栏（话题列表之上展示持仓标的）── */
-    .opus-sidebar-symbol-strip {
-      flex-shrink: 0; display: flex; flex-direction: column;
-      border-bottom: 1px solid var(--opus-border); background: var(--opus-bg);
-      padding: 6px 8px; gap: 4px;
+    /* 消息菜单 */
+    .opus-msg-menu-panel { right: auto; left: 0; min-width: 150px; }
+    .opus-cost-pill { font-size: 9px; padding: 2px 6px; }
+
+    /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       移动端持仓选择器 · Bottom Sheet
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+    .opus-sheet-overlay {
+      display: none; position: fixed; inset: 0; z-index: 250;
+      background: rgba(0,0,0,0.45); animation: opus-fade-in 0.2s ease;
     }
-    .opus-sidebar-symbol-strip-title {
-      font-size: 9px; font-weight: 700; color: var(--opus-text-muted);
-      text-transform: uppercase; letter-spacing: 0.06em; margin: 0;
+    .opus-sheet-overlay.is-active { display: block; }
+    .opus-sheet-panel {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 260;
+      background: var(--opus-surface); border-radius: 16px 16px 0 0;
+      max-height: 60vh; display: flex; flex-direction: column;
+      box-shadow: 0 -4px 24px rgba(0,0,0,0.15);
+      transform: translateY(100%); transition: transform 0.3s ease;
+      will-change: transform;
     }
-    .opus-sidebar-symbol-strip-scroll {
-      display: flex; flex-direction: row; gap: 4px; overflow-x: auto; overflow-y: hidden;
-      padding-bottom: 2px;
+    .opus-sheet-panel.is-open { transform: translateY(0); }
+    .opus-sheet-handle {
+      flex-shrink: 0; display: flex; justify-content: center; padding: 8px 0 4px;
     }
-    .opus-sidebar-symbol-btn {
-      flex: 0 0 auto; padding: 4px 10px; border-radius: 999px;
-      font-size: 10px; font-weight: 600; font-family: ui-monospace, monospace;
-      border: 1px solid var(--opus-border); background: var(--opus-surface);
-      color: var(--opus-text-secondary); cursor: pointer; white-space: nowrap;
-      min-height: 32px; display: flex; align-items: center; gap: 4px;
-      transition: background 0.12s, border-color 0.12s;
+    .opus-sheet-handle::after {
+      content: ''; display: block; width: 36px; height: 4px;
+      border-radius: 2px; background: #d1d5db;
     }
-    .opus-sidebar-symbol-btn:active,
-    .opus-sidebar-symbol-btn.is-active {
+    .opus-sheet-header {
+      flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 16px 10px;
+    }
+    .opus-sheet-title {
+      font-size: 15px; font-weight: 700; color: var(--opus-text);
+    }
+    .opus-sheet-close {
+      font-size: 14px; color: var(--opus-text-muted); border: none; background: none; cursor: pointer;
+      padding: 6px; line-height: 1;
+    }
+    .opus-sheet-list {
+      flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+      padding: 0 12px 12px;
+    }
+    .opus-sheet-item {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%; padding: 12px 14px; margin-bottom: 4px;
+      border: 1px solid var(--opus-border); border-radius: var(--opus-radius-sm);
+      background: var(--opus-bg); cursor: pointer; transition: all 0.12s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .opus-sheet-item:active {
       background: var(--opus-primary-light); border-color: var(--opus-primary-border);
-      color: var(--opus-primary-hover);
+      transform: scale(0.98);
     }
-    /* 侧边栏分隔 */
-    .opus-sidebar-sep { width: 100%; height: 1px; background: var(--opus-border); flex-shrink: 0; }
+    .opus-sheet-item-code {
+      font-size: 14px; font-weight: 700; font-family: ui-monospace, monospace;
+      color: var(--opus-text);
+    }
+    .opus-sheet-item-name {
+      font-size: 12px; color: var(--opus-text-muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .opus-sheet-empty {
+      text-align: center; padding: 30px 0; font-size: 12px; color: var(--opus-text-muted);
+    }
+
+    @keyframes opus-fade-in {
+      from { opacity: 0; } to { opacity: 1; }
+    }
   }
 
-  /* T2 回复排版 */
+  /* T2 回复排版 (未改）*/
   #t2-analyst-messages .opus-assistant-bubble { max-width: min(920px, 100%); width: 100%; }
   .opus-assistant-body.t2-assistant-body { padding: 12px 14px; font-size: var(--opus-text-base); line-height: 1.55; color: var(--opus-text); }
   .t2-analyst-result { width: 100%; }

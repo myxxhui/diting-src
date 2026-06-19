@@ -5,6 +5,7 @@
 
 <div id="opus-workspace-root">
   <div class="opus-header-strip">
+    <button type="button" class="opus-hamburger" id="opus-hamburger-btn" aria-label="菜单">☰</button>
     <h1>
       <span>🔬</span> Opus 分析
       <span class="text-[10px] font-normal text-gray-400">· 可手动同步<a href="/planning?view=executing" class="text-violet-600 hover:underline">执行中</a></span>
@@ -14,6 +15,9 @@
       <button type="button" id="opus-tab-chat" class="opus-mode-tab">自由研究</button>
     </div>
   </div>
+
+  <!-- 移动端 Drawer 遮罩 -->
+  <div class="opus-sidebar-overlay" id="opus-sidebar-overlay"></div>
 
   <div class="opus-panel-wrap">
     <div id="opus-panel-t2" class="flex flex-1 min-h-0">
@@ -35,9 +39,8 @@
     <div id="opus-panel-chat" class="opus-chat-shell hidden flex-1 min-h-0">
       <aside class="opus-sidebar" id="radar-chat-sidebar" aria-label="对话话题">
         <div class="opus-sidebar-head">
-          <span class="opus-sidebar-title text-xs font-semibold text-gray-600">话题</span>
-          <button type="button" id="radar-chat-new-btn"
-                  class="text-[11px] px-2 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700 border-0">＋ 新</button>
+          <span class="opus-sidebar-title text-xs font-semibold">话题</span>
+          <button type="button" id="radar-chat-new-btn" class="opus-sidebar-new-btn">＋ 新建对话</button>
         </div>
         <div class="opus-sidebar-list" id="radar-chat-session-list"></div>
       </aside>
@@ -47,19 +50,22 @@
           <details class="opus-toolbar-details">
             <summary>选项 · 标的与模型</summary>
             <div class="opus-toolbar-inline py-1">
-              <label class="flex items-center gap-1 text-gray-600">
+              <label class="flex items-center gap-1 text-gray-600 opus-symbol-label">
                 标的
-                <input type="text" id="radar-chat-symbol" list="radar-symbol-datalist"
-                       placeholder="代码or名称…"
-                       autocomplete="off"
-                       class="border border-gray-200 rounded px-2 py-0.5 text-[10px] w-[130px] focus:outline-none focus:border-blue-400">
-                <datalist id="radar-symbol-datalist">
-                  {% for s in workspace_symbols|default([]) %}
-                  <option value="{{ s.symbol }}">{{ s.symbol }}{% if s.name %} · {{ s.name }}{% endif %}</option>
-                  {% endfor %}
-                </datalist>
+                <span class="opus-symbol-row">
+                  <input type="text" id="radar-chat-symbol" list="radar-symbol-datalist"
+                         placeholder="代码or名称…"
+                         autocomplete="off"
+                         class="border border-gray-200 rounded px-2 py-0.5 text-[10px] w-[130px] focus:outline-none focus:border-blue-400">
+                  <datalist id="radar-symbol-datalist">
+                    {% for s in workspace_symbols|default([]) %}
+                    <option value="{{ s.symbol }}">{{ s.symbol }}{% if s.name %} · {{ s.name }}{% endif %}</option>
+                    {% endfor %}
+                  </datalist>
+                  <button type="button" class="opus-symbol-sheet-btn" id="opus-symbol-sheet-trigger" title="选择持仓标的" aria-label="选择持仓标的">📋</button>
+                </span>
               </label>
-              <label class="flex items-center gap-1 text-gray-600">
+              <label class="flex items-center gap-1 text-gray-600 opus-model-label">
                 模型
                 <select id="radar-chat-model" class="border border-gray-200 rounded px-2 py-0.5 text-[10px]">
                   {% for mid, label in chat_models|default([]) %}
@@ -68,63 +74,86 @@
                 </select>
               </label>
               <span id="radar-chat-context-hint" class="text-[10px] text-gray-400">填写标的后自动携带 JL 数据包</span>
-              <label class="flex items-center gap-1 text-gray-500 cursor-pointer">
-                <input type="checkbox" id="radar-force-base" class="w-3 h-3 rounded border-gray-300" title="强制刷新基础信息">
-                <span class="text-[10px]">基础</span>
-              </label>
-              <label class="flex items-center gap-1 text-gray-500 cursor-pointer">
-                <input type="checkbox" id="radar-force-jl13" class="w-3 h-3 rounded border-gray-300" title="强制刷新 JL1-3 宏观/产业链">
-                <span class="text-[10px]">JL1-3</span>
-              </label>
-              <label class="flex items-center gap-1 text-gray-500 cursor-pointer">
-                <input type="checkbox" id="radar-force-jl4" class="w-3 h-3 rounded border-gray-300" title="强制刷新 JL4 盘面指标">
-                <span class="text-[10px]">JL4</span>
-              </label>
-              <label class="flex items-center gap-1 text-gray-500 cursor-pointer">
-                <input type="checkbox" id="radar-force-9d" class="w-3 h-3 rounded border-gray-300" title="强制刷新 9维框架">
-                <span class="text-[10px]">9维</span>
-              </label>
+              <div class="opus-force-grid">
+                <label class="opus-force-card" data-force="base">
+                  <input type="checkbox" id="radar-force-base" title="强制刷新基础信息">基础
+                </label>
+                <label class="opus-force-card" data-force="jl13">
+                  <input type="checkbox" id="radar-force-jl13" title="强制刷新 JL1-3 宏观/产业链">JL1-3
+                </label>
+                <label class="opus-force-card" data-force="jl4">
+                  <input type="checkbox" id="radar-force-jl4" title="强制刷新 JL4 盘面指标">JL4
+                </label>
+                <label class="opus-force-card" data-force="9d">
+                  <input type="checkbox" id="radar-force-9d" title="强制刷新 9维框架">9维
+                </label>
+              </div>
               <span class="text-[10px] text-gray-400">研究 advisory · 非交易指令</span>
             </div>
           </details>
         </header>
 
         <div id="radar-chat-messages" class="opus-messages-scroll">
-          <div class="text-sm text-gray-400 text-center py-12">切换到本 Tab 后加载对话…</div>
+          <div class="opus-empty-state">
+            <div class="opus-empty-state-logo">🔬</div>
+            <h2 class="opus-empty-state-title">Opus 量化研究助手</h2>
+            <p class="opus-empty-state-sub">选择标的，输入你的投资研究问题，AI 将结合 JL1-4 层数据与 9 维框架为你深入分析。</p>
+            <div class="opus-empty-prompts">
+              <div class="opus-empty-prompt-card" data-prompt="请对当前组合做一次全面体检，覆盖 JL1 到 JL4">
+                <div class="opus-empty-prompt-icon">🏥</div>
+                <div class="opus-empty-prompt-text">请对当前组合做一次全面体检，覆盖 JL1 到 JL4</div>
+              </div>
+              <div class="opus-empty-prompt-card" data-prompt="分析当前A股持仓标的的筹码集中度与主力动向">
+                <div class="opus-empty-prompt-icon">📊</div>
+                <div class="opus-empty-prompt-text">分析当前A股持仓标的的筹码集中度与主力动向</div>
+              </div>
+              <div class="opus-empty-prompt-card" data-prompt="生成当前标的的宏观环境与产业链竞争格局研报">
+                <div class="opus-empty-prompt-icon">📄</div>
+                <div class="opus-empty-prompt-text">生成当前标的的宏观环境与产业链竞争格局研报</div>
+              </div>
+              <div class="opus-empty-prompt-card" data-prompt="基于 JL4 盘面指标判断当前持仓的短期风险信号">
+                <div class="opus-empty-prompt-icon">⚠️</div>
+                <div class="opus-empty-prompt-text">基于 JL4 盘面指标判断当前持仓的短期风险信号</div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="opus-bottom-dock">
-        <div class="opus-templates-inline">
-          <details class="opus-tpl-chip" id="radar-tpl-jl13-wrap">
-            <summary>JL1–3 模板（可选自定义）</summary>
-            <div class="opus-tpl-body">
-              <textarea id="radar-chat-jl13-input" name="jl13_data_prompt" form="radar-chat-form"
-                        maxlength="2000" rows="2">{{ default_jl13_data_template|default('') }}</textarea>
-              <p class="opus-tpl-hint">选填 · 编辑后自动保存 · 不填则用默认模板补充公开市场数据 · 填写标的即自动携带</p>
+          <footer class="opus-composer">
+            <div class="opus-composer-tool-strip">
+              <details id="radar-tpl-jl13-wrap">
+                <summary>JL1–3 模板 ▾</summary>
+                <div class="opus-composer-jl13-body">
+                  <textarea id="radar-chat-jl13-input" name="jl13_data_prompt" form="radar-chat-form"
+                            maxlength="2000" rows="2" placeholder="可选 · 自定义 JL1-3 数据模板（留空则使用默认）">{{ default_jl13_data_template|default('') }}</textarea>
+                  <span class="text-[9px] text-gray-400 mt-1 block">编辑后自动保存 · 选标自动携带</span>
+                </div>
+              </details>
+              <span class="text-gray-400">|</span>
+              <span id="radar-chat-context-hint-bottom" class="text-gray-400">研究 advisory · 非交易指令</span>
             </div>
-          </details>
-        </div>
-        <footer class="opus-composer">
-          <form id="radar-chat-form"
-                hx-post="/api/radar/chat"
-                hx-target="#radar-chat-messages"
-                hx-swap="innerHTML"
-                hx-indicator="#radar-chat-spinner">
-            <input type="hidden" name="session_id" id="radar-chat-session-id" value="">
-            <input type="hidden" name="symbol" id="radar-chat-symbol-hidden" value="">
-            <input type="hidden" name="model_id" id="radar-chat-model-hidden" value="">
-            <input type="hidden" name="force_base" id="radar-force-base-hidden" value="">
-            <input type="hidden" name="force_jl13" id="radar-force-jl13-hidden" value="">
-            <input type="hidden" name="force_jl4" id="radar-force-jl4-hidden" value="">
-            <input type="hidden" name="force_9d" id="radar-force-9d-hidden" value="">
-            <div class="opus-composer-box">
-              <textarea name="message" id="radar-chat-input" rows="1" maxlength="4000" required
-                        placeholder="输入问题… Enter 发送 · Shift+Enter 换行"></textarea>
-              <button type="submit" class="opus-composer-send" title="发送" aria-label="发送">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4l17.45-7.48a1 1 0 000-1.84L3.4 3.6a1 1 0 00-1.52 1.08l2.2 6.38H11a1 1 0 010 2H3.08l2.2 6.38a1 1 0 001.32 1.56z"/></svg>
-              </button>
-            </div>
-          </form>
+            <form id="radar-chat-form"
+                  hx-post="/api/radar/chat"
+                  hx-target="#radar-chat-messages"
+                  hx-swap="innerHTML"
+                  hx-indicator="#radar-chat-spinner">
+              <input type="hidden" name="session_id" id="radar-chat-session-id" value="">
+              <input type="hidden" name="symbol" id="radar-chat-symbol-hidden" value="">
+              <input type="hidden" name="model_id" id="radar-chat-model-hidden" value="">
+              <input type="hidden" name="force_base" id="radar-force-base-hidden" value="">
+              <input type="hidden" name="force_jl13" id="radar-force-jl13-hidden" value="">
+              <input type="hidden" name="force_jl4" id="radar-force-jl4-hidden" value="">
+              <input type="hidden" name="force_9d" id="radar-force-9d-hidden" value="">
+              <div class="opus-composer-box">
+                <textarea name="message" id="radar-chat-input" rows="1" maxlength="4000" required
+                          placeholder="输入问题… Enter 发送 · Shift+Enter 换行"></textarea>
+                <button type="submit" class="opus-composer-send" title="发送" aria-label="发送">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4l17.45-7.48a1 1 0 000-1.84L3.4 3.6a1 1 0 00-1.52 1.08l2.2 6.38H11a1 1 0 010 2H3.08l2.2 6.38a1 1 0 001.32 1.56z"/></svg>
+                </button>
+              </div>
+            </form>
+          </footer>
           <div id="radar-chat-spinner" class="htmx-indicator flex items-center gap-2 text-xs text-gray-400 mt-2 justify-center">
             <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -132,7 +161,6 @@
             </svg>
             <span id="radar-chat-model-label">Opus 4.6</span> 思考中…
           </div>
-        </footer>
         </div>
       </div>
     </div>
@@ -140,6 +168,17 @@
 </div>
 
 {% include "planning/_t2_analyst_boot.html" %}
+
+<!-- ════ 移动端 Bottom Sheet：持仓标的列表选择器 ════ -->
+<div class="opus-sheet-overlay" id="opus-sheet-overlay"></div>
+<div class="opus-sheet-panel" id="opus-sheet-panel">
+  <div class="opus-sheet-handle"></div>
+  <div class="opus-sheet-header">
+    <span class="opus-sheet-title">选择持仓标的</span>
+    <button type="button" class="opus-sheet-close" id="opus-sheet-close">✕</button>
+  </div>
+  <div class="opus-sheet-list" id="opus-sheet-list"></div>
+</div>
 
 <script>
   (function () {
@@ -256,19 +295,17 @@
       var active = radarSid();
       var list = getRadarSessions();
       if (!list.length) {
-        box.innerHTML = '<p class="text-[10px] text-gray-400 px-2 py-3">暂无历史话题</p>';
+        box.innerHTML = '<p class="text-[10px] text-gray-400 px-3 py-3 text-center">暂无历史话题</p>';
         return;
       }
       box.innerHTML = list.map(function (item) {
         var dt = item.updatedAt ? new Date(item.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
         var cls = item.id === active ? 'opus-session-item is-active' : 'opus-session-item';
-        return '<div class="flex items-center group/sess">'
-          + '<button type="button" class="' + cls + ' flex-1 min-w-0" data-radar-session-id="' + item.id + '">'
-          + '<span class="opus-session-title truncate">' + (item.title || '未命名') + '</span>'
-          + '<span class="opus-session-meta">' + dt + '</span></button>'
-          + '<button type="button" class="opus-session-del opacity-0 group-hover/sess:opacity-100 text-[10px] text-gray-400 hover:text-rose-600 px-1.5 py-1 shrink-0" '
-          + 'data-delete-sid="' + item.id + '" title="删除话题">✕</button>'
-          + '</div>';
+        return '<button type="button" class="' + cls + '" data-radar-session-id="' + item.id + '">'
+          + '<span class="opus-session-title">' + (item.title || '未命名') + '</span>'
+          + '<span class="opus-session-meta">' + dt + '</span>'
+          + '<span class="opus-session-del" data-delete-sid="' + item.id + '" title="删除话题">✕</span>'
+          + '</button>';
       }).join('');
 
       // 绑定删除按钮
@@ -276,6 +313,7 @@
         delBtn.setAttribute('data-bound', '1');
         delBtn.addEventListener('click', function (ev) {
           ev.stopPropagation();
+          ev.preventDefault();
           var sid = delBtn.getAttribute('data-delete-sid');
           if (sid && confirm('删除此话题？')) deleteRadarSession(sid);
         });
@@ -295,7 +333,7 @@
       ta._composerBound = true;
       ta.addEventListener('input', function () {
         ta.style.height = 'auto';
-        ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
+        ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
       });
     }
 
@@ -320,6 +358,8 @@
             // 不在初始加载时向侧栏添加空会话（无数据不显示）
             renderRadarSessionList();
             bindRadarComposer();
+            bindForceCards();
+            initSymbolSheet();
             if (typeof htmx !== 'undefined') {
               htmx.ajax('GET', '/api/radar/chat/' + radarSid(), {
                 target: '#radar-chat-messages',
@@ -343,6 +383,37 @@
             }
           };
           syncRadarSessionsFromServer().finally(bootChat);
+
+    // ── 汉堡按钮 · 移动端 Drawer ──
+    var hamburger = document.getElementById('opus-hamburger-btn');
+    var sidebar = document.getElementById('radar-chat-sidebar');
+    var overlay = document.getElementById('opus-sidebar-overlay');
+    function openSidebarDrawer() {
+      if (sidebar) sidebar.classList.add('is-open');
+      if (overlay) overlay.classList.add('is-active');
+      document.body.style.overflow = 'hidden';
+    }
+    function closeSidebarDrawer() {
+      if (sidebar) sidebar.classList.remove('is-open');
+      if (overlay) overlay.classList.remove('is-active');
+      document.body.style.overflow = '';
+    }
+    if (hamburger) hamburger.addEventListener('click', openSidebarDrawer);
+    if (overlay) overlay.addEventListener('click', closeSidebarDrawer);
+
+    // ── 空状态快捷提示卡片 ──
+    document.body.addEventListener('click', function (ev) {
+      var card = ev.target.closest && ev.target.closest('.opus-empty-prompt-card');
+      if (!card) return;
+      var prompt = card.getAttribute('data-prompt');
+      if (!prompt) return;
+      var input = document.getElementById('radar-chat-input');
+      if (input) {
+        input.value = prompt;
+        input.dispatchEvent(new Event('input'));
+        input.focus();
+      }
+    });
         }
       } else {
         if (t2Wrap) t2Wrap.classList.remove('hidden');
@@ -434,8 +505,115 @@
       var counter = document.getElementById('radar-chat-jl13-count');
       if (counter) counter.textContent = (jl13El.value || '').length + ' / 2000';
     }
+    // ── 防抖工具 ──
+    function debounce(fn, ms) {
+      var timer = null;
+      return function () {
+        var ctx = this, args = arguments;
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { fn.apply(ctx, args); }, ms || 300);
+      };
+    }
+
+    // ── 卡片式复选框绑定（移动端触摸友好）──
+    function bindForceCards() {
+      document.querySelectorAll('.opus-force-card:not([data-card-bound])').forEach(function (card) {
+        card.setAttribute('data-card-bound', '1');
+        card.addEventListener('click', function (e) {
+          // 避免双击事件干扰
+          if (e.target.closest('.opus-force-card input')) return;
+          var cb = card.querySelector('input[type="checkbox"]');
+          if (!cb) return;
+          cb.checked = !cb.checked;
+          card.classList.toggle('is-checked', cb.checked);
+          radarSyncFormFields();
+        });
+        // 同步初始化状态
+        var cb = card.querySelector('input[type="checkbox"]');
+        if (cb) card.classList.toggle('is-checked', cb.checked);
+      });
+    }
+
+    // ── 移动端 Bottom Sheet 持仓选择器 ──
+    function initSymbolSheet() {
+      var trigger = document.getElementById('opus-symbol-sheet-trigger');
+      var panel = document.getElementById('opus-sheet-panel');
+      var overlay = document.getElementById('opus-sheet-overlay');
+      var closeBtn = document.getElementById('opus-sheet-close');
+      var listEl = document.getElementById('opus-sheet-list');
+      if (!trigger || !panel || !overlay) return;
+
+      function openSheet() {
+        // 从 datalist 构建列表
+        var datalist = document.getElementById('radar-symbol-datalist');
+        if (!listEl || !datalist) return;
+        var options = datalist.querySelectorAll('option');
+        var html = '';
+        if (!options.length) {
+          html = '<div class="opus-sheet-empty">暂无持仓标的</div>';
+        } else {
+          options.forEach(function (opt) {
+            var val = opt.value || '';
+            var label = opt.textContent || val;
+            var namePart = '';
+            if (label.indexOf(' · ') > -1) {
+              namePart = label.split(' · ').slice(1).join(' · ');
+            }
+            html += '<div class="opus-sheet-item" data-symbol="' + val.replace(/"/g, '&quot;') + '">'
+                  + '<span class="opus-sheet-item-code">' + val + '</span>'
+                  + (namePart ? '<span class="opus-sheet-item-name">' + namePart + '</span>' : '')
+                  + '</div>';
+          });
+        }
+        listEl.innerHTML = html;
+        panel.classList.add('is-open');
+        overlay.classList.add('is-active');
+        document.body.style.overflow = 'hidden';
+
+        // 绑定点击选择
+        listEl.querySelectorAll('.opus-sheet-item').forEach(function (item) {
+          item.addEventListener('click', function () {
+            var sym = item.getAttribute('data-symbol') || '';
+            var symIn = document.getElementById('radar-chat-symbol');
+            if (symIn) { symIn.value = sym; radarSyncFormFields(); }
+            closeSheet();
+          });
+        });
+      }
+
+      function closeSheet() {
+        panel.classList.remove('is-open');
+        overlay.classList.remove('is-active');
+        document.body.style.overflow = '';
+      }
+
+      trigger.addEventListener('click', function (e) { e.stopPropagation(); openSheet(); });
+      if (closeBtn) closeBtn.addEventListener('click', closeSheet);
+      overlay.addEventListener('click', closeSheet);
+      // 仅移动端响应滑动关闭
+      var startY = 0, moving = false;
+      panel.addEventListener('touchstart', function (e) {
+        if (panel.scrollTop <= 0) { startY = e.touches[0].clientY; moving = true; }
+      }, { passive: true });
+      panel.addEventListener('touchmove', function (e) {
+        if (!moving) return;
+        var dy = e.touches[0].clientY - startY;
+        if (dy > 80) closeSheet();
+      }, { passive: true });
+
+      // 移动端触发按钮展示（PC 隐藏）
+      var mq = window.matchMedia('(max-width: 767px)');
+      function toggleTrigger(m) {
+        if (trigger) trigger.style.display = m.matches ? 'flex' : 'none';
+      }
+      toggleTrigger(mq);
+      mq.addListener(toggleTrigger);
+    }
+
     if (symIn) {
-      symIn.addEventListener('input', radarSyncFormFields);
+      symIn.addEventListener('input', debounce(function () {
+        radarSyncFormFields();
+      }, 300));
       symIn.addEventListener('change', radarSyncFormFields);
     }
     // bind data-toggle checkboxes
@@ -472,6 +650,8 @@
           var cb = document.getElementById(id);
           if (cb) { cb.checked = false; radarSyncFormFields(); }
         });
+        // 同步卡片视觉状态
+        document.querySelectorAll('.opus-force-card.is-checked').forEach(function (c) { c.classList.remove('is-checked'); });
         var input = document.getElementById('radar-chat-input');
         var preview = input && input.value.trim().slice(0, 48);
         upsertRadarSession(radarSid(), preview || '对话中…');
