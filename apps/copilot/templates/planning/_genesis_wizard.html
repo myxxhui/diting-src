@@ -1,10 +1,10 @@
 {# 段 B · genesis 四步向导 [Ref: 33_ §4.4] #}
-<div id="genesis-wizard-root" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+<div class="genesis-wizard-modal fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
   <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-base font-bold text-gray-900">Genesis 建板 · 步骤 {{ step }}/4</h3>
       <button type="button" class="text-gray-400 hover:text-gray-600 text-xl"
-              onclick="document.getElementById('genesis-wizard-root').innerHTML=''">×</button>
+              onclick="this.closest('.genesis-wizard-modal').remove()">×</button>
     </div>
 
     {% if error %}
@@ -19,27 +19,109 @@
       {% endfor %}
     </div>
 
-    {% if step == 1 %}
-    <form hx-post="/api/strategic/genesis/wizard?step=2" hx-target="#genesis-wizard-root" hx-swap="innerHTML" class="space-y-3 text-sm">
-      <div>
-        <label class="block text-xs font-medium text-gray-700 mb-1">板块名称</label>
-        <input name="board_title" type="text" required class="w-full border rounded-lg px-3 py-2"
-               placeholder="例：AI 算力基建" value="{{ preview.board_title if preview else '' }}" />
+        {% if step == 1 %}
+    <form hx-post="/api/strategic/genesis/wizard?step=2" hx-target="#genesis-wizard-root" hx-swap="innerHTML" class="space-y-4 text-sm">
+
+      {# ── 板块名称：纯 HTML 候选列表 + 搜索过滤（不依赖 Alpine/HTMX 脚本时序）── #}
+      <div class="genesis-board-picker space-y-2">
+        <label class="block text-xs font-medium text-gray-700 mb-1" for="genesis-board-title-input">
+          板块名称 <span class="text-gray-400 font-normal">（点选候选或自由输入）</span>
+        </label>
+        <div class="relative">
+          <input
+            id="genesis-board-title-input"
+            name="board_title"
+            type="text" required
+            data-genesis-filter
+            class="w-full border rounded-lg px-3 py-2 pr-9 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none"
+            placeholder="输入筛选或自定义：AI 算力 / 低空经济 ..."
+            value="{{ preview.board_title if preview and preview.board_title else '' }}" />
+          <button type="button" tabindex="-1" data-genesis-toggle
+                  class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                  aria-label="展开/收起候选列表">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+        </div>
+        <input type="hidden" name="wind_scan_id" value="{{ wind_scan.id if wind_scan else '' }}" />
+
+        <div id="genesis-picker-dropdown" class="border border-gray-200 rounded-xl shadow-sm max-h-64 overflow-y-auto text-xs bg-white">
+          {% if candidates %}
+          <div class="px-3 py-1.5 text-[10px] uppercase tracking-wide text-gray-500 bg-gray-50 font-semibold border-b border-gray-100 sticky top-0">
+            🌬 Wind Scan 候选赛道 · 降序（点击选用）
+          </div>
+          {% for c in candidates|sort(attribute='rank') %}
+          <button type="button"
+                  class="genesis-pick-item w-full text-left px-3 py-2 flex items-center justify-between gap-2 hover:bg-indigo-50 border-b border-gray-50 last:border-0 transition-colors"
+                  data-genesis-pick="{{ c.sector }}"
+                  data-label="{{ c.sector }}"
+                  data-wind-id="{{ wind_scan.id if wind_scan else '' }}">
+            <span>
+              <span class="font-medium text-gray-800">{{ c.sector }}</span>
+              <span class="text-[10px] text-gray-400 ml-1.5">rank #{{ c.rank }}</span>
+            </span>
+            {% if c.wind_score is not none %}
+            <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full {% if c.wind_score >= 0.7 %}bg-emerald-50 text-emerald-700{% else %}bg-amber-50 text-amber-700{% endif %}">
+              {{ (c.wind_score * 100)|round(0) }}
+            </span>
+            {% endif %}
+          </button>
+          {% endfor %}
+          {% endif %}
+
+          {% if boards %}
+          <div class="px-3 py-1.5 text-[10px] uppercase tracking-wide text-gray-500 bg-gray-50 font-semibold border-b border-t border-gray-100 sticky top-0">
+            📋 已有战略板块
+          </div>
+          {% for b in boards %}
+          <button type="button"
+                  class="genesis-pick-item w-full text-left px-3 py-2 flex items-center justify-between gap-2 hover:bg-gray-50 border-b border-gray-50"
+                  data-genesis-pick="{{ b.name }}"
+                  data-label="{{ b.name }}"
+                  data-wind-id="">
+            <span class="font-medium text-gray-700">{{ b.name }}</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">已有 #{{ b.id }}</span>
+          </button>
+          {% endfor %}
+          {% endif %}
+
+          {% if not candidates and not boards %}
+          <p class="px-3 py-4 text-center text-gray-400">暂无候选，请直接在上方输入板块名称</p>
+          {% endif %}
+        </div>
       </div>
-      <div>
-        <label class="block text-xs font-medium text-gray-700 mb-1">绑定 wind_scan（可选）</label>
-        <input name="wind_scan_id" type="number" class="w-full border rounded-lg px-3 py-2"
-               value="{{ wind_scan.id if wind_scan else '' }}" placeholder="留空则手动建板" />
+
+      {# ── 绑定 wind_scan 说明 + 当前绑定状态 ── #}
+      <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs space-y-1.5">
+        <p class="font-medium text-blue-800">📡 绑定 wind_scan</p>
+        <p class="text-blue-700">
+          wind_scan 是 <strong>段A 宏观风口扫描</strong>产出的赛道排名快照。
+          绑定后，Genesis 会从它自动导入 <strong>候选赛道</strong> 和 <strong>政策顺风主题词</strong>，
+          用于预填 phase 结构和生态位模板，省去手动配置。
+        </p>
+        {% if wind_scan %}
+        <p class="text-blue-600 font-medium">
+          ✅ 当前绑定: <code>#{{ wind_scan.id }}</code>
+          — 共 {{ candidates | length if candidates else 0 }} 个候选赛道
+          {% if candidates %}(🏆 {{ candidates[0].sector }}){% endif %}
+        </p>
+        {% else %}
+        <p class="text-blue-500 italic">⚠ 未检测到 wind_scan，将使用手动建板模式。</p>
+        {% endif %}
       </div>
+
       <textarea name="candidates_json" class="hidden">[]</textarea>
+
       <label class="flex items-center gap-2 text-xs">
         <input type="checkbox" name="advisory_ack" value="1" required class="rounded" />
         本人确认本操作为 advisory · 不触发下单
       </label>
-      <button type="submit" class="w-full py-2 rounded-lg bg-indigo-600 text-white text-sm">下一步 · 时间骨架</button>
+
+      <button type="submit" class="w-full py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition">
+        下一步 · 时间骨架
+      </button>
     </form>
 
-    {% elif step == 2 %}
+{% elif step == 2 %}
     <form hx-post="/api/strategic/genesis/wizard?step=3" hx-target="#genesis-wizard-root" hx-swap="innerHTML" class="space-y-3 text-sm">
       <input type="hidden" name="board_title" value="{{ preview.board_title }}" />
       <input type="hidden" name="wind_scan_id" value="{{ preview.source_wind_scan_id or '' }}" />
@@ -100,7 +182,7 @@
           本人确认 advisory · 确认建板
         </label>
         <button type="submit" class="w-full py-2 rounded-lg bg-emerald-600 text-white"
-                onclick="document.getElementById('genesis-wizard-root').innerHTML=''">
+                onclick="this.closest('.genesis-wizard-modal').remove()">
           确认建板 · 落库
         </button>
       </form>

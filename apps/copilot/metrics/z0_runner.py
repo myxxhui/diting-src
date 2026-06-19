@@ -1,4 +1,4 @@
-"""Z0 段 A 采集 Job 执行器。
+"""Z0 段 A/C 采集 Job 执行器。
 
 [Ref: 34_ §3.0b · 29_ §2]
 """
@@ -13,7 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.copilot.metrics.collectors.m1_macro import collect_m1_bundle
 from apps.copilot.metrics.collectors.m2_sector_heat import collect_m2_bundle
+from apps.copilot.metrics.collectors.m3_capex import collect_capex_total
 from apps.copilot.metrics.collectors.m5_liquidity import collect_m5_bundle
+from apps.copilot.metrics.collectors.m6_jl import aggregate_jl_panel
+from apps.copilot.metrics.synthesizer.ecosystem_scorer import score_ecosystem_bundle
 from apps.copilot.metrics.synthesizer.wind_scan import synthesize_wind_scan
 from apps.copilot.metrics.z0_registry import Z0_JOB_REGISTRY
 from apps.copilot.metrics.z0_storage import (
@@ -129,6 +132,102 @@ async def run_z0_m0(session: AsyncSession, redis_client: Any) -> dict[str, Any]:
     return {"job_id": "z0-m0-wind-scan", "synthesis": synth, "wind_scan": row}
 
 
+# ─── 段C 新增 ─── [Ref: 34_ §3.7 段C]
+
+async def run_z0_m3(session: AsyncSession, redis_client: Any) -> dict[str, Any]:
+    """Z0-M3 · 四云 Capex 采集（S1）."""
+    result = collect_capex_total()
+    mid = "M.policy.capex_total"
+    write_metric_redis(redis_client, mid, result)
+    await upsert_metric_pg(session, mid, result)
+    write_watermark_redis(
+        redis_client,
+        "z0-m3-capex",
+        {"status": result.get("status"), "at": datetime.now(timezone.utc).isoformat()},
+    )
+    return {"job_id": "z0-m3-capex", **result}
+
+
+async def run_z0_m4(
+    session: AsyncSession,
+    redis_client: Any,
+    *,
+    niche_themes: set[str] | None = None,
+    s_curve_position: str = "early",
+) -> dict[str, Any]:
+    """Z0-M4 · E1~E5 生态位评分（S2 · phase×niche）."""
+    capex = read_metric_redis(redis_client, "M.policy.capex_total")
+    if capex is None:
+        bundle = await read_metrics_bundle(session, redis_client)
+        capex = bundle.get("M.policy.capex_total") or {}
+    policy = read_metric_redis(redis_client, "M.sector.policy_direction") or {}
+
+    result = score_ecosystem_bundle(
+        capex_metric=capex,
+        policy_metric=policy,
+        niche_themes=niche_themes,
+        s_curve_position=s_curve_position,
+    )
+    mid = "M.niche.ecosystem_scores"
+    write_metric_redis(redis_client, mid, result)
+    await upsert_metric_pg(session, mid, result)
+    write_watermark_redis(
+        redis_client,
+        "z0-m4-ecosystem",
+        {"status": result.get("status"), "at": datetime.now(timezone.utc).isoformat()},
+    )
+    return {"job_id": "z0-m4-ecosystem", **result}
+
+
+async def run_z0_m6(session: AsyncSession, redis_client: Any, *, board_id: int | None = None) -> dict[str, Any]:
+    """Z0-M6 · JL1/JL2 红灯面板."""
+    bundle = await read_metrics_bundle(session, redis_client)
+    result = aggregate_jl_panel(metrics=bundle, board_id=board_id)
+    mid = "M.strategic.jl_panel"
+    write_metric_redis(redis_client, mid, result)
+    await upsert_metric_pg(session, mid, result)
+    panel = result.get("panel") or {}
+    write_watermark_redis(
+        redis_client,
+        "z0-m6-jl",
+        {"status": result.get("status"), "overall": panel.get("overall"), "at": datetime.now(timezone.utc).isoformat()},
+    )
+    return {"job_id": "z0-m6-jl", **result}
+
+
+async def run_z0_segment_c(
+    session: AsyncSession,
+    redis_client: Any,
+    *,
+    board_id: int | None = None,
+    niche_themes: set[str] | None = None,
+    s_curve_position: str = "early",
+) -> dict[str, Any]:
+    """段C 全流程 M3 → M4 → M6.
+
+    [Ref: 34_ §3.7 段C]
+    """
+    steps: dict[str, Any] = {}
+
+    steps["m3"] = await run_z0_m3(session, redis_client)
+    steps["m4"] = await run_z0_m4(
+        session, redis_client,
+        niche_themes=niche_themes, s_curve_position=s_curve_position,
+    )
+    steps["m6"] = await run_z0_m6(session, redis_client, board_id=board_id)
+
+    status = "ok" if all(s.get("status") in ("ok", "partial") for s in steps.values()) else "partial"
+    return {
+        "job_id": "z0-segment-c-full",
+        "status": status,
+        "board_id": board_id,
+        "steps": steps,
+        "as_of": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ─── 主入口 ──────────────────────────────────────────────────────────
+
 async def run_z0_bootstrap(
     session: AsyncSession,
     redis_client: Any,
@@ -191,4 +290,13 @@ async def run_z0_job(
         return await run_z0_m2(session, redis_client)
     if job_id == "z0-m0-wind-scan":
         return await run_z0_m0(session, redis_client)
+    if job_id == "z0-m3-capex":
+        return await run_z0_m3(session, redis_client)
+    if job_id == "z0-m4-ecosystem":
+        return await run_z0_m4(session, redis_client)
+    if job_id == "z0-m6-jl":
+        return await run_z0_m6(session, redis_client)
+    if job_id == "z0-segment-c-full":
+        return await run_z0_segment_c(session, redis_client)
     return {"job_id": job_id, "status": "error", "error": "not implemented"}
+

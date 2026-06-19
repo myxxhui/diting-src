@@ -34,6 +34,8 @@ def render_genesis_wizard(
     wind_scan: Optional[dict[str, Any]] = None,
     preview: Optional[dict[str, Any]] = None,
     error: str = "",
+    candidates: Optional[list[dict[str, Any]]] = None,
+    boards: Optional[list[dict[str, Any]]] = None,
 ) -> str:
     return _render(
         "_genesis_wizard.html",
@@ -41,6 +43,8 @@ def render_genesis_wizard(
         wind_scan=wind_scan,
         preview=preview,
         error=error,
+        candidates=candidates or [],
+        boards=boards or [],
     )
 
 

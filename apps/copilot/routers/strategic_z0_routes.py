@@ -142,10 +142,15 @@ async def api_genesis_wizard(
     session: AsyncSession = Depends(get_db),
 ):
     wind = await get_latest_wind_scan(session)
+    candidates = (wind.get("candidates") or []) if wind else []
+    boards = await list_boards_summary(session)
     preview = None
     if step > 1:
         preview = await genesis_preview(session, {"board_title": "新战略板块"})
-    return HTMLResponse(render_genesis_wizard(step=step, wind_scan=wind, preview=preview))
+    return HTMLResponse(render_genesis_wizard(
+        step=step, wind_scan=wind, preview=preview,
+        candidates=candidates, boards=boards,
+    ))
 
 
 @router.post("/api/strategic/genesis/wizard", response_class=HTMLResponse)

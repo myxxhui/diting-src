@@ -84,6 +84,7 @@ async def persist_wind_scan_from_synthesis(
     )
     session.add(row)
     await session.flush()
+    await session.refresh(row)
     return wind_scan_to_dict(row)
 
 

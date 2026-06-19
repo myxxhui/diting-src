@@ -124,6 +124,7 @@
     .htmx-indicator { opacity: 0; visibility: hidden; pointer-events: none; }
     .htmx-request .htmx-indicator,
     .htmx-request.htmx-indicator { opacity: 1; visibility: visible; pointer-events: auto; }
+    [x-cloak] { display: none !important; }
   </style>
 </head>
 <body class="bg-gray-100 min-h-screen" hx-headers='{"Accept":"text/html","HX-Request":"true"}'>
@@ -153,5 +154,36 @@
   <main>
     {% block content %}{% endblock %}
   </main>
+  <script>
+  (function () {
+    document.body.addEventListener('input', function (e) {
+      if (!e.target.matches('[data-genesis-filter]')) return;
+      var root = e.target.closest('.genesis-board-picker');
+      if (!root) return;
+      var q = e.target.value.trim().toLowerCase();
+      root.querySelectorAll('.genesis-pick-item').forEach(function (btn) {
+        var label = (btn.getAttribute('data-label') || '').toLowerCase();
+        btn.style.display = !q || label.indexOf(q) !== -1 ? '' : 'none';
+      });
+    });
+    document.body.addEventListener('click', function (e) {
+      var toggle = e.target.closest('[data-genesis-toggle]');
+      if (toggle) {
+        var dd = toggle.closest('.genesis-board-picker').querySelector('#genesis-picker-dropdown');
+        if (dd) dd.classList.toggle('hidden');
+        return;
+      }
+      var pick = e.target.closest('[data-genesis-pick]');
+      if (!pick) return;
+      var form = pick.closest('form');
+      if (!form) return;
+      var input = form.querySelector('[name=board_title]');
+      if (input) input.value = pick.getAttribute('data-genesis-pick') || '';
+      var windInput = form.querySelector('[name=wind_scan_id]');
+      var wid = pick.getAttribute('data-wind-id');
+      if (windInput && wid) windInput.value = wid;
+    });
+  })();
+  </script>
 </body>
 </html>

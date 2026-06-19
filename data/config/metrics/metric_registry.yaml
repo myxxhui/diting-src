@@ -1,7 +1,7 @@
-# Z0 段 A 指标注册表 · [Ref: 34_ §3.0a · 32_ §2.4.1 · 29_ §5]
-schema_version: "1.3"
+# Z0 段 A ~ C 指标注册表 · [Ref: 34_ §3.0a · 32_ §2.4.1 · 29_ §5]
+schema_version: "1.5"
 zone: Z0
-segment: A
+segment: A-C
 source_priority: "tushare > eastmoney:push2delay > deepsea:pg > akshare"
 
 metrics:
@@ -100,10 +100,36 @@ metrics:
     name: 宏观风口合成
     tier: T1
     cron_job: z0-m0-wind-scan
+  # ─── 段 C 新增 ─── [Ref: 34_ §3.2 M.policy.capex_total · §3.3 Z0-M3]
+  - metric_id: M.policy.capex_total
+    matrix: Z0-M3
+    name: 四云 Capex 合计与 YoY
+    tier: T0
+    share_scope: S1
+    history_required: "8个季度"
+    source: "yfinance:MSFT+GOOG+META+AMZN:quarterly_cashflow"
+    cron_job: z0-m3-capex
+  - metric_id: M.niche.ecosystem_scores
+    matrix: Z0-M4
+    name: 生态位 E1~E5 per niche
+    tier: T1
+    share_scope: S2
+    history_required: "无（瞬时计算）"
+    source: "rule:z0_ecosystem_v1 | M3+M2 依赖"
+    cron_job: z0-m4-ecosystem
+    note: T1 规则版 · 启动期 · 依赖 M3/M2 已采集后按 niche 计算
+  - metric_id: M.strategic.jl_panel
+    matrix: Z0-M6
+    name: JL1/JL2 红灯面板
+    tier: T1
+    share_scope: board
+    history_required: "无（瞬时计算）"
+    source: "rule:z0_jl_v1 | M1+M3+akshare 依赖"
+    cron_job: z0-m6-jl
 
 jobs:
   z0-bootstrap-all:
-    description: 首次全量采集 M1+M5+M2 并合成 wind_scan
+    description: 首次全量采集 M1+M5+M2+M3 并合成 wind_scan
     enqueue_queue: copilot:q:interactive
   z0-m1-macro:
     description: 宏观景气 T0
@@ -120,3 +146,16 @@ jobs:
   z0-m0-wind-scan:
     description: M0 合成 wind_scan（依赖 M1/M5；M2 双支路至少其一）
     cron: "15 8 * * 1-5"
+  z0-m3-capex:
+    description: 四云 Capex 合计 (S1)
+    cron: "30 18 * * 1-5"
+  z0-m4-ecosystem:
+    description: E1~E5 生态位评分 (S2, phase×niche)
+    cron: "0 19 * * 5"
+  z0-m6-jl:
+    description: JL1/JL2 红灯面板刷新
+    cron: "15 19 * * 5"
+  z0-segment-c-full:
+    description: 段C 全流程 M3 → M4 → M6 → M8 → M7
+    enqueue_queue: copilot:q:interactive
+
