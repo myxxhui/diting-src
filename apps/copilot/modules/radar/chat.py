@@ -471,15 +471,163 @@ async def build_symbol_research_context(
     }
 
 
+async def build_multi_symbol_research_context(
+    db_session: AsyncSession,
+    symbols: list[str],
+    *,
+    include_t1_jl4: bool = True,
+    include_9d: bool = False,
+    redis_client: Any = None,
+) -> list[dict[str, Any]]:
+    """为自由研究模式批量组装多标的 JL1–4 数据包。
+
+    include_9d=True 时还会从 radar_symbol_versions 加载最新 9维推理数据。
+    返回列表按输入 symbols 顺序排列，跳过错标的条目。
+    """
+    from apps.copilot.modules.executing.t1_assembler import assemble_batch_portfolio
+    from apps.copilot.modules.executing.t1_build import _symbol_exchange
+    from apps.copilot.modules.executing.t2_analyst import strip_jl4_from_t1
+    from apps.copilot.modules.executing.t2_preexec_envelope import build_t2_preexec_envelope
+
+    clean = [s.zfill(6)[-6:] for s in symbols if s and str(s).strip()]
+    if not clean:
+        return []
+
+    try:
+        t1 = await assemble_batch_portfolio(db_session, clean, redis_client=redis_client)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("多标 T1 组装失败 symbols=%s: %s", clean, exc)
+        return []
+
+    signals = t1.get("portfolio_signals") or {}
+    if not include_t1_jl4:
+        t1 = strip_jl4_from_t1(t1)
+    envelope = build_t2_preexec_envelope(t1)
+
+    # ── 9D：从 radar_symbol_versions 加载最新九维推理数据 ──
+    nine_dim_map: dict[str, dict[str, Any]] = {}
+    if include_9d:
+        nine_dim_map = await _load_latest_nine_dim_data(db_session, clean)
+
+    out: list[dict[str, Any]] = []
+    for sym in clean:
+        code = _symbol_exchange(sym)
+        sig = signals.get(code) or {}
+        name = sig.get("stock_name") or sym
+        ctx: dict[str, Any] = {
+            "symbol": sym,
+            "signal_key": code,
+            "name": name,
+            "envelope": envelope,
+            "compact": _compact_envelope_for_chat(envelope),
+            "jl4_indicator_count": len((sig.get("indicators") or {})),
+        }
+        # 附加最新 9维推理数据
+        nd = nine_dim_map.get(sym)
+        if nd:
+            ctx["nine_dim"] = nd
+        elif include_9d:
+            ctx["nine_dim"] = None  # 标记：标的存在但无 9D 数据
+        out.append(ctx)
+    return out
+
+
+async def _load_latest_nine_dim_data(
+    db_session: AsyncSession,
+    symbols: list[str],
+) -> dict[str, dict[str, Any]]:
+    """从 radar_symbol_versions 加载每只标的最新 bundle 中的 nine_dim 数据。
+
+    返回 { symbol: {overall, dimensions} }。无数据时不包含该 symbol。
+    """
+    from sqlalchemy import select, func
+    from apps.copilot.db.models import RadarSymbolVersion
+
+    out: dict[str, dict[str, Any]] = {}
+    for sym in symbols:
+        row = await db_session.scalar(
+            select(RadarSymbolVersion)
+            .where(RadarSymbolVersion.symbol == sym)
+            .order_by(RadarSymbolVersion.synced_at.desc())
+            .limit(1)
+        )
+        if row is None:
+            continue
+        bundle = row.bundle_json or {}
+        t2_data = bundle.get("t2") or bundle.get("deep_analysis") or {}
+        nine_dim = t2_data.get("radar_nine_dimensions") or t2_data.get("dimensions")
+        overall = t2_data.get("overall") or {}
+        if nine_dim or overall:
+            out[sym] = {
+                "overall": overall,
+                "dimensions": nine_dim,
+                "synced_at": (
+                    row.synced_at.isoformat() if hasattr(row.synced_at, "isoformat") else str(row.synced_at)
+                ),
+            }
+    return out
+
+
 def _build_system_extra(
     symbol: str | None,
     context: dict[str, Any] | None,
     *,
     research_context: dict[str, Any] | None = None,
+    multi_contexts: list[dict[str, Any]] | None = None,
 ) -> str:
-    if not symbol and not context and not research_context:
+    """构建 system prompt 中的标的上下文段。
+
+    - multi_contexts：多标模式 — 同时附加多只标的 JL/JL4/9D 数据包
+    - research_context：单标模式（向后兼容）
+    """
+    if not symbol and not context and not research_context and not multi_contexts:
         return CHAT_SYSTEM
-    lines = [CHAT_SYSTEM, "", "【当前附带标的上下文（供参考，可忽略）】"]
+    lines = [CHAT_SYSTEM]
+
+    if multi_contexts:
+        # ── 多标模式 ──
+        lines.append("")
+        lines.append(f"【当前附带 {len(multi_contexts)} 只标的上下文（供参考，可忽略）】")
+        for i, ctx in enumerate(multi_contexts, 1):
+            sym = ctx.get("symbol") or ""
+            name = ctx.get("name") or sym
+            jl4_n = ctx.get("jl4_indicator_count")
+            sym_line = f"标的 {i}: {sym} {name}"
+            if jl4_n is not None:
+                sym_line += f"（JL4 T1 指标数: {jl4_n}）"
+            lines.append(sym_line)
+        # 合并所有标的的 compact 数据
+        compact_all: dict[str, Any] = {}
+        for ctx in multi_contexts:
+            compact = ctx.get("compact")
+            if compact:
+                sym = ctx.get("symbol") or "unknown"
+                compact_all[sym] = compact
+            # 附加 9D 数据
+            nine_dim = ctx.get("nine_dim")
+            if nine_dim:
+                nd_str = (
+                    f"\n【{ctx.get('name', sym)} · 雷达九维推理数据（最新同步）】\n"
+                    f"同步时间: {nine_dim.get('synced_at', '?')}\n"
+                    f"总体判断: {json.dumps(nine_dim.get('overall', {}), ensure_ascii=False)}\n"
+                    f"九维细则: {json.dumps(nine_dim.get('dimensions', {}), ensure_ascii=False)[:3000]}"
+                )
+                lines.append(nd_str)
+            elif ctx.get("nine_dim") is None and ctx.get("symbol"):
+                # 9D 标记为 None → 已启用但无数据
+                lines.append(
+                    f"\n【{ctx.get('name', sym)} · 九维推理数据不可用，模型可基于 JL 数据自行分析】"
+                )
+        if compact_all:
+            lines.append(
+                "\n【JL1–JL4 本地数据包（只读 · 所有标的合并）】\n"
+                + json.dumps(compact_all, ensure_ascii=False)
+            )
+        return "\n".join(lines)
+
+    # ── 单标模式（原逻辑） ──
+    lines.append("")
+    lines.append("【当前附带标的上下文（供参考，可忽略）】")
     if symbol:
         lines.append(f"标的代码：{symbol}")
     if research_context:
@@ -581,6 +729,24 @@ async def _ensure_research_context(
     )
 
 
+async def _ensure_multi_research_context(
+    db_session: AsyncSession | None,
+    symbols: list[str],
+    *,
+    redis_client: Any = None,
+    include_9d: bool = False,
+) -> list[dict[str, Any]] | None:
+    """多标模式：批量组装所有标的的 JL/JL4 数据。返回列表可能少于输入（跳过错标的）。"""
+    if db_session is None or not symbols:
+        return None
+    return await build_multi_symbol_research_context(
+        db_session, symbols,
+        include_t1_jl4=True,
+        include_9d=include_9d,
+        redis_client=redis_client,
+    )
+
+
 async def _load_scan_context(
     db_session: AsyncSession, symbol: str
 ) -> dict[str, Any] | None:
@@ -612,14 +778,26 @@ def _build_system_for_turn(
     scan_context: dict[str, Any] | None,
     has_prior_assistant: bool,
     force_data: bool = False,
+    multi_contexts: list[dict[str, Any]] | None = None,
 ) -> str:
     """构建本轮 system prompt。
 
-    - 首轮（has_prior_assistant=False）+ 有 research_context：注入全量 JL/JL4 数据包
-    - 首轮 + 仅 scan_context：注入扫描结论
-    - 后续轮 + force_data=True：强制重新注入全量（勾选开关），并附带上下文切换指令
-    - 后续轮（has_prior_assistant=True）：轻量版，仅提示已注入上下文
+    单标模式沿用原逻辑；multi_contexts 非空时进入多标模式。
     """
+    # ── 多标模式 ──
+    if multi_contexts:
+        base = _build_system_extra(None, None, multi_contexts=multi_contexts)
+        if has_prior_assistant and force_data:
+            syms = [c.get("symbol", "?") for c in multi_contexts if c.get("symbol")]
+            base += (
+                f"\n\n【⚠ 上下文切换指令 · 高优先级】"
+                f"\n用户刚刚切换/添加了分析标的到 {', '.join(syms)}。"
+                f"\n请完全忽略之前对话中涉及其他标的的分析内容。"
+                f"\n你只应基于上面多标的 JL/JL4/9D 数据包进行分析和回答。"
+            )
+        return base
+
+    # ── 单标模式 ──
     if research_context and (not has_prior_assistant or force_data):
         base = _build_system_extra(symbol, None, research_context=research_context)
         if has_prior_assistant and force_data:
@@ -627,9 +805,9 @@ def _build_system_for_turn(
             base += (
                 f"\n\n【⚠ 上下文切换指令 · 高优先级】"
                 f"\n用户刚刚切换了分析标的到 {symbol}（{name}）。"
-                f"以下对话历史中的先前回复涉及的是另一个标的，请完全忽略它们。"
-                f"你只应基于上面 {symbol} 的数据包进行分析和回答。"
-                f"请不要在回复中提及切换标的或历史对话。"
+                f"\n以下对话历史中的先前回复涉及的是另一个标的，请完全忽略它们。"
+                f"\n你只应基于上面 {symbol} 的数据包进行分析和回答。"
+                f"\n请不要在回复中提及切换标的或历史对话。"
             )
         return base
 
@@ -653,12 +831,16 @@ async def chat_turn(
     session_id: str,
     user_message: str,
     symbol: str | None = None,
+    symbols: list[str] | None = None,
     jl13_data_prompt: str = "",
     model_id: str | None = None,
     db_session: AsyncSession | None = None,
     force_refresh: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
     """用户一轮输入 → Opus 回复。首轮自动携带 JL/JL4 全量数据；后续轮仅轻量 system。
+
+    支持多标模式：传入 symbols=[...]（多个）时将合并所有标的 JL/JL4/9D 数据。
+    symbol 保留用于单标向后兼容；symbols 优先于 symbol。
 
     force_refresh 数据开关（任意轮次可强制重取）:
       {"base": True, "jl13": True, "jl4": True, "9d": True}
@@ -679,32 +861,59 @@ async def chat_turn(
         sid, redis_client=redis_client, db_session=db_session
     )
 
+    # —— 判断是多标模式还是单标模式 ——
+    syms: list[str] = []
+    if symbols and len(symbols) > 0:
+        syms = [s.zfill(6)[-6:] for s in symbols if s and str(s).strip()]
+    elif symbol:
+        syms = [symbol.zfill(6)[-6:]]
+    is_multi = len(syms) > 1
+    primary_sym = syms[0] if syms else None
+
     # —— 首轮 vs 强制刷新判断 ——
     has_prior_assistant = any(
         m.get("role") == "assistant" for m in history
     )
-    # 强制刷新：勾选了任一开关 → 在后续轮中也算「数据载入轮」
     force_any = force_refresh and any(force_refresh.values())
-    is_first_turn = (not has_prior_assistant and symbol) or (force_any and symbol)
+    is_data_turn = (not has_prior_assistant and bool(syms)) or (force_any and bool(syms))
 
+    multi_contexts: list[dict[str, Any]] | None = None
     research_context: dict[str, Any] | None = None
     scan_context: dict[str, Any] | None = None
 
-    if is_first_turn:
-        research_context = await _ensure_research_context(
-            db_session, symbol, redis_client=redis_client
+    if is_data_turn and is_multi:
+        # —— 多标模式：批量组装所有标的的 JL/JL4/9D 数据 ——
+        include_9d = force_refresh.get("9d", False) if force_refresh else False
+        multi_contexts = await _ensure_multi_research_context(
+            db_session, syms,
+            redis_client=redis_client,
+            include_9d=include_9d,
         )
-        if research_context is None and db_session is not None:
-            scan_context = await _load_scan_context(db_session, symbol)
-        # 仅在首轮或 jl13 开关打开时附加 JL1-3 模板
+        # 即使部分标的数据未组装成功也继续
+        if not multi_contexts:
+            logger.warning("多标上下文全部组装失败 syms=%s，降级为无上下文", syms)
+        # JL1-3 模板仅在首轮或 jl13 刷新时附加
         append_jl13 = (not has_prior_assistant) or (force_refresh and force_refresh.get("jl13", False))
         text = compose_user_question(
             text,
             jl13_data_prompt=jl13_data_prompt or DEFAULT_JL13_DATA_TEMPLATE,
             include_jl13=append_jl13,
         )
-    elif symbol:
-        # 后续轮次：不附加 JL1–3，不注入数据包；仅提示历史中已有上下文
+    elif is_data_turn:
+        # —— 单标模式（原逻辑） ——
+        research_context = await _ensure_research_context(
+            db_session, primary_sym, redis_client=redis_client
+        )
+        if research_context is None and db_session is not None:
+            scan_context = await _load_scan_context(db_session, primary_sym)
+        append_jl13 = (not has_prior_assistant) or (force_refresh and force_refresh.get("jl13", False))
+        text = compose_user_question(
+            text,
+            jl13_data_prompt=jl13_data_prompt or DEFAULT_JL13_DATA_TEMPLATE,
+            include_jl13=append_jl13,
+        )
+    elif primary_sym:
+        # 后续轮次：仅提示历史中已有上下文（不注入新数据）
         pass
 
     if len(text) > _MAX_USER_CHARS:
@@ -713,17 +922,17 @@ async def chat_turn(
     history.append({"role": "user", "content": text})
 
     system_prompt = _build_system_for_turn(
-        symbol=symbol,
+        symbol=primary_sym,
         research_context=research_context,
         scan_context=scan_context,
         has_prior_assistant=has_prior_assistant,
         force_data=force_any and has_prior_assistant,
+        multi_contexts=multi_contexts,
     )
 
-    # —— 换标上下文切换：过滤旧 assistant 回复，防止 LLM 引用旧标分析 ——
+    # —— 换标上下文切换：过滤旧 assistant 回复 ——
     api_history = history
-    if has_prior_assistant and force_any and symbol:
-        # 只保留 system/user 消息，丢弃旧 assistant（LLM 会基于上下文切换指令重新分析新标）
+    if has_prior_assistant and force_any and primary_sym:
         api_history = [m for m in history if m.get("role") != "assistant"]
 
     api_messages: list[dict[str, str]] = [
@@ -731,14 +940,19 @@ async def chat_turn(
     ]
     api_messages.extend(api_history)
 
+    # 上下文摘要
     context_meta = summarize_context_meta(
-        symbol=symbol,
+        symbol=primary_sym,
         research_context=research_context,
         scan_context=scan_context,
         user_text=text,
         system_prompt=system_prompt,
-        is_subsequent_turn=bool(has_prior_assistant and symbol and not force_any),
+        is_subsequent_turn=bool(has_prior_assistant and primary_sym and not force_any),
     )
+    # 多标时补充元信息
+    if multi_contexts:
+        context_meta["multi_symbols"] = [c.get("symbol") for c in multi_contexts]
+        context_meta["symbol_count"] = len(multi_contexts)
 
     resolved = resolve_chat_model(model_id)
     route = chat_model_route(resolved)

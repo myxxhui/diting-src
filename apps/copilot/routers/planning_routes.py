@@ -1368,18 +1368,32 @@ async def api_radar_chat(
     """Opus 多轮日常对话（HTMX 返回聊天气泡 HTML）。
     首轮自动携带 JL/JL4 全量数据；后续轮仅轻量 system 省 token。
     勾选「基础/JL1-3/JL4/9维」可在任意轮次强制重取对应数据。
+
+    支持多标：symbol 参数可用逗号分隔传多个代码（如 "601138,002463"）。
     """
     import logging
 
     log = logging.getLogger(__name__)
 
     redis_client = _sync_redis()
-    sym: str | None = (symbol or "").strip() or None
-    if sym:
-        try:
-            sym, _ = resolve_radar_query(sym)
-        except RadarSymbolResolveError:
-            sym = sym.zfill(6)[-6:] if sym.isdigit() else None
+
+    # —— 解析多个标的（逗号分隔） ——
+    raw_syms = (symbol or "").strip()
+    sym_list: list[str] = []
+    if raw_syms:
+        from apps.copilot.modules.planning.funnel import normalize_symbol
+        from apps.copilot.modules.radar.symbol_resolve import RadarSymbolResolveError, resolve_radar_query
+
+        parts = [s.strip() for s in raw_syms.replace("，", ",").split(",") if s.strip()]
+        for p in parts:
+            try:
+                resolved, _ = resolve_radar_query(p)
+                sym_list.append(resolved)
+            except RadarSymbolResolveError:
+                normalized = p.zfill(6)[-6:] if p.isdigit() else p
+                if normalized:
+                    sym_list.append(normalized)
+    sym_list = list(dict.fromkeys(sym_list))  # 去重保持顺序
 
     force_flags = {
         "base": bool((force_base or "").strip() == "1"),
@@ -1387,14 +1401,15 @@ async def api_radar_chat(
         "jl4": bool((force_jl4 or "").strip() == "1"),
         "9d": bool((force_9d or "").strip() == "1"),
     }
-    log.info("radar_chat sym=%s force=%s", sym, force_flags)
+    log.info("radar_chat syms=%s force=%s", sym_list, force_flags)
 
     try:
         result = await chat_turn(
             redis_client,
             session_id=session_id,
             user_message=message,
-            symbol=sym,
+            symbols=sym_list if len(sym_list) > 1 else None,
+            symbol=sym_list[0] if sym_list else None,
             jl13_data_prompt=jl13_data_prompt,
             model_id=model_id or None,
             db_session=session,
@@ -1467,12 +1482,29 @@ async def api_radar_chat_edit(
         if v and v.lower() in ("on", "true", "1", "yes"):
             force_refresh[k] = True
 
+    # 解析逗号分隔的多个标的
+    edit_sym_list: list[str] = []
+    raw_edit_sym = (symbol or "").strip()
+    if raw_edit_sym:
+        parts = [s.strip() for s in raw_edit_sym.replace("，", ",").split(",") if s.strip()]
+        for p in parts:
+            try:
+                from apps.copilot.modules.radar.symbol_resolve import resolve_radar_query, RadarSymbolResolveError
+                resolved, _ = resolve_radar_query(p)
+                edit_sym_list.append(resolved)
+            except RadarSymbolResolveError:
+                normalized = p.zfill(6)[-6:] if p.isdigit() else p
+                if normalized:
+                    edit_sym_list.append(normalized)
+    edit_sym_list = list(dict.fromkeys(edit_sym_list))
+
     try:
         result = await chat_turn(
             redis_client,
             session_id=sid,
             user_message=text,
-            symbol=sym,
+            symbols=edit_sym_list if len(edit_sym_list) > 1 else None,
+            symbol=edit_sym_list[0] if edit_sym_list else sym,
             model_id=None,
             db_session=session,
             force_refresh=force_refresh if force_refresh else None,
@@ -1914,15 +1946,8 @@ def _render_chat_panel(payload: dict) -> str:
 
     bubbles: list[str] = []
     if not messages and status in ("new", None):
-        bubbles.append(
-            "<div class='flex flex-col items-center justify-center py-16 text-center'>"
-            "<div class='w-12 h-12 rounded-full bg-violet-100 flex items-center justify-center mb-4'>"
-            "<span class='text-2xl'>💬</span></div>"
-            "<p class='text-sm font-medium text-gray-700 mb-1'>开始与 Opus 对话</p>"
-            "<p class='text-xs text-gray-400 max-w-[280px] leading-relaxed'>"
-            "可问产业逻辑、财报解读、估值框架、风险识别等；"
-            "可选填标的代码以附带最近扫描结论</p></div>"
-        )
+        # 保留模板中的空状态（含快捷提示卡片），不覆盖
+        bubbles.append('<div style="display:none"></div>')
 
     prev_role = None
     for i, m in enumerate(messages):

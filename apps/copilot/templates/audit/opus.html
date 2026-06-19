@@ -52,16 +52,18 @@
             <div class="opus-toolbar-inline py-1">
               <label class="flex items-center gap-1 text-gray-600 opus-symbol-label">
                 标的
-                <span class="opus-symbol-row">
+                <span class="opus-symbol-row opus-multi-chip-row">
+                  <span class="opus-chip-wrap" id="opus-symbol-chips"></span>
                   <input type="text" id="radar-chat-symbol" list="radar-symbol-datalist"
                          placeholder="代码or名称…"
                          autocomplete="off"
-                         class="border border-gray-200 rounded px-2 py-0.5 text-[10px] w-[130px] focus:outline-none focus:border-blue-400">
+                         class="border border-gray-200 rounded px-2 py-0.5 text-[10px] w-[110px] focus:outline-none focus:border-blue-400 opus-symbol-input">
                   <datalist id="radar-symbol-datalist">
                     {% for s in workspace_symbols|default([]) %}
                     <option value="{{ s.symbol }}">{{ s.symbol }}{% if s.name %} · {{ s.name }}{% endif %}</option>
                     {% endfor %}
                   </datalist>
+                  <button type="button" class="opus-chip-add-btn" id="opus-chip-add-btn" title="添加标的" aria-label="添加标的">＋</button>
                   <button type="button" class="opus-symbol-sheet-btn" id="opus-symbol-sheet-trigger" title="选择持仓标的" aria-label="选择持仓标的">📋</button>
                 </span>
               </label>
@@ -459,29 +461,99 @@
     var ctxHint = document.getElementById('radar-chat-context-hint');
     var jl13El = document.getElementById('radar-chat-jl13-input');
 
-    function radarLoadJl13Template() {
-      if (!jl13El) return;
-      var saved = localStorage.getItem(window.T2_JL13_TPL_KEY || 'opus_t2_jl13_template');
-      if (saved !== null) jl13El.value = saved;
+    // ── 多标芯片管理 ──
+    var SYMBOLS = [];
+
+    function renderChips() {
+      var wrap = document.getElementById('opus-symbol-chips');
+      if (!wrap) return;
+      if (!SYMBOLS.length) { wrap.innerHTML = ''; return; }
+      wrap.innerHTML = SYMBOLS.map(function (s) {
+        return '<span class="opus-chip" data-sym="' + s.replace(/"/g, '&quot;') + '">'
+          + s + '<button type="button" class="opus-chip-remove" data-sym="' + s.replace(/"/g, '&quot;') + '">✕</button></span>';
+      }).join('');
+      wrap.querySelectorAll('.opus-chip-remove').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var s = btn.getAttribute('data-sym');
+          if (s) removeSymbol(s);
+        });
+      });
     }
 
-    function radarSaveJl13Template() {
-      if (!jl13El) return;
-      localStorage.setItem(window.T2_JL13_TPL_KEY || 'opus_t2_jl13_template', jl13El.value || '');
+    function addSymbol(sym) {
+      if (!sym) return;
+      sym = sym.toUpperCase().replace(/[^A-Z0-9]/g, '').trim();
+      if (!sym) return;
+      if (SYMBOLS.indexOf(sym) > -1) return;
+      SYMBOLS.push(sym);
+      renderChips();
+      if (symIn) symIn.value = '';
+      radarSyncFormFields();
+      updateSymbolHint();
+    }
+
+    function removeSymbol(sym) {
+      if (!sym) return;
+      SYMBOLS = SYMBOLS.filter(function (s) { return s !== sym; });
+      renderChips();
+      radarSyncFormFields();
+      updateSymbolHint();
+    }
+
+    function clearAllSymbols() {
+      SYMBOLS = [];
+      renderChips();
+      if (symIn) symIn.value = '';
+      radarSyncFormFields();
+      updateSymbolHint();
+    }
+
+    function updateSymbolHint() {
+      if (!ctxHint) return;
+      if (!SYMBOLS.length) { ctxHint.textContent = '添加标的后自动携带 JL 数据包'; return; }
+      ctxHint.textContent = '将携带 ' + SYMBOLS.length + ' 只标的 · ' + SYMBOLS.join(', ') + ' · JL1–4 数据包';
+    }
+
+    // ── 标的输入：回车或按钮添加 ──
+    if (symIn) {
+      symIn.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          addSymbol(symIn.value);
+        }
+      });
+      symIn.addEventListener('input', debounce(function () {
+        var val = (symIn.value || '').trim();
+        if (!val) return;
+        var datalist = document.getElementById('radar-symbol-datalist');
+        var exact = val.toUpperCase();
+        if (datalist) {
+          var opts = datalist.querySelectorAll('option');
+          for (var i = 0; i < opts.length; i++) {
+            var ov = (opts[i].value || '').toUpperCase();
+            if (ov === exact) { addSymbol(exact); return; }
+          }
+        }
+      }, 400));
+    }
+
+    // ── 添加按钮 ──
+    var addBtn = document.getElementById('opus-chip-add-btn');
+    if (addBtn) {
+      addBtn.addEventListener('click', function () {
+        if (symIn) addSymbol(symIn.value);
+      });
     }
 
     function radarSyncHint() {
-      if (!ctxHint || !symIn) return;
-      var sym = (symIn.value || '').trim();
-      if (!sym) { ctxHint.textContent = '填写标的后自动携带 JL 数据包'; return; }
-      ctxHint.textContent = '将携带：标的 ' + sym + ' · JL1–4 数据包';
+      updateSymbolHint();
     }
 
     function radarSyncFormFields() {
-      if (symHid && symIn) symHid.value = (symIn.value || '').trim();
+      if (symHid) symHid.value = SYMBOLS.join(',');
       if (modelHid && modelSel) modelHid.value = modelSel.value;
       radarSyncHint();
-      // sync data-toggle checkboxes to hidden fields
       var cbMap = [
         ['radar-force-base',  'radar-force-base-hidden'],
         ['radar-force-jl13',  'radar-force-jl13-hidden'],
@@ -574,8 +646,11 @@
         listEl.querySelectorAll('.opus-sheet-item').forEach(function (item) {
           item.addEventListener('click', function () {
             var sym = item.getAttribute('data-symbol') || '';
-            var symIn = document.getElementById('radar-chat-symbol');
-            if (symIn) { symIn.value = sym; radarSyncFormFields(); }
+            if (typeof addSymbol === 'function') { addSymbol(sym); }
+            else {
+              var symIn = document.getElementById('radar-chat-symbol');
+              if (symIn) { symIn.value = sym; radarSyncFormFields(); }
+            }
             closeSheet();
           });
         });
@@ -610,13 +685,7 @@
       mq.addListener(toggleTrigger);
     }
 
-    if (symIn) {
-      symIn.addEventListener('input', debounce(function () {
-        radarSyncFormFields();
-      }, 300));
-      symIn.addEventListener('change', radarSyncFormFields);
-    }
-    // bind data-toggle checkboxes
+    // bind data-toggle checkboxes (no auto-symIn binding – handled by chip code above)
     ['radar-force-base','radar-force-jl13','radar-force-jl4','radar-force-9d'].forEach(function (id) {
       var cb = document.getElementById(id);
       if (cb) cb.addEventListener('change', radarSyncFormFields);
@@ -835,9 +904,13 @@
           }).catch(function () { if(st) st.textContent = '发送失败'; sb.disabled = false; });
         });
 
-        // 读取当前工具栏的标的/数据开关状态作为默认
-        var curSym = document.getElementById('radar-chat-symbol');
-        if(curSym) overlay.querySelector('#opus-edit-symbol').value = curSym.value;
+        // 读取当前标的列表作为默认
+        if (typeof SYMBOLS !== 'undefined' && SYMBOLS.length) {
+          overlay.querySelector('#opus-edit-symbol').value = SYMBOLS.join(',');
+        } else {
+          var curSym = document.getElementById('radar-chat-symbol');
+          if(curSym) overlay.querySelector('#opus-edit-symbol').value = curSym.value;
+        }
 
         overlay.querySelector('#opus-edit-text').focus();
       });

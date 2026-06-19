@@ -318,6 +318,37 @@
   }
   .opus-symbol-sheet-btn:hover { background: var(--opus-primary-light); border-color: var(--opus-primary-border); }
 
+  /* ── 多标芯片输入 ── */
+  .opus-multi-chip-row {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  }
+  .opus-chip-wrap {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  }
+  .opus-chip {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 2px 6px 2px 8px; border-radius: 4px;
+    background: var(--opus-primary-light); border: 1px solid var(--opus-primary-border);
+    font-size: 10px; font-weight: 600; color: var(--opus-primary-hover);
+    line-height: 1.4; white-space: nowrap;
+  }
+  .opus-chip-remove {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px; border-radius: 50%; border: none;
+    background: transparent; color: var(--opus-primary-hover); cursor: pointer;
+    font-size: 10px; line-height: 1; padding: 0;
+    transition: all 0.1s;
+  }
+  .opus-chip-remove:hover { background: var(--opus-primary); color: #fff; }
+  .opus-chip-add-btn {
+    flex-shrink: 0; width: 24px; height: 24px; border-radius: 4px;
+    border: 1px dashed var(--opus-border); background: transparent;
+    cursor: pointer; font-size: 14px; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--opus-text-muted); transition: all 0.12s;
+  }
+  .opus-chip-add-btn:hover { border-color: var(--opus-primary); color: var(--opus-primary); background: var(--opus-primary-light); }
+
   /* ── 面板显隐 ── */
   #opus-panel-chat.hidden { display: none; }
   #opus-panel-chat:not(.hidden) { flex: 1; min-height: 0; display: flex; }
