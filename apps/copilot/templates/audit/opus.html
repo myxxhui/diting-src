@@ -567,6 +567,17 @@
       });
     }
 
+    function radarLoadJl13Template() {
+      if (!jl13El) return;
+      var saved = localStorage.getItem(window.T2_JL13_TPL_KEY || 'opus_t2_jl13_template');
+      if (saved !== null) jl13El.value = saved;
+    }
+
+    function radarSaveJl13Template() {
+      if (!jl13El) return;
+      localStorage.setItem(window.T2_JL13_TPL_KEY || 'opus_t2_jl13_template', jl13El.value || '');
+    }
+
     if (jl13El) {
       radarLoadJl13Template();
       jl13El.addEventListener('input', function () {
