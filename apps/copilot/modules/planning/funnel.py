@@ -187,7 +187,11 @@ async def hide_symbol_ui(
     *,
     name: str = "",
 ) -> Optional[CampaignSymbol]:
-    """前端移除：即时隐藏，后端保留 7 天。"""
+    """前端移除：即时隐藏，后端保留 7 天。
+
+    【级联】同时禁用 executing_collect_symbols.enabled，停止数据采集；
+    所有视图通过 campaign_symbols （ui_removed_at IS NULL）为单一真相源。
+    """
     sym = symbol.zfill(6)[-6:]
     row = await get_funnel_symbol(session, sym)
     if row is None:
@@ -196,6 +200,14 @@ async def hide_symbol_ui(
             session, sym, name or sym, stage="radar_intake"
         )
     row.ui_removed_at = utc_now_naive()
+
+    # 级联：禁用执行区数据采集（持仓监控区 = 单一真相源）
+    from apps.copilot.db.models import ExecutingCollectSymbol
+
+    collect = await session.get(ExecutingCollectSymbol, sym)
+    if collect is not None and collect.enabled:
+        collect.enabled = False
+
     await session.flush()
     return row
 

@@ -58,11 +58,26 @@ def _redis_for_panel() -> Any:
         return None
 
 
+async def _ui_removed_symbols(session: AsyncSession) -> set[str]:
+    """查询已从持仓监控区移除（ui_removed_at 被设置）的标的代码集合。"""
+    from apps.copilot.db.models import CampaignSymbol
+    from sqlalchemy import select
+
+    rows = await session.scalars(
+        select(CampaignSymbol.symbol).where(CampaignSymbol.ui_removed_at.isnot(None))
+    )
+    return {(s or "").zfill(6)[-6:] for s in rows if s}
+
+
 async def _load_analyst_symbol_rows(
     session: AsyncSession,
     redis: Any,
 ) -> list[dict[str, Any]]:
-    """与执行区标的卡对齐：funnel executing ∪ executing_collect ∪ user_positions。"""
+    """与执行区标的卡对齐：funnel executing ∪ executing_collect ∪ user_positions。
+
+    持仓监控区（campaign_symbols.ui_removed_at IS NULL）为单一真相源；
+    合并后额外过滤已移除标的，确保所有视图级联一致。
+    """
     from apps.copilot.modules.planning.service import list_workspace_symbols
 
     seen: set[str] = set()
@@ -85,6 +100,10 @@ async def _load_analyst_symbol_rows(
         if s and s not in seen:
             seen.add(s)
             ordered.append(s)
+
+    # 统一过滤：去除持仓监控区已移除（ui_removed_at）的标的
+    removed = await _ui_removed_symbols(session)
+    ordered = [s for s in ordered if s not in removed]
 
     symbol_rows: list[dict[str, Any]] = []
     for sym in ordered:
