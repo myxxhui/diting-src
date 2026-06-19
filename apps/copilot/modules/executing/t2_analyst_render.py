@@ -397,7 +397,7 @@ def _render_symbol_section(
     badge = _action_badge(str(advice))
     open_attr = " open" if open_default else ""
     return f"""
-<details class="t2-symbol-card group"{open_attr}>
+<details class="t2-symbol-card group" data-t2-symbol="{_esc(symbol)}"{open_attr}>
   <summary class="t2-symbol-summary">
     <div class="t2-symbol-head">
       <h4 class="t2-symbol-title">{_esc(symbol)} · {_esc(name)}</h4>

@@ -512,5 +512,24 @@
         });
       }
     });
+
+    /* ── 移动端侧边栏标的按钮 · 点击滚动到对应卡片 ── */
+    var symBtns = document.querySelectorAll('.opus-sidebar-symbol-btn');
+    symBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var sym = btn.getAttribute('data-t2-symbol');
+        if (!sym) return;
+        var msgs = document.getElementById('t2-analyst-messages');
+        if (!msgs) return;
+        var card = msgs.querySelector('.t2-symbol-card[data-t2-symbol="' + sym + '"]');
+        if (card) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          card.open = true;
+        }
+        // 高亮当前选中
+        symBtns.forEach(function (b) { b.classList.remove('is-active'); });
+        btn.classList.add('is-active');
+      });
+    });
   })();
 </script>

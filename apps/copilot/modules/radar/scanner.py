@@ -492,17 +492,25 @@ def t1_to_candidate_fields(
     t2_ok = t2.get("status") == "ok"
     confidence = float(overall.get("confidence") or t2.get("confidence") or 0.0)
 
+    # 防御性截断：Opus 有时不遵守 {yes|no|inferred} 等枚举约束，返回长句
+    def _v32(key: str) -> str | None:
+        v = _vd(key)
+        if isinstance(v, str) and len(v) > 32:
+            _log_varchar_trunc(key, v)
+            return v[:32]
+        return v
+
     return {
         "symbol": t0.get("symbol"),
         "name": t0.get("name") or t0.get("symbol"),
         "industry": profile.get("industry") if profile.get("status") == "ok" else None,
         "niche_text": _vd("niche") if t2_ok else None,
         "value_chain_pos": _vd("value_chain") if t2_ok else None,
-        "is_leader": _vd("is_leader") if t2_ok else None,
+        "is_leader": _v32("is_leader") if t2_ok else None,
         "leader_confidence": (dims.get("is_leader") or {}).get("confidence") if t2_ok else None,
-        "moat_level": _vd("moat") if t2_ok else None,
-        "profit_quality": _vd("profit_quality") if t2_ok else None,
-        "market_phase": _vd("market_phase") if t2_ok else None,
+        "moat_level": _v32("moat") if t2_ok else None,
+        "profit_quality": _v32("profit_quality") if t2_ok else None,
+        "market_phase": _v32("market_phase") if t2_ok else None,
         "catalyst_window": _catalyst_window(dims) if t2_ok else None,
         "risk_summary": _vd("risk") if t2_ok else (t2.get("detail") if not t2_ok else None),
         "confidence": confidence,
@@ -530,3 +538,14 @@ def _catalyst_window(dims: dict[str, Any]) -> str | None:
     if items and isinstance(items[0], dict):
         return items[0].get("window")
     return (dims.get("catalyst_timeline") or {}).get("verdict")
+
+
+def _log_varchar_trunc(field: str, value: str) -> None:
+    """LLM 输出超出 VARCHAR(32) 时记录截断日志，不打断流程。"""
+    import logging
+    _logger = logging.getLogger("radar.scanner")
+    _logger.warning(
+        "radar_candidates.%s verdict too long (%d chars), truncating to 32. "
+        "Original: %s...",
+        field, len(value), value[:120],
+    )

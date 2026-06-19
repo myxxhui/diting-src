@@ -190,7 +190,10 @@ async def confirm_cvm_pool(
         sc.human_confirmed = chosen
         sc.confirmed_at = now if chosen else None
         if sc.symbol in role_overrides:
-            sc.role_override = role_overrides[sc.symbol]
+            raw = role_overrides[sc.symbol] or ""
+            if len(raw) > 32:
+                raw = raw[:32]
+            sc.role_override = raw
             sc.override_reason = override_reasons.get(sc.symbol) or "用户覆盖"
         if chosen:
             sym_row = await session.execute(
