@@ -24,12 +24,12 @@ feeds:
   - id: ndrc_zcfb
     name: 发改委-政策发布
     kind: html_list
-    url: https://www.ndrc.gov.cn/xxgk/zcfb/
+    url: https://www.ndrc.gov.cn/xxgk/zcfb/fzggwl/
     source: ndrc.gov.cn
-    href_contains: zcfb
+    href_contains: /fzggwl/
     min_title_len: 10
     tier: L0
-    note: 专项规划/产业政策；若列表空则跳过不 mock
+    note: 专项规划/产业政策；原 /xxgk/zcfb/ JS 重定向 → 直接指 /fzggwl/
   - id: miit_zcwj
     name: 工信部-政策文件
     kind: html_list
@@ -66,14 +66,14 @@ feeds:
     tier: L1
   # ──────── v2.2 新增 P0（URL 已验证 ✅）───────
   - id: nea_gzdt
-    name: 国家能源局-工作动态
+    name: 国家能源局-新闻中心
     kind: html_list
-    url: https://www.nea.gov.cn/gzdt/index.htm
+    url: https://www.nea.gov.cn/xwzx/index.htm
     source: nea.gov.cn
     href_contains: nea.gov.cn
     min_title_len: 10
     tier: L1
-    note: P0·能源政策核心源：光伏/风电/储能/氢能的补贴、并网、规划
+    note: P0·能源政策核心源。原 /gzdt/ 为 2013-2016 历史归档，改为 /xwzx/ 新闻中心
   - id: most_tztg
     name: 科技部-通知公告
     kind: html_list
