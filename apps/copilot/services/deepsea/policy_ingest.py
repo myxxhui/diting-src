@@ -474,11 +474,9 @@ def _ingest_api_paginated_feed(
     fulltext_count = 0
     seen: set[str] = set()
 
-    # 用 Session 保活（部分 API 需要主站 cookie，含 Chrome 版本的 UA 被挡）
+    # 用 Session 保活（部分 API 需要主站 cookie，非标准 Accept/Chrome UA 被挡）
     api_session = httpx.Client(headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": _HTTP_HEADERS["Accept"],
-        "Accept-Language": _HTTP_HEADERS["Accept-Language"],
         "Referer": "https://www.mofcom.gov.cn/zwgk/zcfb/index.html",
     })
     try:
