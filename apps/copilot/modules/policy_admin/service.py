@@ -111,7 +111,18 @@ def get_source_health() -> list[dict[str, Any]]:
         ):
             b["last_ingested"] = ingested
 
-    return list(buckets.values())
+    # 将 datetime 转为 ISO 字符串以兼容模板
+    result: list[dict[str, Any]] = []
+    for b in buckets.values():
+        result.append({
+            "source": b["source"],
+            "total_docs": b["total_docs"],
+            "has_fulltext": b["has_fulltext"],
+            "last_published": b["last_published"].isoformat() if isinstance(b["last_published"], datetime) else b["last_published"],
+            "last_ingested": b["last_ingested"].isoformat() if isinstance(b["last_ingested"], datetime) else b["last_ingested"],
+            "has_recent": b["has_recent"],
+        })
+    return result
 
 
 def query_documents(
