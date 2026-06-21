@@ -29,9 +29,10 @@ router = APIRouter(tags=["z0-policy-admin"])
 
 @router.get("/z0/policy/admin", response_class=HTMLResponse)
 @router.get("/api/z0/policy/admin", response_class=HTMLResponse)
-async def z0_policy_admin_page(request: Request = None):
+async def z0_policy_admin_page(request: Request):
     """政策数据管理面板入口页（全页 + HTMX 兼容）。"""
-    return render_admin_index_page()
+    templates = request.app.state.templates
+    return templates.TemplateResponse("policy_admin/index.html", {"request": request})
 
 
 @router.get("/api/z0/policy/admin/sources", response_class=HTMLResponse)
