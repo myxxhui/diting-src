@@ -2,7 +2,8 @@
 # [Ref: 34_ §3.2 · 29_ §5.1 · 36_ §15 · z0_history_contract.yaml policy_t0]
 # L0 战略锚：gov.cn 政策库 / 十五五专项规划；L1 部委通知公告
 # v2.2：URL 验证修正（NEA→gzdt, MOT→gongkai/zcjd）；MOF+MOFCOM 降级 P2pending
-schema_version: "2.2"
+# v2.3: ndrc→/fzggwl/ ; nea→/xwzx/ ; miit_zcwj→search API w/ response_type
+schema_version: "2.3"
 doc_type: policy
 scope: S0
 max_items_per_feed: 80
@@ -32,12 +33,24 @@ feeds:
     note: 专项规划/产业政策；原 /xxgk/zcfb/ JS 重定向 → 直接指 /fzggwl/
   - id: miit_zcwj
     name: 工信部-政策文件
-    kind: html_list
-    url: https://www.miit.gov.cn/zwgk/zcwj/
+    kind: api_paginated
+    url: https://www.miit.gov.cn/search-front-server/api/search/info
     source: miit.gov.cn
     href_contains: /art/
     min_title_len: 10
     tier: L0
+    page_size: 15
+    max_pages: 291
+    response_type: search
+    api_params:
+      websiteid: "110000000000000"
+      scope: basic
+      q: ""
+      cateid: "196"
+      pos: "title_text,infocontent,titlepy"
+      _cus_eq_typename: ""
+      _cus_eq_publishgroupname: ""
+    note: JS渲染页面改用搜索 API，cateid=196(政策文件)，4360总条数
 
   # ──────── L1 源 ────────
   - id: gov_cn_zhengce_home

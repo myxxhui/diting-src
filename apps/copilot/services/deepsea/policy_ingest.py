@@ -455,7 +455,7 @@ def _ingest_api_paginated_feed(
     full_text_max: int,
     min_full_text: int,
 ) -> tuple[int, int, int, str | None]:
-    """API 分页列表采集（商务部等 JS 渲染页面用后端分页 API 替代）。"""
+    """API 分页列表采集（商务部 jpaas / 工信部 search 等后端 API 替代 JS 渲染页面）。"""
     import json as _json
     from urllib.parse import urlencode
 
@@ -466,37 +466,52 @@ def _ingest_api_paginated_feed(
     feed_tier = feed.get("tier")
     page_size = int(feed.get("page_size") or 15)
     max_pages = int(feed.get("max_pages") or 154)
-    # API 专有参数
     api_params = feed.get("api_params") or {}
+    response_type = str(feed.get("response_type", "jpaas")).lower()
 
     new_count = 0
     skipped = 0
     fulltext_count = 0
     seen: set[str] = set()
 
-    # 用 Session 保活（部分 API 需要主站 cookie，非标准 Accept/Chrome UA 被挡）
+    # Session 保活（按响应类型调整 Referer）
+    if response_type == "search":
+        warmup_url = "https://www.miit.gov.cn/"
+    else:
+        warmup_url = "https://www.mofcom.gov.cn/zwgk/zcfb/index.html"
+
     api_session = httpx.Client(headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://www.mofcom.gov.cn/zwgk/zcfb/index.html",
+        "Referer": warmup_url,
     })
     try:
-        api_session.get("https://www.mofcom.gov.cn/zwgk/zcfb/index.html", timeout=timeout_sec)
+        api_session.get(warmup_url, timeout=timeout_sec)
     except Exception:
         pass  # 主站预热失败不阻塞
 
     for page_no in range(1, max_pages + 1):
-        param_json = _json.dumps({"pageNo": page_no, "pageSize": str(page_size)}, separators=(",", ":"))
-        query = {
-            "parseType": str(api_params.get("parseType", "bulidstatic")),
-            "webId": str(api_params.get("webId", "")),
-            "tplSetId": str(api_params.get("tplSetId", "")),
-            "pageType": str(api_params.get("pageType", "column")),
-            "tagId": str(api_params.get("tagId", "列表")),
-            "editType": str(api_params.get("editType", "null")),
-            "pageId": str(api_params.get("pageId", "")),
-            "paramJson": param_json,
-        }
-        api_url = str(feed.get("url") or "").strip()
+        if response_type == "search":
+            # MIIT search API 格式
+            query = {
+                k: str(v) for k, v in api_params.items()
+            }
+            query["pg"] = str(page_size)
+            query["p"] = str(page_no)
+            api_url = str(feed.get("url") or "").strip()
+        else:
+            # MOFCOM jpaas API 格式
+            param_json = _json.dumps({"pageNo": page_no, "pageSize": str(page_size)}, separators=(",", ":"))
+            query = {
+                "parseType": str(api_params.get("parseType", "bulidstatic")),
+                "webId": str(api_params.get("webId", "")),
+                "tplSetId": str(api_params.get("tplSetId", "")),
+                "pageType": str(api_params.get("pageType", "column")),
+                "tagId": str(api_params.get("tagId", "列表")),
+                "editType": str(api_params.get("editType", "null")),
+                "pageId": str(api_params.get("pageId", "")),
+                "paramJson": param_json,
+            }
+            api_url = str(feed.get("url") or "").strip()
         if page_no == 1 and not api_url:
             return 0, 0, 0, "empty_api_url"
 
@@ -518,56 +533,109 @@ def _ingest_api_paginated_feed(
                     return 0, 0, 0, str(exc)
                 break
 
-        # 处理 JSON 响应（data.html 内嵌 HTML）
+        # 处理响应：search 格式直接用 JSON，jpaas 格式解析 data.html
         body = response.text
-        try:
-            payload = json.loads(body) if body.strip().startswith("{") else {}
-            if payload.get("success") and payload.get("data", {}).get("html"):
-                body = payload["data"]["html"]
-        except (json.JSONDecodeError, TypeError, KeyError):
-            pass  # 不是 JSON 或结构不对，用原始文本
+        if response_type == "search":
+            try:
+                payload = _json.loads(body)
+                results = payload.get("data", {}).get("searchResult", {}).get("dataResults") or []
+                if not results:
+                    break  # 空页，停止翻页
+                page_has_articles = True
+                for item in results:
+                    item_data = item.get("data") or {}
+                    href = str(item_data.get("url") or "").strip()
+                    title = str(item_data.get("title") or "").strip()
+                    published_str = str(item_data.get("jsearch_date") or "").strip()
+                    link = urljoin("https://www.miit.gov.cn", href)
+                    if href_contains and href_contains not in link:
+                        continue
+                    if len(title) < min_title_len:
+                        continue
+                    if link in seen:
+                        continue
+                    seen.add(link)
 
-        parser = _LinkParser()
-        parser.feed(body)
+                    published = _parse_date_from_url(link)
+                    if not published and published_str:
+                        # jsearch_date 格式: YYYY-MM-DD
+                        try:
+                            published = datetime.strptime(published_str, "%Y-%m-%d")
+                        except ValueError:
+                            published = None
+                    doc_id, was_skipped, got_full = _register_item(
+                        link=link, title=title, summary=title,
+                        source=source, feed_id=feed_id, published=published,
+                        cutoff=cutoff, fetch_full_text=fetch_full_text,
+                        full_text_max=full_text_max, min_full_text=min_full_text,
+                        feed_tier=str(feed_tier) if feed_tier else None,
+                        timeout_sec=timeout_sec,
+                    )
+                    if doc_id:
+                        new_count += 1
+                        if got_full:
+                            fulltext_count += 1
+                    elif was_skipped:
+                        skipped += 1
+                    if new_count + skipped >= max_items:
+                        break
+                if new_count + skipped >= max_items:
+                    break
+            except (_json.JSONDecodeError, TypeError, KeyError):
+                if page_no == 1:
+                    return 0, 0, 0, "invalid_json"
+                break
+        else:
+            # jpaas 格式：解析 JSON 中嵌入的 HTML
+            try:
+                payload = _json.loads(body) if body.strip().startswith("{") else {}
+                if payload.get("success") and payload.get("data", {}).get("html"):
+                    body = payload["data"]["html"]
+            except (_json.JSONDecodeError, TypeError, KeyError):
+                pass  # 不是 JSON 或结构不对，用原始文本
 
-        page_has_articles = False
-        for href, title in parser.links:
-            link = urljoin("https://www.mofcom.gov.cn", href)
-            if href_contains and href_contains not in link:
-                continue
-            if len(title) < min_title_len:
-                continue
-            if link in seen:
-                continue
-            seen.add(link)
-            page_has_articles = True
+            parser = _LinkParser()
+            parser.feed(body)
 
-            published = _parse_date_from_url(link)
-            doc_id, was_skipped, got_full = _register_item(
-                link=link,
-                title=title,
-                summary=title,
-                source=source,
-                feed_id=feed_id,
-                published=published,
-                cutoff=cutoff,
-                fetch_full_text=fetch_full_text,
-                full_text_max=full_text_max,
-                min_full_text=min_full_text,
-                feed_tier=str(feed_tier) if feed_tier else None,
-                timeout_sec=timeout_sec,
-            )
-            if doc_id:
-                new_count += 1
-                if got_full:
-                    fulltext_count += 1
-            elif was_skipped:
-                skipped += 1
-            if new_count + skipped >= max_items:
+            page_has_articles = False
+            for href, title in parser.links:
+                link = urljoin("https://www.mofcom.gov.cn", href)
+                if href_contains and href_contains not in link:
+                    continue
+                if len(title) < min_title_len:
+                    continue
+                if link in seen:
+                    continue
+                seen.add(link)
+                page_has_articles = True
+
+                published = _parse_date_from_url(link)
+                doc_id, was_skipped, got_full = _register_item(
+                    link=link,
+                    title=title,
+                    summary=title,
+                    source=source,
+                    feed_id=feed_id,
+                    published=published,
+                    cutoff=cutoff,
+                    fetch_full_text=fetch_full_text,
+                    full_text_max=full_text_max,
+                    min_full_text=min_full_text,
+                    feed_tier=str(feed_tier) if feed_tier else None,
+                    timeout_sec=timeout_sec,
+                )
+                if doc_id:
+                    new_count += 1
+                    if got_full:
+                        fulltext_count += 1
+                elif was_skipped:
+                    skipped += 1
+                if new_count + skipped >= max_items:
+                    break
+
+            if not page_has_articles:
                 break
 
-        if not page_has_articles:
-            break
         if new_count + skipped >= max_items:
             break
         if page_no >= max_pages:
