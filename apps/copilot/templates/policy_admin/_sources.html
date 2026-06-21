@@ -92,9 +92,10 @@
   <!-- 数据源说明 -->
   <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
     <p class="text-xs text-amber-800">
-      <strong>💡 说明</strong> · 数据来自 <code>deepsea_doc_registry</code> 的 policy 文档。<br>
+      <strong>💡 说明</strong> · 数据来自 <code>deepsea_doc_registry</code> 的 policy 文档 · 共 <strong>15</strong> 个数据源。<br>
       采集频率：L0 源每 60min，L1 源每 120min（工作日 9-18 点）。<br>
-      P2 剩余待补：全国人大网（JS渲染）、证监会（JS渲染）、国家数据局（无独立公网）。
+      <strong>不可达</strong>：全国人大网（区域封锁·仅2022内容）、国家数据局（无独立公网）。
+      gov.cn 仅首页8条（JS分页·待Playwright方案）。
     </p>
   </div>
   {% endif %}
