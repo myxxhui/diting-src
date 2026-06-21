@@ -474,6 +474,18 @@ def _ingest_api_paginated_feed(
     fulltext_count = 0
     seen: set[str] = set()
 
+    # 用 Session 保活（部分 API 需要主站 cookie）
+    api_session = httpx.Client(headers={
+        "User-Agent": _HTTP_HEADERS["User-Agent"],
+        "Accept": _HTTP_HEADERS["Accept"],
+        "Accept-Language": _HTTP_HEADERS["Accept-Language"],
+        "Referer": "https://www.mofcom.gov.cn/zwgk/zcfb/index.html",
+    })
+    try:
+        api_session.get("https://www.mofcom.gov.cn/zwgk/zcfb/index.html", timeout=timeout_sec)
+    except Exception:
+        pass  # 主站预热失败不阻塞
+
     for page_no in range(1, max_pages + 1):
         param_json = _json.dumps({"pageNo": page_no, "pageSize": str(page_size)}, separators=(",", ":"))
         query = {
@@ -490,17 +502,11 @@ def _ingest_api_paginated_feed(
         if page_no == 1 and not api_url:
             return 0, 0, 0, "empty_api_url"
 
-        # API 请求头含 Referer（部分 API 需要）
-        api_headers = dict(_HTTP_HEADERS)
-        api_headers.setdefault("Referer", "https://www.mofcom.gov.cn/zwgk/zcfb/index.html")
-
         try:
-            response = httpx.get(
+            response = api_session.get(
                 api_url,
                 params=query,
-                headers=api_headers,
                 timeout=timeout_sec,
-                follow_redirects=True,
             )
             response.raise_for_status()
         except Exception as exc:
