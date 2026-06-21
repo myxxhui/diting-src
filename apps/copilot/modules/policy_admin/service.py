@@ -30,6 +30,37 @@ def _sync_db_url() -> str:
     return raw
 
 
+def _load_feeds_cfg() -> dict[str, Any]:
+    cfg_path = (
+        Path(__file__).resolve().parents[4]
+        / "data"
+        / "config"
+        / "metrics"
+        / "z0_policy_feeds.yaml"
+    )
+    if cfg_path.is_file():
+        with cfg_path.open(encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+def get_source_display_map() -> dict[str, str]:
+    """返回 {source_domain: 中文显示名} 映射，供模板使用。"""
+    cfg = _load_feeds_cfg()
+    feeds = cfg.get("feeds") or []
+    return {
+        str(f.get("source", f.get("id", ""))): str(f.get("name", f.get("source", "")))
+        for f in feeds
+    }
+
+
+def get_all_configured_source_keys() -> list[str]:
+    """返回所有已配置数据源的 source 键（不依赖 DB 查询结果）。"""
+    cfg = _load_feeds_cfg()
+    feeds = cfg.get("feeds") or []
+    return sorted({str(f.get("source") or f.get("id", "")) for f in feeds})
+
+
 def _load_all_policy_docs() -> list[dict[str, Any]]:
     """加载所有 policy 类型文档，Python 层反序列化 lineage_tags。
 
@@ -329,6 +360,7 @@ def get_all_sources() -> list[dict[str, Any]]:
         merged.append({
             "id": fd.get("id"),
             "name": fd.get("name", source_name),
+            "source": source_name,
             "kind": fd.get("kind", "rss"),
             "tier": fd.get("tier", "L1"),
             "url": fd.get("url", ""),
@@ -347,6 +379,7 @@ def get_all_sources() -> list[dict[str, Any]]:
             merged.append({
                 "id": f"orphan_{src_name}",
                 "name": f"{src_name}（未配置）",
+                "source": src_name,
                 "kind": "unknown",
                 "tier": "unknown",
                 "url": "",

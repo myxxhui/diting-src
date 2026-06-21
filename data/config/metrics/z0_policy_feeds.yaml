@@ -2,8 +2,8 @@
 # [Ref: 34_ §3.2 · 29_ §5.1 · 36_ §15 · z0_history_contract.yaml policy_t0]
 # L0 战略锚：gov.cn 政策库 / 十五五专项规划；L1 部委通知公告
 # v2.2：URL 验证修正（NEA→gzdt, MOT→gongkai/zcjd）；MOF+MOFCOM 降级 P2pending
-# v2.3: ndrc→/fzggwl/ ; nea→/xwzx/ ; miit_zcwj→search API w/ response_type
-schema_version: "2.3"
+# v2.4: +3 P2（央行/农业农村部/生态环境部）; 前端中国化修复
+schema_version: "2.4"
 doc_type: policy
 scope: S0
 max_items_per_feed: 80
@@ -135,3 +135,31 @@ feeds:
       editType: "null"
       pageId: fc8bdff48fa345a48b651c1285b70b8f
     note: P1·贸易政策。JS 渲染页面改用后端分页 API，154 页 15 条/页
+  # ──────── v2.4 新增 P2 源（已完成URL验证）────────
+  - id: pbc_zhengce
+    name: 央行-货币政策
+    kind: html_list
+    url: https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/index.html
+    source: pbc.gov.cn
+    href_contains: pbc.gov.cn
+    min_title_len: 10
+    tier: L1
+    note: P2·货币政策。利率/准备金/公开市场操作，影响全赛道资金面
+  - id: moa_zcfg
+    name: 农业农村部-政策法规
+    kind: html_list
+    url: https://www.moa.gov.cn/gk/zcfg/
+    source: moa.gov.cn
+    href_contains: /t202
+    min_title_len: 10
+    tier: L1
+    note: P2·乡村振兴/粮食安全/种业等农业赛道政策
+  - id: mee_zcjd
+    name: 生态环境部-政策法规
+    kind: html_list
+    url: https://www.mee.gov.cn/zcwj/zcjd/
+    source: mee.gov.cn
+    href_contains: mee.gov.cn
+    min_title_len: 10
+    tier: L1
+    note: P2·碳排放/环保/新能源环保合规等环保节能赛道

@@ -31,6 +31,7 @@ def render_documents_page(
     all_sectors: list[str],
     current_source: str = "",
     current_sector: str = "",
+    source_display: dict[str, str] | None = None,
 ) -> str:
     return _templates.get_template("policy_admin/_documents.html").render(
         docs=docs,
@@ -39,6 +40,7 @@ def render_documents_page(
         all_sectors=all_sectors,
         current_source=current_source,
         current_sector=current_sector,
+        source_display=source_display or {},
     )
 
 
@@ -46,12 +48,19 @@ def render_document_detail_page(doc: dict[str, Any] | None) -> str:
     return _templates.get_template("policy_admin/_document_detail.html").render(doc=doc)
 
 
-def render_matrix_page(matrix: dict[str, Any]) -> str:
-    return _templates.get_template("policy_admin/_matrix.html").render(matrix=matrix)
+def render_matrix_page(matrix: dict[str, Any], source_display: dict[str, str] | None = None, all_sectors: list[str] | None = None) -> str:
+    return _templates.get_template("policy_admin/_matrix.html").render(
+        matrix=matrix,
+        source_display=source_display or {},
+        all_sectors=all_sectors or [],
+    )
 
 
-def render_timeline_page(events: list[dict[str, Any]]) -> str:
-    return _templates.get_template("policy_admin/_timeline.html").render(events=events)
+def render_timeline_page(events: list[dict[str, Any]], source_display: dict[str, str] | None = None) -> str:
+    return _templates.get_template("policy_admin/_timeline.html").render(
+        events=events,
+        source_display=source_display or {},
+    )
 
 
 def render_admin_index_page() -> str:

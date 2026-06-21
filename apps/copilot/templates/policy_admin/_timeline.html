@@ -46,7 +46,7 @@
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-1">
               <span class="source-badge {{ ev.tier }}">{{ ev.tier }}</span>
-              <span class="text-[10px] text-gray-500">{{ ev.source }}</span>
+              <span class="text-[10px] text-gray-500">{{ source_display.get(ev.source, ev.source) }}</span>
             </div>
             <a href="#"
                class="text-sm font-medium text-gray-900 hover:text-indigo-600 line-clamp-2"

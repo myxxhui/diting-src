@@ -1,17 +1,18 @@
-<!-- 文档浏览器（Partial，供 HTMX 加载） -->
+<!-- 文档浏览器（Partial，供 HTMX 加载）
+  表单与文档列表分离：hx-target 指向父容器 #policy-admin-content 避免重复表单 -->
 <div class="space-y-4">
-  <!-- 过滤栏 - 使用 Form 统一提交 -->
+  <!-- 过滤栏 - hx-target 改为 #policy-admin-content 避免重复表单 -->
   <form class="bg-white rounded-lg border border-gray-200 p-3 flex flex-wrap gap-3 items-center"
         hx-get="/api/z0/policy/admin/documents"
-        hx-target="#policy-doc-list"
-        hx-swap="innerHTML"
+        hx-target="#policy-admin-content"
+        hx-swap="outerHTML"
         hx-trigger="change from:select">
     <div class="flex items-center gap-2">
       <label class="text-xs text-gray-500">数据源：</label>
       <select name="source" class="text-xs border border-gray-200 rounded px-2 py-1">
         <option value="">全部</option>
         {% for s in all_sources %}
-        <option value="{{ s }}" {% if s == current_source %}selected{% endif %}>{{ s }}</option>
+        <option value="{{ s }}" {% if s == current_source %}selected{% endif %}>{{ source_display.get(s, s) }}</option>
         {% endfor %}
       </select>
     </div>
@@ -28,7 +29,7 @@
   </form>
 
   <!-- 文档列表 -->
-  <div id="policy-doc-list" class="space-y-2">
+  <div class="space-y-2">
     {% if not docs or docs|length == 0 %}
     <div class="rounded-lg border border-dashed border-gray-300 px-6 py-12 text-center text-sm text-gray-500">
       无匹配文档 · 试试调整过滤条件
@@ -40,7 +41,7 @@
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 mb-1">
             <span class="source-badge {{ d.tier }}">{{ d.tier }}</span>
-            <span class="text-[10px] text-gray-500">{{ d.source }}</span>
+            <span class="text-[10px] text-gray-500">{{ source_display.get(d.source, d.source) }}</span>
             {% if d.published_at %}
             <span class="text-[10px] text-gray-400">{{ d.published_at[:10] }}</span>
             {% endif %}
