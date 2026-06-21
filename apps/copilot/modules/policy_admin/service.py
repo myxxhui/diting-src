@@ -234,7 +234,10 @@ def get_sector_source_matrix() -> dict[str, Any]:
 
 
 def _get_t1_sector_scores() -> dict[str, dict[str, Any]]:
-    """从 deepsea_indicator_state 读取各赛道最新 T1 评分。"""
+    """从 deepsea_indicator_state 读取各赛道的最新 T1 评分。
+
+    数据使用 probe_key='M.policy.sector_direction', scope=赛道名。
+    """
     engine = create_engine(_sync_db_url(), future=True)
     scores: dict[str, dict[str, Any]] = {}
     try:
@@ -242,24 +245,24 @@ def _get_t1_sector_scores() -> dict[str, dict[str, Any]]:
             result = conn.execute(
                 text(
                     """
-                    SELECT metric_id, snapshot, updated_at
+                    SELECT scope, snapshot, inferred_at
                     FROM deepsea_indicator_state
-                    WHERE metric_id LIKE 'M.policy.sector_direction.%'
-                    ORDER BY updated_at DESC NULLS LAST
-                    LIMIT 100
+                    WHERE probe_key = 'M.policy.sector_direction'
+                      AND scope != 'S0_doc'
+                    ORDER BY inferred_at DESC NULLS LAST
+                    LIMIT 200
                     """
                 ),
             )
             seen: set[str] = set()
             for row in result:
-                mid: str = row.metric_id
-                if mid in seen:
+                sector_name = str(row.scope or "")
+                if not sector_name or sector_name in seen:
                     continue
-                seen.add(mid)
+                seen.add(sector_name)
                 snap = row.snapshot
                 if isinstance(snap, str):
                     snap = json.loads(snap)
-                sector_name = mid.replace("M.policy.sector_direction.", "")
                 scores[sector_name] = {
                     "composite_score": snap.get("composite_score", 0),
                     "direction": snap.get("direction", "neutral"),
