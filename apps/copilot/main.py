@@ -223,6 +223,7 @@ app.include_router(alerts_view_router)
 app.include_router(value_router)
 app.include_router(value_view_router)
 app.include_router(reports_router.router)
+app.include_router(policy_admin_routes.router)
 app.include_router(admin_router.router)
 
 
