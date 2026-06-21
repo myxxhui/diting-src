@@ -123,15 +123,31 @@ def _parse_published(entry: dict[str, Any]) -> datetime | None:
 
 
 def _parse_date_from_url(url: str) -> datetime | None:
-    for pat in (r"/(\d{6})/", r"/(\d{4})/"):
+    for pat in (
+        r"/(\d{4}-\d{2})/(\d{2})/",  # /2014-02/17/  (NEA)
+        r"/(\d{4}-\d{2})/",          # /2014-02/     (NEA fallback)
+        r"/(\d{6})/",                # /202604/      (MOST/MOT/MOF)
+        r"/(\d{4})/",                # /2026/        (year only)
+    ):
         match = re.search(pat, url)
         if match:
-            token = match.group(1)
-            fmt = "%Y%m" if len(token) == 6 else "%Y"
-            try:
-                return datetime.strptime(token, fmt)
-            except ValueError:
-                continue
+            if pat.startswith(r"/(\d{4}-\d{2})/(\d{2})"):
+                try:
+                    return datetime.strptime(match.group(1) + "-" + match.group(2), "%Y-%m-%d")
+                except ValueError:
+                    continue
+            elif pat.startswith(r"/(\d{4}-\d{2})"):
+                try:
+                    return datetime.strptime(match.group(1), "%Y-%m")
+                except ValueError:
+                    continue
+            else:
+                token = match.group(1)
+                fmt = "%Y%m" if len(token) == 6 else "%Y"
+                try:
+                    return datetime.strptime(token, fmt)
+                except ValueError:
+                    continue
     return None
 
 
