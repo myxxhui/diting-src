@@ -23,6 +23,7 @@ from apps.copilot.modules.health_check import routes as health_routes
 from apps.copilot.modules.recommendation import routes as recommendation_routes
 from apps.copilot.routers import admin as admin_router
 from apps.copilot.routers import executing_routes, planning_routes, strategic_routes, strategic_z0_routes
+from apps.copilot.routers import policy_admin_routes
 from apps.copilot.routers import portfolio
 from apps.copilot.routers import reports as reports_router
 from apps.copilot.routers.alerts import router as alerts_router, view_router as alerts_view_router

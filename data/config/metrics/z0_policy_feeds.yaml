@@ -1,7 +1,8 @@
 # Z0 段 A 政策 T0 源 · DeepSea doc_registry · 全文采集
-# [Ref: 34_ §3.2 · 29_ §5.1 · z0_history_contract.yaml policy_t0]
+# [Ref: 34_ §3.2 · 29_ §5.1 · 36_ §15 · z0_history_contract.yaml policy_t0]
 # L0 战略锚：gov.cn 政策库 / 十五五专项规划；L1 部委通知公告
-schema_version: "1.2"
+# v2.2：URL 验证修正（NEA→gzdt, MOT→gongkai/zcjd）；MOF+MOFCOM 降级 P2pending
+schema_version: "2.2"
 doc_type: policy
 scope: S0
 max_items_per_feed: 80
@@ -10,6 +11,7 @@ fetch_full_text: true
 full_text_max_chars: 48000
 min_full_text_chars: 200
 feeds:
+  # ──────── L0 源 ────────
   - id: gov_cn_zhengce_index
     name: 中国政府网-国务院政策文件库
     kind: html_list
@@ -19,6 +21,25 @@ feeds:
     min_title_len: 12
     tier: L0
     note: 含十五五专项规划、国发/国办文件
+  - id: ndrc_zcfb
+    name: 发改委-政策发布
+    kind: html_list
+    url: https://www.ndrc.gov.cn/xxgk/zcfb/
+    source: ndrc.gov.cn
+    href_contains: zcfb
+    min_title_len: 10
+    tier: L0
+    note: 专项规划/产业政策；若列表空则跳过不 mock
+  - id: miit_zcwj
+    name: 工信部-政策文件
+    kind: html_list
+    url: https://www.miit.gov.cn/zwgk/zcwj/
+    source: miit.gov.cn
+    href_contains: /art/
+    min_title_len: 10
+    tier: L0
+
+  # ──────── L1 源 ────────
   - id: gov_cn_zhengce_home
     name: 中国政府网-首页政策
     kind: html_list
@@ -35,15 +56,6 @@ feeds:
     href_contains: /tzgg/
     min_title_len: 10
     tier: L1
-  - id: ndrc_zcfb
-    name: 发改委-政策发布
-    kind: html_list
-    url: https://www.ndrc.gov.cn/xxgk/zcfb/
-    source: ndrc.gov.cn
-    href_contains: zcfb
-    min_title_len: 10
-    tier: L0
-    note: 专项规划/产业政策；若列表空则跳过不 mock
   - id: miit_xwfb
     name: 工信部-新闻发布
     kind: html_list
@@ -52,11 +64,45 @@ feeds:
     href_contains: /art/
     min_title_len: 10
     tier: L1
-  - id: miit_zcwj
-    name: 工信部-政策文件
+  # ──────── v2.2 新增 P0（URL 已验证 ✅）───────
+  - id: nea_gzdt
+    name: 国家能源局-工作动态
     kind: html_list
-    url: https://www.miit.gov.cn/zwgk/zcwj/
-    source: miit.gov.cn
-    href_contains: /art/
+    url: https://www.nea.gov.cn/gzdt/index.htm
+    source: nea.gov.cn
+    href_contains: nea.gov.cn
     min_title_len: 10
-    tier: L0
+    tier: L1
+    note: P0·能源政策核心源：光伏/风电/储能/氢能的补贴、并网、规划
+  - id: most_tztg
+    name: 科技部-通知公告
+    kind: html_list
+    url: https://www.most.gov.cn/tztg/
+    source: most.gov.cn
+    href_contains: tztg/
+    min_title_len: 10
+    tier: L1
+    note: P0·科技政策核心源：重大专项/研发计划/卡脖子攻关
+  # ──────── v2.2 新增 P1（URL 已验证 ✅）───────
+  - id: mot_zcjd
+    name: 交通运输部-政策解读
+    kind: html_list
+    url: https://www.mot.gov.cn/gongkai/zcjd/index.html
+    source: mot.gov.cn
+    href_contains: /t2026
+    min_title_len: 10
+    tier: L1
+    note: P1·交通政策：低空经济/自动驾驶/智慧交通
+  # ──────── P2 pending（自定义解析器，本次不启用）───────
+  # - id: mof_zhengce
+  #   name: 财政部-政策发布（需自定义解析器·暂不启用）
+  #   kind: custom
+  #   url: https://www.mof.gov.cn/zhengce/
+  #   tier: L1
+  #   note: P2·财税政策。网站反爬严格，需使用 RSS/搜索接口替代 HTML 列表
+  # - id: mofcom_tzgg
+  #   name: 商务部-通知公告（需自定义解析器·暂不启用）
+  #   kind: custom
+  #   url: https://www.mofcom.gov.cn/tongzhi/
+  #   tier: L1
+  #   note: P2·贸易政策。网站反爬严格+URL 结构未知，等现用搜索接口

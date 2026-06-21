@@ -1,0 +1,78 @@
+<!-- 事件时间线（Partial）- 按时间排序展示 -->
+<div class="space-y-4">
+  <div class="bg-white rounded-lg border border-gray-200 p-3 flex items-center justify-between">
+    <span class="text-sm font-medium text-gray-700">近 180 天政策事件</span>
+    <span class="text-xs text-gray-400">
+      展示最后 {{ events|length }} 条 · 按发布时间倒序
+    </span>
+  </div>
+
+  {% if not events or events|length == 0 %}
+  <div class="rounded-lg border border-dashed border-gray-300 px-6 py-12 text-center text-sm text-gray-500">
+    近 6 个月暂无政策文档
+  </div>
+  {% else %}
+  <div class="relative">
+    <!-- 时间线主轴 -->
+    <div class="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200"></div>
+
+    <!-- 记录上一个月份，用变量跟踪 -->
+    {% set last_month = namespace(value='') %}
+
+    {% for ev in events %}
+    {% set pub_month = ev.published_at[:7] if ev.published_at and ev.published_at|length >= 7 else '' %}
+
+    <!-- 月份分隔线 -->
+    {% if pub_month and pub_month != last_month.value %}
+    <div class="relative pl-10 mb-3 mt-2">
+      {% if last_month.value %}<hr class="border-gray-100 my-2">{% endif %}
+      <div class="absolute left-2.5 -translate-x-1/2 w-3 h-3 rounded-full bg-indigo-500 border-2 border-white shadow-sm"></div>
+      <h3 class="text-sm font-bold text-gray-700">{{ pub_month }}</h3>
+    </div>
+    {% set last_month.value = pub_month %}
+    {% endif %}
+
+    <!-- 事件卡片 -->
+    <div class="relative pl-10 mb-3">
+      <div class="bg-white rounded-lg border border-gray-200 p-3 hover:shadow-sm transition-shadow">
+        <div class="flex items-start gap-3">
+          <div class="text-xs text-gray-400 w-14 shrink-0 pt-0.5 text-right">
+            {% if ev.published_at and ev.published_at|length >= 10 %}
+            {{ ev.published_at[8:10] }}日
+            {% else %}
+            —
+            {% endif %}
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="source-badge {{ ev.tier }}">{{ ev.tier }}</span>
+              <span class="text-[10px] text-gray-500">{{ ev.source }}</span>
+            </div>
+            <a href="#"
+               class="text-sm font-medium text-gray-900 hover:text-indigo-600 line-clamp-2"
+               hx-get="/api/z0/policy/admin/document/{{ ev.doc_id }}"
+               hx-target="#policy-admin-content"
+               hx-swap="innerHTML">
+              {{ ev.title }}
+            </a>
+            {% if ev.themes and ev.themes|length > 0 %}
+            <div class="flex flex-wrap gap-1 mt-1">
+              {% for t in ev.themes[:3] %}
+              <span class="inline-block px-1.5 py-0.5 rounded text-[10px] bg-amber-50 text-amber-700">{{ t }}</span>
+              {% endfor %}
+              {% if ev.themes|length > 3 %}
+              <span class="text-[10px] text-gray-400">+{{ ev.themes|length - 3 }}</span>
+              {% endif %}
+            </div>
+            {% endif %}
+          </div>
+          {% if ev.link %}
+          <a href="{{ ev.link }}" target="_blank" class="text-xs text-gray-400 hover:text-gray-600 shrink-0">🔗</a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>

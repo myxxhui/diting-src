@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}政策数据源管理 - AI 投资副驾驶{% endblock %}
+{% block head %}
+<style>
+  .tab-btn { @apply px-4 py-2 text-sm font-medium rounded-t-lg transition-colors; }
+  .tab-btn.active { @apply bg-white text-indigo-700 border-t-2 border-indigo-600 shadow-sm; }
+  .tab-btn:not(.active) { @apply bg-gray-100 text-gray-600 hover:bg-gray-200; }
+  .stat-card { @apply bg-white rounded-lg border border-gray-200 p-4; }
+  .stat-value { @apply text-2xl font-bold text-gray-900; }
+  .stat-label { @apply text-xs text-gray-500 mt-1; }
+  .source-badge { @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium; }
+  .source-badge.L0 { @apply bg-purple-100 text-purple-800; }
+  .source-badge.L1 { @apply bg-blue-100 text-blue-800; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+  <!-- 导航标题 -->
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-bold text-gray-900">Z0 政策数据管理</h1>
+    <div class="flex gap-2">
+      <button type="button"
+              class="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
+              hx-post="/api/strategic/z0/collect/run?job_id=z0-policy-ingest"
+              hx-target="#policy-admin-content"
+              hx-swap="innerHTML"
+              hx-trigger="click">
+        ⟳ 执行 T0 采集
+      </button>
+    </div>
+  </div>
+
+  <!-- 导航 Tabs -->
+  <div class="flex border-b border-gray-200 gap-0.5">
+    <button class="tab-btn active" hx-get="/api/z0/policy/admin/sources" hx-target="#policy-admin-content" hx-swap="innerHTML">📊 数据源总览</button>
+    <button class="tab-btn" hx-get="/api/z0/policy/admin/documents" hx-target="#policy-admin-content" hx-swap="innerHTML">📄 文档浏览器</button>
+    <button class="tab-btn" hx-get="/api/z0/policy/admin/matrix" hx-target="#policy-admin-content" hx-swap="innerHTML">🔗 赛道×数据源</button>
+    <button class="tab-btn" hx-get="/api/z0/policy/admin/timeline" hx-target="#policy-admin-content" hx-swap="innerHTML">📅 事件时间线</button>
+  </div>
+
+  <!-- 主内容区 -->
+  <div id="policy-admin-content"
+       hx-get="/api/z0/policy/admin/sources"
+       hx-trigger="load"
+       class="min-h-[400px]">
+    <div class="text-center py-12 text-gray-400 text-sm">加载中...</div>
+  </div>
+</div>
+
+<script>
+  // Tab 切换高亮
+  document.addEventListener('htmx:beforeSend', function(e) {
+    const btn = e.detail.elt;
+    if (btn && btn.classList.contains('tab-btn')) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    }
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,81 @@
+<!-- 文档浏览器（Partial，供 HTMX 加载） -->
+<div class="space-y-4">
+  <!-- 过滤栏 - 使用 Form 统一提交 -->
+  <form class="bg-white rounded-lg border border-gray-200 p-3 flex flex-wrap gap-3 items-center"
+        hx-get="/api/z0/policy/admin/documents"
+        hx-target="#policy-doc-list"
+        hx-swap="innerHTML"
+        hx-trigger="change from:select">
+    <div class="flex items-center gap-2">
+      <label class="text-xs text-gray-500">数据源：</label>
+      <select name="source" class="text-xs border border-gray-200 rounded px-2 py-1">
+        <option value="">全部</option>
+        {% for s in all_sources %}
+        <option value="{{ s.name }}" {% if s.name == current_source %}selected{% endif %}>{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="flex items-center gap-2">
+      <label class="text-xs text-gray-500">赛道：</label>
+      <select name="sector" class="text-xs border border-gray-200 rounded px-2 py-1">
+        <option value="">全部</option>
+        {% for sec in all_sectors %}
+        <option value="{{ sec }}" {% if sec == current_sector %}selected{% endif %}>{{ sec }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <span class="text-xs text-gray-400 ml-auto">共 {{ total }} 篇文档</span>
+  </form>
+
+  <!-- 文档列表 -->
+  <div id="policy-doc-list" class="space-y-2">
+    {% if not docs or docs|length == 0 %}
+    <div class="rounded-lg border border-dashed border-gray-300 px-6 py-12 text-center text-sm text-gray-500">
+      无匹配文档 · 试试调整过滤条件
+    </div>
+    {% else %}
+    {% for d in docs %}
+    <div class="bg-white rounded-lg border border-gray-200 p-3 hover:shadow-sm transition-shadow">
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="source-badge {{ d.tier }}">{{ d.tier }}</span>
+            <span class="text-[10px] text-gray-500">{{ d.source }}</span>
+            {% if d.published_at %}
+            <span class="text-[10px] text-gray-400">{{ d.published_at[:10] }}</span>
+            {% endif %}
+          </div>
+          <a href="#"
+             class="text-sm font-medium text-gray-900 hover:text-indigo-600 line-clamp-2"
+             hx-get="/api/z0/policy/admin/document/{{ d.doc_id }}"
+             hx-target="#policy-admin-content"
+             hx-swap="innerHTML">
+            {{ d.title }}
+          </a>
+          {% if d.summary and d.summary != d.title %}
+          <p class="text-xs text-gray-500 mt-1 line-clamp-2">{{ d.summary[:200] }}</p>
+          {% endif %}
+        </div>
+        <div class="flex flex-col items-end gap-1 shrink-0">
+          {% if d.themes and d.themes|length > 0 %}
+          <div class="flex flex-wrap gap-1 justify-end">
+            {% for t in d.themes[:3] %}
+            <span class="inline-block px-1.5 py-0.5 rounded text-[10px] bg-indigo-50 text-indigo-700">{{ t }}</span>
+            {% endfor %}
+          </div>
+          {% endif %}
+          <div class="flex gap-2">
+            {% if d.has_fulltext %}
+            <span class="text-[10px] text-emerald-600 flex items-center gap-0.5">📄{{ d.full_text_len }}字</span>
+            {% endif %}
+            {% if d.link %}
+            <a href="{{ d.link }}" target="_blank" class="text-[10px] text-gray-400 hover:text-gray-600" title="查看原文">🔗</a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+  </div>
+</div>

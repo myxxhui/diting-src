@@ -1,0 +1,70 @@
+<!-- 文档详情（Partial） -->
+<div class="max-w-4xl mx-auto space-y-4">
+  <div class="flex items-center gap-2 mb-2">
+    <button class="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
+            hx-get="/api/z0/policy/admin/documents"
+            hx-target="#policy-admin-content"
+            hx-swap="innerHTML">
+      ← 返回文档列表
+    </button>
+  </div>
+
+  {% if doc %}
+  <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+    <!-- 头部信息 -->
+    <div class="px-5 py-4 border-b border-gray-100">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="source-badge {{ doc.tier }}">{{ doc.tier }}</span>
+        <span class="text-xs text-gray-500">{{ doc.source }}</span>
+        <span class="text-xs text-gray-400">{{ doc.feed_id }}</span>
+        {% if doc.published_at %}
+        <span class="text-xs text-gray-400 ml-auto">发布时间：{{ doc.published_at[:10] }}</span>
+        {% endif %}
+      </div>
+      <h2 class="text-lg font-bold text-gray-900">{{ doc.title }}</h2>
+      {% if doc.themes and doc.themes|length > 0 %}
+      <div class="flex flex-wrap gap-1 mt-2">
+        {% for t in doc.themes %}
+        <span class="inline-block px-2 py-0.5 rounded text-xs bg-indigo-50 text-indigo-700">{{ t }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if doc.link %}
+      <div class="mt-2">
+        <a href="{{ doc.link }}" target="_blank" class="text-xs text-indigo-600 hover:text-indigo-800">
+          查看原文 → {{ doc.link[:80] }}...
+        </a>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- 摘要 -->
+    {% if doc.summary and doc.summary != doc.title %}
+    <div class="px-5 py-3 border-b border-gray-100 bg-gray-50/50">
+      <p class="text-xs text-gray-600">{{ doc.summary[:2000] }}</p>
+    </div>
+    {% endif %}
+
+    <!-- 正文 -->
+    {% if doc.full_text %}
+    <div class="px-5 py-4">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-semibold text-gray-700">全文内容（{{ doc.full_text_len }} 字）</h3>
+      </div>
+      <div class="prose prose-sm max-w-none text-gray-700 leading-relaxed whitespace-pre-wrap text-xs"
+           style="max-height: 600px; overflow-y: auto; font-family: 'Noto Sans SC', 'PingFang SC', sans-serif;">
+        {{ doc.full_text }}
+      </div>
+    </div>
+    {% else %}
+    <div class="px-5 py-8 text-center text-sm text-gray-400">
+      本文档暂未采集到全文内容
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="rounded-lg border border-dashed border-gray-300 px-6 py-12 text-center text-sm text-gray-500">
+    文档不存在
+  </div>
+  {% endif %}
+</div>

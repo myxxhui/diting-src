@@ -1,0 +1,101 @@
+<!-- 数据源健康总览（Partial，供 HTMX 加载） -->
+<div class="space-y-6">
+  {% if not sources or sources|length == 0 %}
+  <div class="rounded-lg border border-dashed border-gray-300 px-6 py-12 text-center text-sm text-gray-500">
+    暂无数据源记录 · 请先执行 T0 采集
+  </div>
+  {% else %}
+  <!-- 统计卡片 -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div class="stat-card">
+      <div class="stat-value">{{ sources|length }}</div>
+      <div class="stat-label">数据源总数</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{{ sources | selectattr('has_recent') | list | length }}</div>
+      <div class="stat-label">近 7 天有更新</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{{ sources | map(attribute='total_docs') | sum }}</div>
+      <div class="stat-label">文档总数</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{{ sources | map(attribute='has_fulltext') | sum }}</div>
+      <div class="stat-label">含全文文档</div>
+    </div>
+  </div>
+
+  <!-- 数据源列表 -->
+  <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+    <div class="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+      <span class="text-sm font-semibold text-gray-700">各数据源详情</span>
+      <span class="text-xs text-gray-400">点击文档数可查看对应文档列表</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-xs">
+        <thead class="bg-gray-50 text-gray-600">
+          <tr>
+            <th class="px-3 py-2.5 text-left">数据源</th>
+            <th class="px-3 py-2.5 text-left">级别</th>
+            <th class="px-3 py-2.5 text-right">文档数</th>
+            <th class="px-3 py-2.5 text-right">含全文</th>
+            <th class="px-3 py-2.5 text-left">最近发布</th>
+            <th class="px-3 py-2.5 text-left">最近采集</th>
+            <th class="px-3 py-2.5 text-center">7天更新</th>
+            <th class="px-3 py-2.5 text-left">状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in sources %}
+          <tr class="border-t border-gray-50 hover:bg-gray-50/50">
+            <td class="px-3 py-2.5 font-medium text-gray-900">
+              {{ s.name }}
+              <span class="text-[10px] text-gray-400 ml-1">{{ s.id }}</span>
+            </td>
+            <td class="px-3 py-2.5">
+              <span class="source-badge {{ s.tier }}">{{ s.tier }}</span>
+            </td>
+            <td class="px-3 py-2.5 text-right">
+              <a href="#"
+                 class="text-indigo-600 hover:text-indigo-800 font-medium"
+                 hx-get="/api/z0/policy/admin/documents?source={{ s.name | urlencode }}"
+                 hx-target="#policy-admin-content"
+                 hx-swap="innerHTML"
+                 onclick="document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.querySelectorAll('.tab-btn')[1].classList.add('active');">
+                {{ s.total_docs }}
+              </a>
+            </td>
+            <td class="px-3 py-2.5 text-right text-gray-600">{{ s.has_fulltext }}</td>
+            <td class="px-3 py-2.5 text-gray-600">{{ s.last_published[:10] if s.last_published else '—' }}</td>
+            <td class="px-3 py-2.5 text-gray-600">{{ s.last_ingested[:16] if s.last_ingested else '—' }}</td>
+            <td class="px-3 py-2.5 text-center">
+              {% if s.has_recent %}
+              <span class="inline-block w-2 h-2 rounded-full bg-emerald-500" title="近 7 天有更新"></span>
+              {% else %}
+              <span class="inline-block w-2 h-2 rounded-full bg-gray-300" title="近 7 天无更新"></span>
+              {% endif %}
+            </td>
+            <td class="px-3 py-2.5">
+              {% if s.is_active %}
+              <span class="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[10px]">活跃</span>
+              {% else %}
+              <span class="text-gray-500 bg-gray-100 px-2 py-0.5 rounded text-[10px]">待启用</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 数据源说明 -->
+  <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+    <p class="text-xs text-amber-800">
+      <strong>💡 说明</strong> · 数据来自 <code>deepsea_doc_registry</code> 的 policy 文档。<br>
+      采集频率：L0 源每 60min，L1 源每 120min（工作日 9-18 点）。<br>
+      财政部（mof.gov.cn）和商务部（mofcom.gov.cn）因网站反爬限制，暂列入 P2 待自定义解析器。
+    </p>
+  </div>
+  {% endif %}
+</div>

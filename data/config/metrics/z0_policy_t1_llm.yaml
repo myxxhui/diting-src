@@ -1,0 +1,79 @@
+# Z0-M2 政策赛道 T1 LLM 语义工程化配置（v2.0）
+# [Ref: 36_ §4/§7/§8/§11 · 34_ §3.2 M.policy.sector_direction]
+# 模型选择、成本预算、三因子衰减、升格规则
+schema_version: "2.0"
+probe_key: M.policy.sector_direction
+
+# --- 模型配置 ---
+llm_config:
+  default_model: "deepseek-chat"           # 日常轮询模型
+  escalate_model: "claude-opus-4"          # 关键政策升格模型
+  temperature: 0.1                         # 低温度保证一致性
+  max_retries: 2                           # LLM 调用重试次数
+  context_window_tokens: 8500              # 每篇总预算
+  full_text_budget_tokens: 6000            # 正文分配
+
+# --- 成本控制 ---
+cost_control:
+  daily_token_budget: 500000               # 每日 token 上限
+  daily_yuan_budget: 5.0                   # 每日费用上限（¥）
+  batch_mode: false                        # 是否 batch API（回填时开）
+  pricing:
+    deepseek-chat:
+      input_per_1M_yuan: 1.0
+      output_per_1M_yuan: 2.0
+    claude-opus-4:
+      input_per_1M_yuan: 15.0
+      output_per_1M_yuan: 75.0
+
+# --- 文档类型权重（36_ §5.1） ---
+doc_type_weights:
+  L0: 1.0                                  # 国家级规划/立法
+  L1: 0.7                                  # 部委专项政策
+  L2: 0.4                                  # 会议精神/讲话
+  L3: 0.2                                  # 地方/行业动态
+
+# --- 实施状态乘数（36_ §5.1） ---
+impl_status_multipliers:
+  已发布_待执行: 1.0
+  已执行_进行中: 0.8
+  已执行_完成: 0.3
+  征求意见稿: 0.5
+  废止_替代: 0.0
+  状态未知: 0.6
+
+# --- 时间衰减（天，36_ §5.1） ---
+time_decay:
+  L0:
+    full_weight_days: 180
+    decay_to_days: 1825
+    min_weight: 0.0
+  L1:
+    full_weight_days: 90
+    decay_to_days: 1095
+    min_weight: 0.0
+  L2:
+    full_weight_days: 0
+    decay_to_days: 180
+    min_weight: 0.0
+  L3:
+    full_weight_days: 0
+    decay_to_days: 90
+    min_weight: 0.0
+
+# --- 升格触发 ---
+escalation_rules:
+  min_llm_confidence: 0.6                  # 置信度低于此值自动升格
+  tier_l0_always_escalate: true            # L0 源始终用 Opus
+
+# --- 影响评分阈值 ---
+impact_thresholds:
+  high: 61
+  medium: 41
+  low: 21
+
+# --- 证据回检 ---
+evidence_check:
+  enabled: true
+  norm_chinese: true
+  strict_mode: false
