@@ -490,11 +490,15 @@ def _ingest_api_paginated_feed(
         if page_no == 1 and not api_url:
             return 0, 0, 0, "empty_api_url"
 
+        # API 请求头含 Referer（部分 API 需要）
+        api_headers = dict(_HTTP_HEADERS)
+        api_headers.setdefault("Referer", "https://www.mofcom.gov.cn/zwgk/zcfb/index.html")
+
         try:
             response = httpx.get(
                 api_url,
                 params=query,
-                headers=_HTTP_HEADERS,
+                headers=api_headers,
                 timeout=timeout_sec,
                 follow_redirects=True,
             )
@@ -504,8 +508,17 @@ def _ingest_api_paginated_feed(
                 return 0, 0, 0, str(exc)
             break
 
+        # 处理 JSON 响应（data.html 内嵌 HTML）
+        body = response.text
+        try:
+            payload = json.loads(body) if body.strip().startswith("{") else {}
+            if payload.get("success") and payload.get("data", {}).get("html"):
+                body = payload["data"]["html"]
+        except (json.JSONDecodeError, TypeError, KeyError):
+            pass  # 不是 JSON 或结构不对，用原始文本
+
         parser = _LinkParser()
-        parser.feed(response.text)
+        parser.feed(body)
 
         page_has_articles = False
         for href, title in parser.links:
