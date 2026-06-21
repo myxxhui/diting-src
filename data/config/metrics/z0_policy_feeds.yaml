@@ -93,16 +93,22 @@ feeds:
     min_title_len: 10
     tier: L1
     note: P1·交通政策：低空经济/自动驾驶/智慧交通
-  # ──────── P2 pending（自定义解析器，本次不启用）───────
-  # - id: mof_zhengce
-  #   name: 财政部-政策发布（需自定义解析器·暂不启用）
-  #   kind: custom
-  #   url: https://www.mof.gov.cn/zhengce/
-  #   tier: L1
-  #   note: P2·财税政策。网站反爬严格，需使用 RSS/搜索接口替代 HTML 列表
-  # - id: mofcom_tzgg
-  #   name: 商务部-通知公告（需自定义解析器·暂不启用）
-  #   kind: custom
-  #   url: https://www.mofcom.gov.cn/tongzhi/
-  #   tier: L1
-  #   note: P2·贸易政策。网站反爬严格+URL 结构未知，等现用搜索接口
+  # ──────── v2.3 财政部/商务部 URL 修正 ────────
+  - id: mof_zhengcefabu
+    name: 财政部-政策发布
+    kind: html_list
+    url: https://www.mof.gov.cn/zhengwuxinxi/zhengcefabu/
+    source: mof.gov.cn
+    href_contains: /zhengcefabu/
+    min_title_len: 10
+    tier: L1
+    note: P1·财税政策。原 URL /zhengce/ 404，改为政务信息-政策发布
+  - id: mofcom_zcfb
+    name: 商务部-政策发布
+    kind: html_list
+    url: https://www.mofcom.gov.cn/
+    source: mofcom.gov.cn
+    href_contains: /zcfb/art/
+    min_title_len: 10
+    tier: L1
+    note: P1·贸易政策。zcfb 列表页 JS 渲染，暂从首页抓 /zcfb/art/ 文章
