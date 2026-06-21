@@ -336,35 +336,59 @@ def _ingest_html_list_feed(
     href_contains = str(feed.get("href_contains") or "").strip()
     min_title_len = int(feed.get("min_title_len") or 10)
     feed_tier = feed.get("tier")
-
-    response = httpx.get(
-        url,
-        headers=_HTTP_HEADERS,
-        timeout=timeout_sec,
-        follow_redirects=True,
-    )
-    response.raise_for_status()
-
-    parser = _LinkParser()
-    parser.feed(response.text)
+    page_param = str(feed.get("page_param") or "").strip()
+    max_pages = int(feed.get("max_pages") or 1)
+    page_start = int(feed.get("page_start") or 1)
+    pages = list(range(page_start, page_start + max_pages)) if page_param else [None]
 
     seen: set[str] = set()
     new_count = 0
     skipped = 0
     fulltext_count = 0
+    last_error: str | None = None
 
-    for href, title in parser.links:
-        link = urljoin(url, href)
-        if href_contains and href_contains not in link:
-            continue
-        if len(title) < min_title_len:
-            continue
-        if link in seen:
-            continue
-        seen.add(link)
+    for page_num in pages:
+        if new_count + skipped >= max_items:
+            break
 
-        published = _parse_date_from_url(link)
-        doc_id, was_skipped, got_full = _register_item(
+        page_url = url
+        if page_param and page_num is not None:
+            # Append page param to URL (handle both ? and & cases)
+            separator = "&" if "?" in page_url else "?"
+            page_url = f"{page_url}{separator}{page_param}={page_num}"
+
+        try:
+            response = httpx.get(
+                page_url,
+                headers=_HTTP_HEADERS,
+                timeout=timeout_sec,
+                follow_redirects=True,
+            )
+            response.raise_for_status()
+        except Exception as e:
+            last_error = f"page {page_num}: {e}"
+            logger.warning("html_list page fetch failed for %s: %s", feed_id, e)
+            if page_num == page_start:
+                return 0, 0, 0, last_error
+            break
+
+        parser = _LinkParser()
+        parser.feed(response.text)
+        page_links = 0
+
+        for href, title in parser.links:
+            link = urljoin(page_url, href)
+            if href_contains and href_contains not in link:
+                continue
+            if len(title) < min_title_len:
+                continue
+            if link in seen:
+                continue
+            seen.add(link)
+            page_links += 1
+
+            published = _parse_date_from_url(link)
+            doc_id, was_skipped, got_full = _register_item(
             link=link,
             title=title,
             summary=title,
@@ -385,6 +409,10 @@ def _ingest_html_list_feed(
         elif was_skipped:
             skipped += 1
         if new_count + skipped >= max_items:
+            break
+
+        # If this page had 0 new links, stop paginating (no more data)
+        if page_links == 0 and page_num is not None and page_num > page_start:
             break
 
     if not seen:

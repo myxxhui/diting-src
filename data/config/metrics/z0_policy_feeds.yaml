@@ -2,8 +2,8 @@
 # [Ref: 34_ §3.2 · 29_ §5.1 · 36_ §15 · z0_history_contract.yaml policy_t0]
 # L0 战略锚：gov.cn 政策库 / 十五五专项规划；L1 部委通知公告
 # v2.2：URL 验证修正（NEA→gzdt, MOT→gongkai/zcjd）；MOF+MOFCOM 降级 P2pending
-# v2.4: +3 P2（央行/农业农村部/生态环境部）; 前端中国化修复
-schema_version: "2.4"
+# v2.5: +CSRC +gov.cn分页 +html_list分页支持
+schema_version: "2.5"
 doc_type: policy
 scope: S0
 max_items_per_feed: 80
@@ -21,7 +21,9 @@ feeds:
     href_contains: zhengce/content/
     min_title_len: 12
     tier: L0
-    note: 含十五五专项规划、国发/国办文件
+    page_param: page
+    max_pages: 50
+    note: 含十五五专项规划、国发/国办文件 · ?page=1~50
   - id: ndrc_zcfb
     name: 发改委-政策发布
     kind: html_list
@@ -163,3 +165,12 @@ feeds:
     min_title_len: 10
     tier: L1
     note: P2·碳排放/环保/新能源环保合规等环保节能赛道
+  - id: csrc_zcgg
+    name: 证监会-新闻发布
+    kind: html_list
+    url: https://www.csrc.gov.cn/csrc/c100029/common_list.shtml
+    source: csrc.gov.cn
+    href_contains: content.shtml
+    min_title_len: 10
+    tier: L1
+    note: P2·证券市场监管政策。html_list直接解析，18篇最新至2024-04
