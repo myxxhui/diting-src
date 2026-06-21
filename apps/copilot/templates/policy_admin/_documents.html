@@ -11,7 +11,7 @@
       <select name="source" class="text-xs border border-gray-200 rounded px-2 py-1">
         <option value="">全部</option>
         {% for s in all_sources %}
-        <option value="{{ s.name }}" {% if s.name == current_source %}selected{% endif %}>{{ s.name }}</option>
+        <option value="{{ s }}" {% if s == current_source %}selected{% endif %}>{{ s }}</option>
         {% endfor %}
       </select>
     </div>
