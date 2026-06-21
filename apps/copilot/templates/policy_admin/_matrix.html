@@ -78,7 +78,7 @@
 
   <!-- 各源赛道覆盖 -->
   <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-    {% for src, total in source_totals.items() | dictsort(by='value', reverse=true) %}
+    {% for src, total in source_totals | dictsort(by='value', reverse=true) %}
     <div class="bg-white rounded-lg border border-gray-200 p-3">
       <div class="flex items-center justify-between mb-2">
         <span class="text-sm font-medium text-gray-700">{{ src }}</span>
