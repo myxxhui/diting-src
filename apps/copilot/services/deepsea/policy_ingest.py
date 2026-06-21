@@ -124,13 +124,16 @@ def _parse_published(entry: dict[str, Any]) -> datetime | None:
 
 def _parse_date_from_url(url: str) -> datetime | None:
     for pat in (
-        r"/(\d{4}-\d{2})/(\d{2})/",  # /2014-02/17/  (NEA)
+        r"/(\d{4}-\d{2})/(\d{2})/",  # /2014-02/17/  (NEA old)
         r"/(\d{4}-\d{2})/",          # /2014-02/     (NEA fallback)
+        r"/(\d{8})/",                # /20260618/    (NEA new)
         r"/(\d{6})/",                # /202604/      (MOST/MOT/MOF)
         r"/(\d{4})/",                # /2026/        (year only)
     ):
         match = re.search(pat, url)
         if match:
+            token = match.group(1)
+            fmt = None
             if pat.startswith(r"/(\d{4}-\d{2})/(\d{2})"):
                 try:
                     return datetime.strptime(match.group(1) + "-" + match.group(2), "%Y-%m-%d")
@@ -141,9 +144,13 @@ def _parse_date_from_url(url: str) -> datetime | None:
                     return datetime.strptime(match.group(1), "%Y-%m")
                 except ValueError:
                     continue
-            else:
-                token = match.group(1)
-                fmt = "%Y%m" if len(token) == 6 else "%Y"
+            elif len(token) == 8:
+                fmt = "%Y%m%d"
+            elif len(token) == 6:
+                fmt = "%Y%m"
+            elif len(token) == 4:
+                fmt = "%Y"
+            if fmt:
                 try:
                     return datetime.strptime(token, fmt)
                 except ValueError:
@@ -556,13 +563,15 @@ def _ingest_api_paginated_feed(
                         continue
                     seen.add(link)
 
-                    published = _parse_date_from_url(link)
-                    if not published and published_str:
-                        # jsearch_date 格式: YYYY-MM-DD
+                    published = None
+                    if published_str:
+                        # jsearch_date 格式: YYYY-MM-DD (优先于 URL 解析)
                         try:
                             published = datetime.strptime(published_str, "%Y-%m-%d")
                         except ValueError:
                             published = None
+                    if not published:
+                        published = _parse_date_from_url(link)
                     doc_id, was_skipped, got_full = _register_item(
                         link=link, title=title, summary=title,
                         source=source, feed_id=feed_id, published=published,
