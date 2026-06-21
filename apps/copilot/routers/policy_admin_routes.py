@@ -56,7 +56,7 @@ async def z0_policy_admin_documents(
         limit=limit,
         offset=offset,
     )
-    all_sources_list = sorted({d["source"] for d in docs})
+    all_sources_list = sorted({d["source"] for d in docs if d.get("source")})
     kws = load_policy_keywords()
     all_sectors_list = sorted((kws.get("sector_aliases") or {}).keys())
     return render_documents_page(
