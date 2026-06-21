@@ -28,7 +28,6 @@
                  hx-get="/api/z0/policy/admin/documents?source={{ src | urlencode }}"
                  hx-target="#policy-admin-content"
                  hx-swap="innerHTML"
-                 onclick="document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.querySelectorAll('.tab-btn')[1].classList.add('active');"
                  title="查看 {{ source_display.get(src, src) }} 所有文档">
                 {{ source_display.get(src, src) }}
               </a>
@@ -51,7 +50,6 @@
                  hx-get="/api/z0/policy/admin/documents?sector={{ sector_name | urlencode }}"
                  hx-target="#policy-admin-content"
                  hx-swap="innerHTML"
-                 onclick="document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.querySelectorAll('.tab-btn')[1].classList.add('active');"
                  title="查看赛道「{{ sector_name }}」的相关文档">
                 {{ sector_name }}
               </a>
@@ -115,8 +113,7 @@
                class="text-gray-600 hover:text-indigo-600 truncate"
                hx-get="/api/z0/policy/admin/documents?source={{ src | urlencode }}&sector={{ s_name | urlencode }}"
                hx-target="#policy-admin-content"
-               hx-swap="innerHTML"
-               onclick="document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.querySelectorAll('.tab-btn')[1].classList.add('active');">
+               hx-swap="innerHTML">
               {{ s_name }}
             </a>
             <span class="text-gray-400 ml-2">{{ sectors[s_name][src] }}篇</span>

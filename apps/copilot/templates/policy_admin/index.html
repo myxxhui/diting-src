@@ -31,11 +31,11 @@
   </div>
 
   <!-- 导航 Tabs -->
-  <div class="flex border-b border-gray-200 gap-0.5">
-    <button class="tab-btn active" hx-get="/api/z0/policy/admin/sources" hx-target="#policy-admin-content" hx-swap="innerHTML">📊 数据源总览</button>
-    <button class="tab-btn" hx-get="/api/z0/policy/admin/documents" hx-target="#policy-admin-content" hx-swap="innerHTML">📄 文档浏览器</button>
-    <button class="tab-btn" hx-get="/api/z0/policy/admin/matrix" hx-target="#policy-admin-content" hx-swap="innerHTML">🔗 赛道×数据源</button>
-    <button class="tab-btn" hx-get="/api/z0/policy/admin/timeline" hx-target="#policy-admin-content" hx-swap="innerHTML">📅 事件时间线</button>
+  <div class="flex border-b border-gray-200 gap-0.5" id="policy-admin-tabs">
+    <button id="tab-sources" class="tab-btn active" hx-get="/api/z0/policy/admin/sources" hx-target="#policy-admin-content" hx-swap="innerHTML">📊 数据源总览</button>
+    <button id="tab-documents" class="tab-btn" hx-get="/api/z0/policy/admin/documents" hx-target="#policy-admin-content" hx-swap="innerHTML">📄 文档浏览器</button>
+    <button id="tab-matrix" class="tab-btn" hx-get="/api/z0/policy/admin/matrix" hx-target="#policy-admin-content" hx-swap="innerHTML">🔗 赛道×数据源</button>
+    <button id="tab-timeline" class="tab-btn" hx-get="/api/z0/policy/admin/timeline" hx-target="#policy-admin-content" hx-swap="innerHTML">📅 事件时间线</button>
   </div>
 
   <!-- 主内容区 -->
@@ -48,13 +48,64 @@
 </div>
 
 <script>
-  // Tab 切换高亮
-  document.addEventListener('htmx:beforeSend', function(e) {
-    const btn = e.detail.elt;
-    if (btn && btn.classList.contains('tab-btn')) {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+  // ── 统一的 Tab 状态管理 ──
+  // 原则：所有 Tab 高亮由 URL 自动判定，任何地方都不再手动改 class
+
+  function tabIdFromPath(path) {
+    if (!path) return 'sources';
+    if (path.includes('/documents') || path.includes('/document/')) return 'documents';
+    if (path.includes('/matrix')) return 'matrix';
+    if (path.includes('/timeline')) return 'timeline';
+    if (path.includes('/sources')) return 'sources';
+    return 'sources';
+  }
+
+  function switchTab(tabId) {
+    var tabs = document.querySelectorAll('#policy-admin-tabs .tab-btn');
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].classList.remove('active');
     }
+    var target = document.getElementById('tab-' + tabId);
+    if (target) {
+      target.classList.add('active');
+      // 仅当本次调用来自 Tab 按钮的直接点击时，才触发 hx-get
+      // 否则（来自 afterSwap 回调）只更新视觉状态，避免重复请求
+    }
+  }
+
+  // Tab 按钮点击：更新视觉 + 由 hx-get 自动发起请求
+  document.getElementById('policy-admin-tabs').addEventListener('click', function(e) {
+    var btn = e.target.closest('.tab-btn');
+    if (!btn) return;
+    // 先清全部高亮，再亮当前
+    var tabs = document.querySelectorAll('#policy-admin-tabs .tab-btn');
+    for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove('active');
+    btn.classList.add('active');
+    // hx-get 由 HTMX 自动处理，不需要额外操作
+  });
+
+  // 响应加载完成：根据请求 URL 自动修正 Tab 高亮
+  document.addEventListener('htmx:afterSwap', function(e) {
+    if (e.detail.target.id !== 'policy-admin-content') return;
+    try {
+      var url = e.detail.requestConfig.path;
+      var tabId = tabIdFromPath(url);
+      // 只在当前高亮与实际不符时才更新（避免闪烁）
+      var current = document.querySelector('#policy-admin-tabs .tab-btn.active');
+      if (!current || current.id !== 'tab-' + tabId) {
+        switchTab(tabId);
+      }
+    } catch (_) {}
+  });
+
+  // 页面初始加载后修正（处理浏览器前进后退）
+  document.addEventListener('htmx:afterSettle', function(e) {
+    if (e.detail.target.id !== 'policy-admin-content') return;
+    try {
+      var url = e.detail.requestConfig.path;
+      var tabId = tabIdFromPath(url);
+      switchTab(tabId);
+    } catch (_) {}
   });
 </script>
 {% endblock %}

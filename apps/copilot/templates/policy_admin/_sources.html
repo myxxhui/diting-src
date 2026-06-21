@@ -60,8 +60,7 @@
                  class="text-indigo-600 hover:text-indigo-800 font-medium"
                  hx-get="/api/z0/policy/admin/documents?source={{ s.source | urlencode }}"
                  hx-target="#policy-admin-content"
-                 hx-swap="innerHTML"
-                 onclick="document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.querySelectorAll('.tab-btn')[1].classList.add('active');">
+                 hx-swap="innerHTML">
                 {{ s.total_docs }}
               </a>
             </td>
