@@ -502,17 +502,23 @@ def _ingest_api_paginated_feed(
         if page_no == 1 and not api_url:
             return 0, 0, 0, "empty_api_url"
 
-        try:
-            response = api_session.get(
-                api_url,
-                params=query,
-                timeout=timeout_sec,
-            )
-            response.raise_for_status()
-        except Exception as exc:
-            if page_no == 1:
-                return 0, 0, 0, str(exc)
-            break
+        # 重试逻辑（API 间歇性 500）
+        for attempt in range(3):
+            try:
+                response = api_session.get(
+                    api_url,
+                    params=query,
+                    timeout=timeout_sec,
+                )
+                response.raise_for_status()
+                break
+            except Exception as exc:
+                if attempt < 2:
+                    time.sleep(1.0 + attempt * 0.5)
+                    continue
+                if page_no == 1:
+                    return 0, 0, 0, str(exc)
+                break
 
         # 处理 JSON 响应（data.html 内嵌 HTML）
         body = response.text
