@@ -105,10 +105,20 @@ feeds:
     note: P1·财税政策。原 URL /zhengce/ 404，改为政务信息-政策发布
   - id: mofcom_zcfb
     name: 商务部-政策发布
-    kind: html_list
-    url: https://www.mofcom.gov.cn/
+    kind: api_paginated
+    url: https://www.mofcom.gov.cn/api-gateway/jpaas-publish-server/front/page/build/unit
     source: mofcom.gov.cn
     href_contains: /zcfb/art/
     min_title_len: 10
     tier: L1
-    note: P1·贸易政策。zcfb 列表页 JS 渲染，暂从首页抓 /zcfb/art/ 文章
+    page_size: 15
+    max_pages: 154
+    api_params:
+      parseType: bulidstatic
+      webId: 8f43c7ad3afc411fb56f281724b73708
+      tplSetId: 52551ea0e2c14bca8c84792f7aa37ead
+      pageType: column
+      tagId: 分页列表
+      editType: "null"
+      pageId: fc8bdff48fa345a48b651c1285b70b8f
+    note: P1·贸易政策。JS 渲染页面改用后端分页 API，154 页 15 条/页

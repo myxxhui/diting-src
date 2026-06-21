@@ -445,6 +445,116 @@ def _ingest_rss_feed(
     return new_count, skipped, fulltext_count, None
 
 
+def _ingest_api_paginated_feed(
+    feed: dict[str, Any],
+    *,
+    max_items: int,
+    cutoff: datetime,
+    timeout_sec: float,
+    fetch_full_text: bool,
+    full_text_max: int,
+    min_full_text: int,
+) -> tuple[int, int, int, str | None]:
+    """API 分页列表采集（商务部等 JS 渲染页面用后端分页 API 替代）。"""
+    import json as _json
+    from urllib.parse import urlencode
+
+    feed_id = str(feed.get("id") or "unknown")
+    source = str(feed.get("source") or feed_id)
+    href_contains = str(feed.get("href_contains") or "").strip()
+    min_title_len = int(feed.get("min_title_len") or 10)
+    feed_tier = feed.get("tier")
+    page_size = int(feed.get("page_size") or 15)
+    max_pages = int(feed.get("max_pages") or 154)
+    # API 专有参数
+    api_params = feed.get("api_params") or {}
+
+    new_count = 0
+    skipped = 0
+    fulltext_count = 0
+    seen: set[str] = set()
+
+    for page_no in range(1, max_pages + 1):
+        param_json = _json.dumps({"pageNo": page_no, "pageSize": str(page_size)}, separators=(",", ":"))
+        query = {
+            "parseType": str(api_params.get("parseType", "bulidstatic")),
+            "webId": str(api_params.get("webId", "")),
+            "tplSetId": str(api_params.get("tplSetId", "")),
+            "pageType": str(api_params.get("pageType", "column")),
+            "tagId": str(api_params.get("tagId", "列表")),
+            "editType": str(api_params.get("editType", "null")),
+            "pageId": str(api_params.get("pageId", "")),
+            "paramJson": param_json,
+        }
+        api_url = str(feed.get("url") or "").strip()
+        if page_no == 1 and not api_url:
+            return 0, 0, 0, "empty_api_url"
+
+        try:
+            response = httpx.get(
+                api_url,
+                params=query,
+                headers=_HTTP_HEADERS,
+                timeout=timeout_sec,
+                follow_redirects=True,
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            if page_no == 1:
+                return 0, 0, 0, str(exc)
+            break
+
+        parser = _LinkParser()
+        parser.feed(response.text)
+
+        page_has_articles = False
+        for href, title in parser.links:
+            link = urljoin("https://www.mofcom.gov.cn", href)
+            if href_contains and href_contains not in link:
+                continue
+            if len(title) < min_title_len:
+                continue
+            if link in seen:
+                continue
+            seen.add(link)
+            page_has_articles = True
+
+            published = _parse_date_from_url(link)
+            doc_id, was_skipped, got_full = _register_item(
+                link=link,
+                title=title,
+                summary=title,
+                source=source,
+                feed_id=feed_id,
+                published=published,
+                cutoff=cutoff,
+                fetch_full_text=fetch_full_text,
+                full_text_max=full_text_max,
+                min_full_text=min_full_text,
+                feed_tier=str(feed_tier) if feed_tier else None,
+                timeout_sec=timeout_sec,
+            )
+            if doc_id:
+                new_count += 1
+                if got_full:
+                    fulltext_count += 1
+            elif was_skipped:
+                skipped += 1
+            if new_count + skipped >= max_items:
+                break
+
+        if not page_has_articles:
+            break
+        if new_count + skipped >= max_items:
+            break
+        if page_no >= max_pages:
+            break
+
+    if not seen:
+        return new_count, skipped, fulltext_count, "empty_all_pages"
+    return new_count, skipped, fulltext_count, None
+
+
 def ingest_policy_feeds(*, timeout_sec: float = 20.0) -> dict[str, Any]:
     """拉取 HTML/RSS 列表 → doc_registry（可选全文）· 失败 feed 记 errors 不 mock。"""
     cfg = _load_feeds_cfg()
@@ -472,6 +582,16 @@ def ingest_policy_feeds(*, timeout_sec: float = 20.0) -> dict[str, Any]:
         try:
             if kind == "html_list":
                 feed_new, feed_skipped, feed_ft, err = _ingest_html_list_feed(
+                    feed,
+                    max_items=max_items,
+                    cutoff=cutoff,
+                    timeout_sec=timeout_sec,
+                    fetch_full_text=fetch_full_text,
+                    full_text_max=full_text_max,
+                    min_full_text=min_full_text,
+                )
+            elif kind == "api_paginated":
+                feed_new, feed_skipped, feed_ft, err = _ingest_api_paginated_feed(
                     feed,
                     max_items=max_items,
                     cutoff=cutoff,
