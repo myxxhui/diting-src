@@ -777,6 +777,8 @@ def infer_ecosystem_stock_pool(
 
     return {
         "status": "ok",
+        "version": "2.0",
+        "bom_whitelist_version": "2.0.0",
         "sector": display_name,
         "bom_nodes": out_bom_nodes,
         "ecosystem_topology": parsed.get("ecosystem_topology", {}),
