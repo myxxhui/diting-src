@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
@@ -607,6 +608,190 @@ async def api_genesis_infer_status(
 
 
 # ═══════════════════════════════════════════════════
+# v5.6 标的操作：加入猎物池 / 排除 / 批量晋级 / 推送 CVM
+# ═══════════════════════════════════════════════════
+
+def _calc_board_stock_pool(board: Any) -> tuple[list[dict], list[dict]]:
+    """解析 board 的 stock_pool_json 中的标的列表，返回 (可操作标的, 排除标的)。"""
+    spj = board.stock_pool_json or {}
+    bom_nodes = spj.get("bom_nodes") or []
+    stocks = [s for n in bom_nodes for s in (n.get("stocks") or [])]
+    excluded = spj.get("excluded_stocks") or []
+    return stocks, excluded
+
+
+@router.post("/api/strategic/boards/{board_id}/stock/{symbol}/accept", response_class=HTMLResponse)
+async def api_board_stock_accept(
+    board_id: int,
+    symbol: str,
+    session: AsyncSession = Depends(get_db),
+):
+    """将某只标的加入板块的猎物池（hunt_pool），返回已接受标记。"""
+    board = await session.get(StrategicBoard, board_id)
+    if not board:
+        return HTMLResponse('<span class="text-[10px] text-red-500">板块不存在</span>', status_code=404)
+
+    bcj = board.barbell_config_json or {}
+    hunt_pool: list[dict] = bcj.get("hunt_pool") or []
+    # 防止重复加入
+    existing = {s.get("symbol") for s in hunt_pool}
+    if symbol not in existing:
+        stocks, _ = _calc_board_stock_pool(board)
+        for st in stocks:
+            if st.get("symbol") == symbol:
+                hunt_pool.append({
+                    "symbol": symbol,
+                    "stock_name": st.get("stock_name", ""),
+                    "composite": st.get("scoring_detail", {}).get("composite", 0),
+                    "stock_source": st.get("stock_source", "llm"),
+                    "accepted_at": datetime.utcnow().isoformat(),
+                })
+                break
+        bcj["hunt_pool"] = hunt_pool
+        board.barbell_config_json = bcj
+        await session.commit()
+
+    return HTMLResponse(f'<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">✅ 已加入猎物池</span>')
+
+
+@router.post("/api/strategic/boards/{board_id}/stock/{symbol}/reject", response_class=HTMLResponse)
+async def api_board_stock_reject(
+    board_id: int,
+    symbol: str,
+    session: AsyncSession = Depends(get_db),
+):
+    """排除某只标的，从视图中移除该行。"""
+    board = await session.get(StrategicBoard, board_id)
+    if not board:
+        return HTMLResponse('', status_code=404)
+
+    spj = board.stock_pool_json or {}
+    rejected: list[dict] = spj.get("rejected_stocks") or []
+    # 记录排除
+    stocks, _ = _calc_board_stock_pool(board)
+    for st in stocks:
+        if st.get("symbol") == symbol:
+            rejected.append({
+                "symbol": symbol,
+                "stock_name": st.get("stock_name", ""),
+                "reason": "人工排除",
+                "rejected_at": datetime.utcnow().isoformat(),
+            })
+            break
+    spj["rejected_stocks"] = rejected
+    board.stock_pool_json = spj
+    await session.commit()
+
+    return HTMLResponse('')  # 返回空，前端用 hx-swap="outerHTML" 移除该行
+
+
+@router.post("/api/strategic/boards/{board_id}/stock/batch-accept", response_class=HTMLResponse)
+async def api_board_stock_batch_accept(
+    board_id: int,
+    session: AsyncSession = Depends(get_db),
+):
+    """一键晋级：将当前所有未排除的标的批量加入猎物池。"""
+    from apps.copilot.modules.strategic.render import _render_bom_stock_pool
+
+    board = await session.get(StrategicBoard, board_id)
+    if not board:
+        return HTMLResponse('<div class="text-xs text-red-500">板块不存在</div>', status_code=404)
+
+    bcj = board.barbell_config_json or {}
+    spj = board.stock_pool_json or {}
+    hunt_pool: list[dict] = bcj.get("hunt_pool") or []
+    existing_symbols = {s.get("symbol") for s in hunt_pool}
+    bom_nodes = spj.get("bom_nodes") or []
+    rejected_symbols = {s.get("symbol") for s in (spj.get("rejected_stocks") or [])}
+
+    batch_added = 0
+    for node in bom_nodes:
+        for st in (node.get("stocks") or []):
+            sym = st.get("symbol", "")
+            if sym not in existing_symbols and sym not in rejected_symbols:
+                hunt_pool.append({
+                    "symbol": sym,
+                    "stock_name": st.get("stock_name", ""),
+                    "composite": st.get("scoring_detail", {}).get("composite", 0),
+                    "stock_source": st.get("stock_source", "llm"),
+                    "accepted_at": datetime.utcnow().isoformat(),
+                })
+                batch_added += 1
+
+    bcj["hunt_pool"] = hunt_pool
+    board.barbell_config_json = bcj
+    await session.commit()
+
+    # 重新渲染生态位部分
+    bom_nodes = spj.get("bom_nodes") or []
+    html = _render_bom_stock_pool(board_id, spj, bom_nodes)
+    return HTMLResponse(html)
+
+
+@router.post("/api/strategic/boards/{board_id}/stock/preview-accepted", response_class=HTMLResponse)
+async def api_board_stock_preview_accepted(
+    board_id: int,
+    session: AsyncSession = Depends(get_db),
+):
+    """预览当前已接受的标的列表。"""
+    board = await session.get(StrategicBoard, board_id)
+    if not board:
+        return HTMLResponse('')
+
+    bcj = board.barbell_config_json or {}
+    hunt_pool: list[dict] = bcj.get("hunt_pool") or []
+    if not hunt_pool:
+        return HTMLResponse('<p class="text-[10px] text-gray-400">暂无已选标的</p>')
+
+    rows = "".join(
+        f'<li class="text-[10px] text-gray-700 flex items-center gap-1">'
+        f'<span class="font-mono">{_esc(s.get("symbol", ""))}</span>'
+        f'<span>{_esc(s.get("stock_name", ""))}</span>'
+        f'<span class="text-[10px] px-1 rounded bg-gray-100">{s.get("stock_source", "llm")}</span>'
+        f'<span class="ml-auto font-mono">{s.get("composite", 0):.0%}</span>'
+        f'</li>'
+        for s in hunt_pool
+    )
+    return HTMLResponse(
+        f'<div class="mt-2 border border-emerald-200 rounded p-2 bg-white">'
+        f'<p class="text-[10px] font-medium text-emerald-800 mb-1">已选标的 ({len(hunt_pool)} 只)</p>'
+        f'<ul class="space-y-0.5 max-h-40 overflow-y-auto">{rows}</ul>'
+        f'</div>'
+    )
+
+
+@router.post("/api/strategic/boards/{board_id}/stock/push-to-cvm", response_class=HTMLResponse)
+async def api_board_stock_push_to_cvm_ready(
+    board_id: int,
+    session: AsyncSession = Depends(get_db),
+):
+    """将猎物池标的推送到 CVM 矩阵——当前为标记就绪状态，Z1 阶段实现实际落库。"""
+    board = await session.get(StrategicBoard, board_id)
+    if not board:
+        return HTMLResponse('<div class="text-[10px] text-red-500">板块不存在</div>', status_code=404)
+
+    bcj = board.barbell_config_json or {}
+    hunt_pool: list[dict] = bcj.get("hunt_pool") or []
+    if not hunt_pool:
+        return HTMLResponse('<div class="text-[10px] text-amber-600">暂无已选标的，请先加入猎物池。</div>')
+
+    # 标记 push 状态
+    bcj["cvm_push_ready"] = True
+    bcj["cvm_push_at"] = datetime.utcnow().isoformat()
+    bcj["cvm_pool"] = hunt_pool.copy()
+    board.barbell_config_json = bcj
+    await session.commit()
+
+    names = ", ".join(s.get("stock_name", "") for s in hunt_pool[:5])
+    suffix = f"等 {len(hunt_pool)} 只" if len(hunt_pool) > 5 else ""
+    return HTMLResponse(
+        f'<div class="mt-2 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-2">'
+        f'✅ 已标记就绪：{names}{suffix}，等待 Z1 Gate-A 财务交叉验证。'
+        f'</div>'
+    )
+
+
+# ═══════════════════════════════════════════════════
 # v5.5 版块级生态位分析（从战略板块命令中心触发）
 # ═══════════════════════════════════════════════════
 
@@ -677,10 +862,15 @@ async def api_board_ecosystem_infer(
             '</div>'
         )
 
-    # 解析用户选定的 BOM 节点（从 barbell_config_json）
+    # 解析用户选定的 BOM 节点（从 barbell_config_json，保留代表标的）
     bom_node_defs = barbell.get("genesis_bom_nodes") or []
-    bom_nodes_for_infer: list[tuple[str, str, str]] = [
-        (n.get("node_id", ""), n.get("name", ""), n.get("tier", "配套"))
+    bom_nodes_for_infer: list[dict] = [
+        {
+            "node_id": n.get("node_id", ""),
+            "name": n.get("name", ""),
+            "tier": n.get("tier", "配套"),
+            "representative_stocks": n.get("representative_stocks") or [],
+        }
         for n in bom_node_defs
         if n.get("node_id")
     ]
@@ -929,13 +1119,14 @@ async def api_board_edit(
         pass
     _bcj["genesis_sector_display_name"] = _dname
     _bcj["genesis_concepts"] = selected_concepts
-    # 保留已选节点的元数据（动态 BOM 的 name/tier/layer）
+    # 保留已选节点的元数据（动态 BOM 的 name/tier/layer/representative_stocks）
     _bcj["genesis_bom_nodes"] = [
         {
             "node_id": nid,
             "name": _bom_lookup.get(nid, {}).get("name", nid),
             "tier": _bom_lookup.get(nid, {}).get("tier", "配套"),
             "layer": _bom_lookup.get(nid, {}).get("layer") or None,
+            "representative_stocks": _bom_lookup.get(nid, {}).get("representative_stocks") or [],
         }
         for nid in selected_bom_node_ids
     ] if selected_bom_node_ids else []

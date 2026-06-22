@@ -394,7 +394,7 @@ async def genesis_apply(session: AsyncSession, payload: dict[str, Any]) -> Strat
             "genesis_sector_display_name": _dname,
             "genesis_concepts": selected_concepts,
             "genesis_bom_nodes": [
-                {"node_id": n["node_id"], "name": n.get("name", n["node_id"]), "tier": n.get("tier", "配套"), "layer": n.get("layer") or None}
+                {"node_id": n["node_id"], "name": n.get("name", n["node_id"]), "tier": n.get("tier", "配套"), "layer": n.get("layer") or None, "representative_stocks": n.get("representative_stocks") or []}
                 for n in selected_bom_nodes
             ],
         }

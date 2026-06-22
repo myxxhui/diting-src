@@ -8,634 +8,902 @@ concept_sync:
   version: '5.1'
 direction_rules:
   enum_values:
-  - tailwind
-  - headwind
-  - neutral
-  - mixed
+    - tailwind
+    - headwind
+    - neutral
+    - mixed
   tailwind:
-  - 支持
-  - 加快
-  - 推动
-  - 鼓励
-  - 试点
-  - 规划
-  - 发展
-  - 建设
-  - 升级
-  - 扩容
-  - 培育
-  - 壮大
-  - 扶持
-  - 推进
-  - 引领
+    - 支持
+    - 加快
+    - 推动
+    - 鼓励
+    - 试点
+    - 规划
+    - 发展
+    - 建设
+    - 升级
+    - 扩容
+    - 培育
+    - 壮大
+    - 扶持
+    - 推进
+    - 引领
   headwind:
-  - 限制
-  - 禁止
-  - 淘汰
-  - 整顿
-  - 遏制
-  - 严控
-  - 清理
-  - 打击
-  - 取缔
+    - 限制
+    - 禁止
+    - 淘汰
+    - 整顿
+    - 遏制
+    - 严控
+    - 清理
+    - 打击
+    - 取缔
 canonical_sectors:
   AI算力:
     concept_code: '302035'
     description: 人工智能、算力基础设施、大模型、芯片等AI产业链
     display_name: 人工智能产业
     child_concepts:
-    - code: '302035'
-      name: 人工智能
-    - code: '308828'
-      name: 东数西算(算力)
-    - code: '308642'
-      name: 数据中心(AIDC)
-    - code: '309068'
-      name: 算力租赁
-    - code: '308700'
-      name: 第三代半导体
-    - code: '307940'
-      name: 存储芯片
-    - code: '301085'
-      name: 芯片概念
-    - code: '308300'
-      name: MCU芯片
-    - code: '309104'
-      name: 多模态AI
-    - code: '309183'
-      name: AI智能体
-    - code: '309121'
-      name: AI PC
-    - code: '309120'
-      name: AI手机
-    - code: '309126'
-      name: AI语料
-    - code: '309049'
-      name: 共封装光学(CPO)
-    - code: '300816'
-      name: 机器人概念
-    - code: '308725'
-      name: 汽车芯片
-    - code: '309119'
-      name: 人形机器人
-    - code: '309118'
-      name: AI视频
-    - code: '309004'
-      name: 先进封装
-    - code: '309061'
-      name: 液冷服务器
-    - code: '309264'
-      name: AI应用
-    - code: '309187'
-      name: 中国AI 50
-    - code: '309164'
-      name: 智谱AI
-    - code: '309152'
-      name: AI眼镜
+      - code: '302035'
+        name: 人工智能
+      - code: '308828'
+        name: 东数西算(算力)
+      - code: '308642'
+        name: 数据中心(AIDC)
+      - code: '309068'
+        name: 算力租赁
+      - code: '308700'
+        name: 第三代半导体
+      - code: '307940'
+        name: 存储芯片
+      - code: '301085'
+        name: 芯片概念
+      - code: '308300'
+        name: MCU芯片
+      - code: '309104'
+        name: 多模态AI
+      - code: '309183'
+        name: AI智能体
+      - code: '309121'
+        name: AI PC
+      - code: '309120'
+        name: AI手机
+      - code: '309126'
+        name: AI语料
+      - code: '309049'
+        name: 共封装光学(CPO)
+      - code: '300816'
+        name: 机器人概念
+      - code: '308725'
+        name: 汽车芯片
+      - code: '309119'
+        name: 人形机器人
+      - code: '309118'
+        name: AI视频
+      - code: '309004'
+        name: 先进封装
+      - code: '309061'
+        name: 液冷服务器
+      - code: '309264'
+        name: AI应用
+      - code: '309187'
+        name: 中国AI 50
+      - code: '309164'
+        name: 智谱AI
+      - code: '309152'
+        name: AI眼镜
     ingest_keywords:
-    - 人工智能
-    - 大模型
-    - 智算
-    - 生成式人工智能
-    - 算力
-    - 数据中心
-    - 芯片
-    - 集成电路
-    - 半导体
-    - 先进封装
+      - 人工智能
+      - 大模型
+      - 智算
+      - 生成式人工智能
+      - 算力
+      - 数据中心
+      - 芯片
+      - 集成电路
+      - 半导体
+      - 先进封装
     llm_aliases:
-    - 算力基础设施
-    - 人工智能产业
-    - 智算中心
-    - 大模型训练
-    - 万兆光网
-    - 新一代人工智能
-    - 先进计算
-    - 人形机器人与具身智能
-    - 新一代智能终端
-    - 人工智能基础底座领域
-    - AI算力链
+      - 算力基础设施
+      - 人工智能产业
+      - 智算中心
+      - 大模型训练
+      - 万兆光网
+      - 新一代人工智能
+      - 先进计算
+      - 人形机器人与具身智能
+      - 新一代智能终端
+      - 人工智能基础底座领域
+      - AI算力链
 
   # ── 定制化产业链 BOM 节点（经人工筛选与深度评估，可持续更新） ──
   # 每个赛道一套固定的 20-25 个关键节点，替代 LLM 动态生成。
     curated_bom_nodes:
 
     # ═══ L1 基础设施层（5 个） ═══
-    - node_id: data_center_construction
-      name: 智算中心建设与配套
-      tier: 重要
-      layer: L1
-    - node_id: power_system
-      name: 电力保障与UPS系统
-      tier: 重要
-      layer: L1
-    - node_id: high_speed_interconnect
-      name: 高速互联与布线
-      tier: 核心
-      layer: L1
-    - node_id: liquid_cooling
-      name: 液冷散热系统
-      tier: 重要
-      layer: L1
-    - node_id: computing_rental
-      name: 算力租赁与云服务
-      tier: 配套
-      layer: L1
+      - node_id: data_center_construction
+        name: 智算中心建设与配套
+        tier: 重要
+        layer: L1
+        representative_stocks:
+          - symbol: '603881'
+            name: 数据港
+            rationale: 国内智算中心建设龙头，阿里/腾讯核心数据中心供应商
+          - symbol: '300383'
+            name: 光环新网
+            rationale: 一线城市IDC资源储备丰富，智算中心转型领先
+          - symbol: '300738'
+            name: 奥飞数据
+            rationale: AIDC转型标杆，定增加码智算中心建设
+      - node_id: power_system
+        name: 电力保障与UPS系统
+        tier: 重要
+        layer: L1
+        representative_stocks:
+          - symbol: '002335'
+            name: 科华数据
+            rationale: 高端UPS国产龙头，智算中心电力保障核心供应商
+          - symbol: '002518'
+            name: 科士达
+            rationale: 数据中心UPS+精密空调一体化方案，出海加速
+      - node_id: high_speed_interconnect
+        name: 高速互联与布线
+        tier: 核心
+        layer: L1
+        representative_stocks:
+          - symbol: '300308'
+            name: 中际旭创
+            rationale: 全球800G光模块龙头，数据中心光互联核心
+          - symbol: '300502'
+            name: 新易盛
+            rationale: 800G/1.6T光模块布局领先，北美云厂商核心供应商
+          - symbol: '300394'
+            name: 天孚通信
+            rationale: 光模块上游器件龙头，800G/1.6T光引擎核心受益
+      - node_id: liquid_cooling
+        name: 液冷散热系统
+        tier: 重要
+        layer: L1
+        representative_stocks:
+          - symbol: '002837'
+            name: 英维克
+            rationale: 数据中心液冷/温控龙头，冷板+浸没液冷双线布局
+          - symbol: '300499'
+            name: 高澜股份
+            rationale: 电力电子冷却龙头，数据中心液冷订单爆发
+          - symbol: '301018'
+            name: 申菱环境
+            rationale: 专用空调龙头，数据中心液冷温控全链覆盖
+          - symbol: '603912'
+            name: 佳力图
+            rationale: 数据中心温控设备龙头，冷板液冷批量交付
+      - node_id: computing_rental
+        name: 算力租赁与云服务
+        tier: 配套
+        layer: L1
 
     # ═══ L2 芯片与硬件层（11 个） ═══
-    - node_id: eda_tool
-      name: 芯片设计EDA工具
-      tier: 核心
-      layer: L2
-    - node_id: fab_equipment
-      name: 半导体制造设备
-      tier: 核心
-      layer: L2
-    - node_id: wafer_substrate
-      name: 大硅片与衬底材料
-      tier: 配套
-      layer: L2
-    - node_id: advanced_packaging
-      name: 先进封装(CoWoS/Chiplet)
-      tier: 核心
-      layer: L2
-    - node_id: ai_chip
-      name: AI训练/推理芯片(GPU/NPU/ASIC)
-      tier: 核心
-      layer: L2
-    - node_id: hbm_memory
-      name: 高带宽存储(HBM)
-      tier: 核心
-      layer: L2
-    - node_id: ai_server
-      name: AI服务器及系统集成
-      tier: 重要
-      layer: L2
-    - node_id: optical_module
-      name: 高速光模块(800G/1.6T/CPO)
-      tier: 重要
-      layer: L2
-    - node_id: high_speed_switch
-      name: 高速网络交换机
-      tier: 重要
-      layer: L2
-    - node_id: pcb_connector
-      name: 高速PCB与铜连接器
-      tier: 重要
-      layer: L2
-    - node_id: power_management_chip
-      name: AI服务器电源管理芯片
-      tier: 配套
-      layer: L2
+        representative_stocks:
+          - symbol: '300738'
+            name: 奥飞数据
+            rationale: 算力租赁+智算中心运营双轮驱动
+          - symbol: '000977'
+            name: 浪潮信息
+            rationale: AI服务器龙头，旗下浪潮云提供算力租赁服务
+      - node_id: eda_tool
+        name: 芯片设计EDA工具
+        tier: 核心
+        layer: L2
+        representative_stocks:
+          - symbol: '688206'
+            name: 概伦电子
+            rationale: EDA国产替代龙头，SPICE仿真/建模国内领先
+          - symbol: '688107'
+            name: 安路科技
+            rationale: 国产FPGA EDA工具链，受益于国产替代加速
+          - symbol: '300661'
+            name: 圣邦股份
+            rationale: 模拟芯片设计龙头，EDA生态受益者
+      - node_id: fab_equipment
+        name: 半导体制造设备
+        tier: 核心
+        layer: L2
+        representative_stocks:
+          - symbol: '002371'
+            name: 北方华创
+            rationale: 国产半导体设备平台龙头，刻蚀/薄膜/PVD全覆盖
+          - symbol: '688012'
+            name: 中微公司
+            rationale: 国产刻蚀/MOCVD龙头，3D NAND/先进工艺核心设备商
+          - symbol: '688072'
+            name: 拓荆科技
+            rationale: 国产CVD/PVD薄膜沉积设备龙头，28nm全流程覆盖
+          - symbol: '688037'
+            name: 芯源微
+            rationale: 涂胶显影+去胶设备国产替代先锋
+      - node_id: wafer_substrate
+        name: 大硅片与衬底材料
+        tier: 配套
+        layer: L2
+        representative_stocks:
+          - symbol: '688126'
+            name: 沪硅产业
+            rationale: 国产大硅片龙头，12英寸正片已导入多家头部产线
+          - symbol: '300054'
+            name: 鼎龙股份
+            rationale: CMP抛光垫龙头，半导体材料平台型公司
+          - symbol: '688019'
+            name: 安集科技
+            rationale: CMP抛光液国产替代领先，多产品线导入产线
+      - node_id: advanced_packaging
+        name: 先进封装(CoWoS/Chiplet)
+        tier: 核心
+        layer: L2
+        representative_stocks:
+          - symbol: '600584'
+            name: 长电科技
+            rationale: 国产封测龙头，Chiplet/CoWoS先进封装产能领先
+          - symbol: '002156'
+            name: 通富微电
+            rationale: AMD核心封测伙伴，Chiplet封装技术储备深厚
+          - symbol: '688362'
+            name: 甬矽电子
+            rationale: SiP/Fan-out先进封测新锐，Chiplet布局积极
+      - node_id: ai_chip
+        name: AI训练/推理芯片(GPU/NPU/ASIC)
+        tier: 核心
+        layer: L2
+        representative_stocks:
+          - symbol: '688256'
+            name: 寒武纪
+            rationale: 国产AI训练芯片龙头，思元系列已落地互联网/运营商
+          - symbol: '688041'
+            name: 海光信息
+            rationale: 深算系列DCU对标CUDA生态，国产替代核心标的
+          - symbol: '300474'
+            name: 景嘉微
+            rationale: GPU国产替代先行者，JM系列已适配LLM推理
+      - node_id: hbm_memory
+        name: 高带宽存储(HBM)
+        tier: 核心
+        layer: L2
+        representative_stocks:
+          - symbol: '603986'
+            name: 兆易创新
+            rationale: 国产存储龙头，DRAM/NOR Flash全覆盖，HBM产业链受益
+          - symbol: '301308'
+            name: 江波龙
+            rationale: 存储模组龙头，企业级SSD/LPDDR受益于AI需求爆发
+          - symbol: '688110'
+            name: 东芯股份
+            rationale: 国产NAND/DRAM设计公司，存储国产化受益
+      - node_id: ai_server
+        name: AI服务器及系统集成
+        tier: 重要
+        layer: L2
+        representative_stocks:
+          - symbol: '000977'
+            name: 浪潮信息
+            rationale: 国内AI服务器出货量第一，英伟达核心合作伙伴
+          - symbol: '601138'
+            name: 工业富联
+            rationale: 英伟达AI服务器主力ODM，GH200/B200全线生产
+          - symbol: '603019'
+            name: 中科曙光
+            rationale: 国产AI服务器&超算龙头，海光CPU+DCU生态
+          - symbol: '000938'
+            name: 紫光股份
+            rationale: 新华三AI服务器+交换机全栈，运营商/政企AI基建主力
+      - node_id: optical_module
+        name: 高速光模块(800G/1.6T/CPO)
+        tier: 重要
+        layer: L2
+        representative_stocks:
+          - symbol: '300308'
+            name: 中际旭创
+            rationale: 全球800G光模块龙头，1.6T产品线率先出样
+          - symbol: '300502'
+            name: 新易盛
+            rationale: 800G/1.6T产品线完整，北美云厂商核心供应商
+          - symbol: '300394'
+            name: 天孚通信
+            rationale: 光模块上游器件/光引擎龙头，800G/1.6T核心受益
+          - symbol: '688313'
+            name: 仕佳光子
+            rationale: PLC/AWG光芯片国产替代，数据中心光互联受益
+      - node_id: high_speed_switch
+        name: 高速网络交换机
+        tier: 重要
+        layer: L2
+        representative_stocks:
+          - symbol: '000938'
+            name: 紫光股份
+            rationale: 新华三交换机国内第一，800G交换机批量出货
+          - symbol: '688702'
+            name: 盛科通信
+            rationale: 国产以太网交换芯片龙头，400G/800G芯片在研
+          - symbol: '300353'
+            name: 东土科技
+            rationale: 工业以太网交换芯片/设备，国产替代受益
+      - node_id: pcb_connector
+        name: 高速PCB与铜连接器
+        tier: 重要
+        layer: L2
+        representative_stocks:
+          - symbol: '002463'
+            name: 沪电股份
+            rationale: AI服务器高多层PCB龙头，深绑英伟达/AMD
+          - symbol: '002916'
+            name: 深南电路
+            rationale: 通信+服务器PCB双龙头，ABF载板国产化先驱
+          - symbol: '002938'
+            name: 鹏鼎控股
+            rationale: 全球PCB龙头，AI服务器/交换机HDI需求受益
+          - symbol: '603005'
+            name: 晶方科技
+            rationale: TSV/CIS封装龙头，Chiplet封测平台受益
+      - node_id: power_management_chip
+        name: AI服务器电源管理芯片
+        tier: 配套
+        layer: L2
 
     # ═══ L3 平台软件层（3 个） ═══
-    - node_id: computing_scheduling
-      name: 算力调度与CUDA兼容生态
-      tier: 核心
-      layer: L3
-    - node_id: training_platform
-      name: 大模型训推平台/MLOps
-      tier: 重要
-      layer: L3
-    - node_id: ai_framework
-      name: AI开发框架与工具链
-      tier: 重要
-      layer: L3
+        representative_stocks:
+          - symbol: '300661'
+            name: 圣邦股份
+            rationale: 模拟芯片设计龙头，电源管理芯片产品线丰富
+          - symbol: '688798'
+            name: 艾为电子
+            rationale: 电源管理+信号链芯片国产替代，AI服务器受益
+          - symbol: '300671'
+            name: 富满微
+            rationale: 电源管理芯片设计，快充/服务器电源芯片受益
+      - node_id: computing_scheduling
+        name: 算力调度与CUDA兼容生态
+        tier: 核心
+        layer: L3
+        representative_stocks:
+          - symbol: '688568'
+            name: 中科星图
+            rationale: 国产算力调度平台，空天信息+AI算力融合
+          - symbol: '300496'
+            name: 中科创达
+            rationale: 智能操作系统龙头，CUDA兼容生态/异构计算布局
+          - symbol: '688207'
+            name: 格灵深瞳
+            rationale: AI算力调度/算法平台，城市AIoT场景落地
+      - node_id: training_platform
+        name: 大模型训推平台/MLOps
+        tier: 重要
+        layer: L3
+        representative_stocks:
+          - symbol: '002230'
+            name: 科大讯飞
+            rationale: 讯飞星火大模型+训推平台，国产MLOps引领者
+          - symbol: '300418'
+            name: 昆仑万维
+            rationale: 天工大模型+AI平台，AI搜索/Agent应用布局
+          - symbol: '688327'
+            name: 云从科技
+            rationale: 人机协同平台+行业AI，AI训推一体平台
+      - node_id: ai_framework
+        name: AI开发框架与工具链
+        tier: 重要
+        layer: L3
 
     # ═══ L4 大模型层（2 个） ═══
-    - node_id: foundation_model
-      name: 基座大模型(文本/多模态)
-      tier: 核心
-      layer: L4
-    - node_id: inference_optimization
-      name: 推理优化与模型压缩
-      tier: 重要
-      layer: L4
+        representative_stocks:
+          - symbol: '300496'
+            name: 中科创达
+            rationale: 智能操作系统+AI开发工具链，异构计算框架
+          - symbol: '002230'
+            name: 科大讯飞
+            rationale: 讯飞开放平台+AI开发框架，开发者生态丰富
+          - symbol: '300229'
+            name: 拓尔思
+            rationale: AI+大数据平台，知识图谱/NLP开发工具链
+      - node_id: foundation_model
+        name: 基座大模型(文本/多模态)
+        tier: 核心
+        layer: L4
+        representative_stocks:
+          - symbol: '002230'
+            name: 科大讯飞
+            rationale: 星火大模型国产第一梯队，教育/医疗等垂域领先
+          - symbol: '300418'
+            name: 昆仑万维
+            rationale: 天工大模型3.0发布，AI搜索/多模态能力领先
+          - symbol: '688327'
+            name: 云从科技
+            rationale: 从容大模型+行业Agent，政企AI应用深度绑定
+          - symbol: '688088'
+            name: 虹软科技
+            rationale: 视觉AI大模型，手机/汽车端侧模型落地领先
+      - node_id: inference_optimization
+        name: 推理优化与模型压缩
+        tier: 重要
+        layer: L4
 
     # ═══ L5 应用与服务层（4 个） ═══
-    - node_id: ai_agent
-      name: AI Agent与智能体平台
-      tier: 重要
-      layer: L5
-    - node_id: ai_appliance
-      name: AI终端端侧应用
-      tier: 重要
-      layer: L5
-    - node_id: industry_solution
-      name: 行业AI解决方案(金融/医疗等)
-      tier: 配套
-      layer: L5
-    - node_id: ai_security
-      name: AI安全与模型对齐
-      tier: 配套
-      layer: L5
+        representative_stocks:
+          - symbol: '688568'
+            name: 中科星图
+            rationale: 空天信息AI推理优化，遥感推理模型效率领先
+          - symbol: '300624'
+            name: 万兴科技
+            rationale: AI创意软件龙头，端侧推理优化/模型压缩
+          - symbol: '688088'
+            name: 虹软科技
+            rationale: 端侧AI推理引擎优化，手机/汽车端侧部署领先
+      - node_id: ai_agent
+        name: AI Agent与智能体平台
+        tier: 重要
+        layer: L5
+        representative_stocks:
+          - symbol: '002230'
+            name: 科大讯飞
+            rationale: 讯飞AI Agent平台，教育/医疗/政企多场景落地
+          - symbol: '300418'
+            name: 昆仑万维
+            rationale: 天工AI Agent+搜索，AI应用/社交布局前瞻
+          - symbol: '688327'
+            name: 云从科技
+            rationale: 金融/安防AI Agent，大模型+行业客户深度绑定
+      - node_id: ai_appliance
+        name: AI终端端侧应用
+        tier: 重要
+        layer: L5
+        representative_stocks:
+          - symbol: '688088'
+            name: 虹软科技
+            rationale: 手机/汽车端侧AI视觉方案，AI终端端侧部署龙头
+          - symbol: '300496'
+            name: 中科创达
+            rationale: 智能终端OS+AI，AI PC/智能汽车/物联网全场景
+          - symbol: '002230'
+            name: 科大讯飞
+            rationale: AI智能硬件(学习机/办公本)终端落地规模化
+          - symbol: '300624'
+            name: 万兴科技
+            rationale: AI创意软件+AI终端应用，AI PC/移动端全覆盖
+      - node_id: industry_solution
+        name: 行业AI解决方案(金融/医疗等)
+        tier: 配套
+        layer: L5
+        representative_stocks:
+          - symbol: '002230'
+            name: 科大讯飞
+            rationale: 教育AI/医疗AI/智慧城市，行业AI解决方案最全面
+          - symbol: '688327'
+            name: 云从科技
+            rationale: 金融/安防/交通AI方案，政企行业AI深度绑定
+          - symbol: '300229'
+            name: 拓尔思
+            rationale: 政府/媒体/金融AI大数据方案，AI+知识图谱深耕
+          - symbol: '300454'
+            name: 深信服
+            rationale: 网络安全+AI融合方案，政企云安全/AI安全布局
+      - node_id: ai_security
+        name: AI安全与模型对齐
+        tier: 配套
+        layer: L5
 
+        representative_stocks:
+          - symbol: '300454'
+            name: 深信服
+            rationale: 网络安全+AI安全龙头，AI安全检测/数据安全方案
+          - symbol: '688023'
+            name: 安恒信息
+            rationale: 数据安全/AI安全检测，AI生成内容鉴别布局领先
+          - symbol: '300229'
+            name: 拓尔思
+            rationale: AI内容安全/舆情监测，大模型安全评测布局
   新能源:
     concept_code: '301079'
     description: 光伏、储能、风电、氢能、新能源汽车等清洁能源产业
     display_name: 新能源
     child_concepts:
-    - code: '301079'
-      name: 光伏概念
-    - code: '306380'
-      name: 储能
-    - code: '300200'
-      name: 风电
-    - code: '308491'
-      name: 氢能源
-    - code: '300733'
-      name: 锂电池概念
-    - code: '300008'
-      name: 新能源汽车
-    - code: '301096'
-      name: 钠离子电池
-    - code: '308294'
-      name: 固态电池
-    - code: '300786'
-      name: 充电桩
-    - code: '308760'
-      name: 绿色电力
-    - code: '300353'
-      name: 特高压
-    - code: '308761'
-      name: 虚拟电厂
-    - code: '300037'
-      name: 智能电网
+      - code: '301079'
+        name: 光伏概念
+      - code: '306380'
+        name: 储能
+      - code: '300200'
+        name: 风电
+      - code: '308491'
+        name: 氢能源
+      - code: '300733'
+        name: 锂电池概念
+      - code: '300008'
+        name: 新能源汽车
+      - code: '301096'
+        name: 钠离子电池
+      - code: '308294'
+        name: 固态电池
+      - code: '300786'
+        name: 充电桩
+      - code: '308760'
+        name: 绿色电力
+      - code: '300353'
+        name: 特高压
+      - code: '308761'
+        name: 虚拟电厂
+      - code: '300037'
+        name: 智能电网
     ingest_keywords:
-    - 光伏
-    - 储能
-    - 锂电
-    - 新能源汽车
-    - 风电
-    - 氢能
-    - 新型储能
-    - 充电
-    - 电池
-    - 绿色电力
+      - 光伏
+      - 储能
+      - 锂电
+      - 新能源汽车
+      - 风电
+      - 氢能
+      - 新型储能
+      - 充电
+      - 电池
+      - 绿色电力
     llm_aliases:
-    - 新能源汽车产业
-    - 光伏组件综合利用产业
-    - 充换电基础设施
-    - 绿色低碳产业
-    - 新能源、新材料及节能环保等战略新兴行业
-    - 电力市场
-    - 水电
-    - 煤炭产业
-    - 输电权市场化交易
-    - 光伏组件高效分离技术装备
-    - 新型电力系统
-    - 智能电网
-    - 核电行业
-    - 电力行业
-    - 非化石能源电力消费
-    - 存量常规水电绿证
+      - 新能源汽车产业
+      - 光伏组件综合利用产业
+      - 充换电基础设施
+      - 绿色低碳产业
+      - 新能源、新材料及节能环保等战略新兴行业
+      - 电力市场
+      - 水电
+      - 煤炭产业
+      - 输电权市场化交易
+      - 光伏组件高效分离技术装备
+      - 新型电力系统
+      - 智能电网
+      - 核电行业
+      - 电力行业
+      - 非化石能源电力消费
+      - 存量常规水电绿证
   低空经济:
     concept_code: '309115'
     description: 无人机、eVTOL、通用航空、商业航天等低空产业
     display_name: 低空经济
     child_concepts:
-    - code: '309115'
-      name: 低空经济
-    - code: '309113'
-      name: 飞行汽车(eVTOL)
-    - code: '300889'
-      name: 无人机
-    - code: '309130'
-      name: 商业航天
-    - code: '300722'
-      name: 卫星导航
+      - code: '309115'
+        name: 低空经济
+      - code: '309113'
+        name: 飞行汽车(eVTOL)
+      - code: '300889'
+        name: 无人机
+      - code: '309130'
+        name: 商业航天
+      - code: '300722'
+        name: 卫星导航
     ingest_keywords:
-    - 低空
-    - eVTOL
-    - 无人机
-    - 通用航空
-    - 低空飞行
-    - 商业航天
+      - 低空
+      - eVTOL
+      - 无人机
+      - 通用航空
+      - 低空飞行
+      - 商业航天
     llm_aliases:
-    - 低空基础设施
-    - 无人驾驶航空器
-    - 通用航空
+      - 低空基础设施
+      - 无人驾驶航空器
+      - 通用航空
   数字经济:
     concept_code: '308870'
     description: 数据要素、工业互联网、5G、物联网等数字经济产业
     display_name: 数字经济
     child_concepts:
-    - code: '308870'
-      name: 数字经济
-    - code: '309060'
-      name: 数据要素
-    - code: '301780'
-      name: 工业互联网
-    - code: '300843'
-      name: 5G
-    - code: '300378'
-      name: 物联网
-    - code: '308801'
-      name: 数据安全
-    - code: '309037'
-      name: 数据确权
-    - code: '301997'
-      name: 数字货币
-    - code: '308977'
-      name: F5G概念
-    - code: '300180'
-      name: 时空大数据
-    - code: '308477'
-      name: 电力物联网
-    - code: '302045'
-      name: 区块链
-    - code: '308642'
-      name: 数据中心(AIDC)
-    - code: '308479'
-      name: 数字孪生
-    - code: '309020'
-      name: 信创
-    - code: '300419'
-      name: 云计算
+      - code: '308870'
+        name: 数字经济
+      - code: '309060'
+        name: 数据要素
+      - code: '301780'
+        name: 工业互联网
+      - code: '300843'
+        name: 5G
+      - code: '300378'
+        name: 物联网
+      - code: '308801'
+        name: 数据安全
+      - code: '309037'
+        name: 数据确权
+      - code: '301997'
+        name: 数字货币
+      - code: '308977'
+        name: F5G概念
+      - code: '300180'
+        name: 时空大数据
+      - code: '308477'
+        name: 电力物联网
+      - code: '302045'
+        name: 区块链
+      - code: '308642'
+        name: 数据中心(AIDC)
+      - code: '308479'
+        name: 数字孪生
+      - code: '309020'
+        name: 信创
+      - code: '300419'
+        name: 云计算
     ingest_keywords:
-    - 数字经济
-    - 数据要素
-    - 工业互联网
-    - 数字化
-    - 算网
-    - 5G
-    - 物联网
-    - 数据安全
+      - 数字经济
+      - 数据要素
+      - 工业互联网
+      - 数字化
+      - 算网
+      - 5G
+      - 物联网
+      - 数据安全
     llm_aliases:
-    - 数字中国
-    - 数据要素市场
-    - 数字化转型
+      - 数字中国
+      - 数据要素市场
+      - 数字化转型
   医药创新:
     concept_code: '308014'
     description: 创新药、生物医药、医疗器械、中药等医药健康产业
     display_name: 生物医药
     child_concepts:
-    - code: '308014'
-      name: 创新药
-    - code: '309129'
-      name: 合成生物
-    - code: '301505'
-      name: 医疗器械概念
-    - code: '300106'
-      name: 生物疫苗
-    - code: '301565'
-      name: 医药电商
-    - code: '300682'
-      name: 智能医疗
-    - code: '308537'
-      name: 动物疫苗
-    - code: '301146'
-      name: 基因测序
-    - code: '308535'
-      name: 脑机接口
-    - code: '301543'
-      name: 细胞免疫治疗
-    - code: '308712'
-      name: 医美概念
-    - code: '300435'
-      name: 转基因
+      - code: '308014'
+        name: 创新药
+      - code: '309129'
+        name: 合成生物
+      - code: '301505'
+        name: 医疗器械概念
+      - code: '300106'
+        name: 生物疫苗
+      - code: '301565'
+        name: 医药电商
+      - code: '300682'
+        name: 智能医疗
+      - code: '308537'
+        name: 动物疫苗
+      - code: '301146'
+        name: 基因测序
+      - code: '308535'
+        name: 脑机接口
+      - code: '301543'
+        name: 细胞免疫治疗
+      - code: '308712'
+        name: 医美概念
+      - code: '300435'
+        name: 转基因
     ingest_keywords:
-    - 创新药
-    - 生物医药
-    - 医疗器械
-    - 集采
-    - 医保
+      - 创新药
+      - 生物医药
+      - 医疗器械
+      - 集采
+      - 医保
     llm_aliases:
-    - 医药创新
-    - 中医药服务贸易
-    - 药品零售行业
+      - 医药创新
+      - 中医药服务贸易
+      - 药品零售行业
   消费内需:
     concept_code: '308384'
     description: 消费电子、汽车消费、跨境电商、以旧换新等内需消费
     display_name: 扩大内需
     child_concepts:
-    - code: '308384'
-      name: 消费电子概念
-    - code: '300008'
-      name: 新能源汽车
-    - code: '308507'
-      name: 华为汽车
-    - code: '301564'
-      name: 跨境电商
-    - code: '301471'
-      name: 汽车电子
-    - code: '308725'
-      name: 汽车芯片
-    - code: '309094'
-      name: 长安汽车概念
-    - code: '308588'
-      name: 宠物经济
-    - code: '309113'
-      name: 飞行汽车(eVTOL)
-    - code: '308657'
-      name: 免税店
-    - code: '308694'
-      name: 汽车拆解概念
-    - code: '308805'
-      name: 汽车热管理
-    - code: '309106'
-      name: 小米汽车
-    - code: '301494'
-      name: 养老概念
-    - code: '308814'
-      name: 预制菜
+      - code: '308384'
+        name: 消费电子概念
+      - code: '300008'
+        name: 新能源汽车
+      - code: '308507'
+        name: 华为汽车
+      - code: '301564'
+        name: 跨境电商
+      - code: '301471'
+        name: 汽车电子
+      - code: '308725'
+        name: 汽车芯片
+      - code: '309094'
+        name: 长安汽车概念
+      - code: '308588'
+        name: 宠物经济
+      - code: '309113'
+        name: 飞行汽车(eVTOL)
+      - code: '308657'
+        name: 免税店
+      - code: '308694'
+        name: 汽车拆解概念
+      - code: '308805'
+        name: 汽车热管理
+      - code: '309106'
+        name: 小米汽车
+      - code: '301494'
+        name: 养老概念
+      - code: '308814'
+        name: 预制菜
     ingest_keywords:
-    - 消费电子
-    - 以旧换新
-    - 促消费
-    - 内需
-    - 消费品
-    - 跨境电商
-    - 智能终端
-    - 可穿戴
+      - 消费电子
+      - 以旧换新
+      - 促消费
+      - 内需
+      - 消费品
+      - 跨境电商
+      - 智能终端
+      - 可穿戴
     llm_aliases:
-    - 丝路电商
-    - 消费升级
-    - 电子商务
+      - 丝路电商
+      - 消费升级
+      - 电子商务
   环保节能:
     concept_code: '308728'
     description: 节能降碳、碳中和、绿色转型、环保治理
     display_name: 绿色低碳
     child_concepts:
-    - code: '308728'
-      name: 碳中和
-    - code: '300261'
-      name: 建筑节能
-    - code: '308760'
-      name: 绿色电力
-    - code: '300221'
-      name: 固废处理
-    - code: '308566'
-      name: 垃圾分类
-    - code: '300931'
-      name: 碳交易
-    - code: '300374'
-      name: 污水处理
+      - code: '308728'
+        name: 碳中和
+      - code: '300261'
+        name: 建筑节能
+      - code: '308760'
+        name: 绿色电力
+      - code: '300221'
+        name: 固废处理
+      - code: '308566'
+        name: 垃圾分类
+      - code: '300931'
+        name: 碳交易
+      - code: '300374'
+        name: 污水处理
     ingest_keywords:
-    - 节能降碳
-    - 碳中和
-    - 生态保护
-    - 绿色转型
+      - 节能降碳
+      - 碳中和
+      - 生态保护
+      - 绿色转型
     llm_aliases:
-    - 节能降碳
-    - 污水处理
-    - 绿色低碳产业
+      - 节能降碳
+      - 污水处理
+      - 绿色低碳产业
   基建交通:
     concept_code: '300345'
     description: 基础设施、交通、铁路、水利等传统基建
     display_name: 新型基础设施
     child_concepts:
-    - code: '300345'
-      name: 水利
-    - code: '300261'
-      name: 建筑节能
-    - code: '301179'
-      name: 冷链物流
-    - code: '307826'
-      name: 水泥概念
-    - code: '301797'
-      name: 智能物流
-    - code: '305794'
-      name: 装配式建筑
+      - code: '300345'
+        name: 水利
+      - code: '300261'
+        name: 建筑节能
+      - code: '301179'
+        name: 冷链物流
+      - code: '307826'
+        name: 水泥概念
+      - code: '301797'
+        name: 智能物流
+      - code: '305794'
+        name: 装配式建筑
     ingest_keywords:
-    - 基础设施
-    - 交通
-    - 铁路
-    - 水利
+      - 基础设施
+      - 交通
+      - 铁路
+      - 水利
     llm_aliases:
-    - 城市更新
-    - 国家高速公路网
-    - 机场群
-    - 高速铁路
+      - 城市更新
+      - 国家高速公路网
+      - 机场群
+      - 高速铁路
   金融国资:
     concept_code: '309034'
     description: 国资改革、资本市场改革、互联网金融
     display_name: 国资改革
     child_concepts:
-    - code: '309034'
-      name: 国企改革
-    - code: '301546'
-      name: 央企国企改革
-    - code: '301209'
-      name: 互联网金融
-    - code: '308874'
-      name: 国资云
-    - code: '300018'
-      name: 参股保险
-    - code: '301270'
-      name: 参股银行
-    - code: '301628'
-      name: 互联网保险
-    - code: '301402'
-      name: 上海国企改革
-    - code: '301171'
-      name: 深圳国企改革
-    - code: '301997'
-      name: 数字货币
+      - code: '309034'
+        name: 国企改革
+      - code: '301546'
+        name: 央企国企改革
+      - code: '301209'
+        name: 互联网金融
+      - code: '308874'
+        name: 国资云
+      - code: '300018'
+        name: 参股保险
+      - code: '301270'
+        name: 参股银行
+      - code: '301628'
+        name: 互联网保险
+      - code: '301402'
+        name: 上海国企改革
+      - code: '301171'
+        name: 深圳国企改革
+      - code: '301997'
+        name: 数字货币
     ingest_keywords:
-    - 国有资本
-    - 国资改革
-    - 资本市场改革
-    - 注册制改革
+      - 国有资本
+      - 国资改革
+      - 资本市场改革
+      - 注册制改革
     llm_aliases:
-    - 新三板
-    - 海南自由贸易港
+      - 新三板
+      - 海南自由贸易港
   军工国防:
     concept_code: '300082'
     description: 国防军工、军民融合、武器装备
     display_name: 国防军工
     child_concepts:
-    - code: '300082'
-      name: 军工
-    - code: '301786'
-      name: 军民融合
-    - code: '301470'
-      name: 航空发动机
-    - code: '309051'
-      name: 毫米波雷达
-    - code: '309128'
-      name: 军工信息化
-    - code: '309130'
-      name: 商业航天
-    - code: '300889'
-      name: 无人机
+      - code: '300082'
+        name: 军工
+      - code: '301786'
+        name: 军民融合
+      - code: '301470'
+        name: 航空发动机
+      - code: '309051'
+        name: 毫米波雷达
+      - code: '309128'
+        name: 军工信息化
+      - code: '309130'
+        name: 商业航天
+      - code: '300889'
+        name: 无人机
     ingest_keywords:
-    - 国防
-    - 军工
-    - 武器装备
-    - 航天
-    - 军民融合
+      - 国防
+      - 军工
+      - 武器装备
+      - 航天
+      - 军民融合
     llm_aliases: []
   农业粮食:
     concept_code: '308956'
     description: 粮食安全、种业振兴、乡村振兴、农业现代化
     display_name: 粮食安全
     child_concepts:
-    - code: '308956'
-      name: 粮食概念
-    - code: '300923'
-      name: 生态农业
-    - code: '300836'
-      name: 乡村振兴
-    - code: '308016'
-      name: 农业种植
-    - code: '301104'
-      name: 化肥
-    - code: '301306'
-      name: 农机
-    - code: '300858'
-      name: 土地流转
-    - code: '300435'
-      name: 转基因
-    - code: '300451'
-      name: 猪肉
+      - code: '308956'
+        name: 粮食概念
+      - code: '300923'
+        name: 生态农业
+      - code: '300836'
+        name: 乡村振兴
+      - code: '308016'
+        name: 农业种植
+      - code: '301104'
+        name: 化肥
+      - code: '301306'
+        name: 农机
+      - code: '300858'
+        name: 土地流转
+      - code: '300435'
+        name: 转基因
+      - code: '300451'
+        name: 猪肉
     ingest_keywords:
-    - 粮食安全
-    - 种业振兴
-    - 乡村振兴
-    - 农业农村现代化
+      - 粮食安全
+      - 种业振兴
+      - 乡村振兴
+      - 农业农村现代化
     llm_aliases:
-    - 智慧农业
+      - 智慧农业
   新质生产力:
     concept_code: '309177'
     description: 新质生产力、未来产业、先进制造业
     display_name: 新质生产力
     child_concepts:
-    - code: '309177'
-      name: 同花顺新质50
-    - code: '300890'
-      name: 高端装备
-    - code: '309108'
-      name: 可控核聚变
-    - code: '300830'
-      name: 量子科技
-    - code: '308535'
-      name: 脑机接口
-    - code: '309119'
-      name: 人形机器人
-    - code: '309130'
-      name: 商业航天
-    - code: '308740'
-      name: 专精特新
-    - code: '309055'
-      name: 6G概念
+      - code: '309177'
+        name: 同花顺新质50
+      - code: '300890'
+        name: 高端装备
+      - code: '309108'
+        name: 可控核聚变
+      - code: '300830'
+        name: 量子科技
+      - code: '308535'
+        name: 脑机接口
+      - code: '309119'
+        name: 人形机器人
+      - code: '309130'
+        name: 商业航天
+      - code: '308740'
+        name: 专精特新
+      - code: '309055'
+        name: 6G概念
     ingest_keywords:
-    - 新质生产力
-    - 未来产业
-    - 先进制造业
-    - 现代化产业体系
+      - 新质生产力
+      - 未来产业
+      - 先进制造业
+      - 现代化产业体系
     llm_aliases:
-    - 科技型企业孵化器
-    - 高端装备制造
-    - 中国制造
-    - 智能船舶
-    - 新一代智能制造
-    - 专精特新企业
-    - 创新型中小企业
+      - 科技型企业孵化器
+      - 高端装备制造
+      - 中国制造
+      - 智能船舶
+      - 新一代智能制造
+      - 专精特新企业
+      - 创新型中小企业
 unmapped_sectors:
-- 家政服务业
-- 环境健康科普宣传
-- 旅行服务出口
-- 综合物流集成商
-- 国际物流供应链系统
-- 存量常规水电绿证
+  - 家政服务业
+  - 环境健康科普宣传
+  - 旅行服务出口
+  - 综合物流集成商
+  - 国际物流供应链系统
+  - 存量常规水电绿证

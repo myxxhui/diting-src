@@ -770,9 +770,43 @@ def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes:
             + "</div>"
         )
 
+    # 统计来源
+    total_curated = sum(1 for n in bom_nodes for s in (n.get("stocks") or []) if s.get("stock_source") == "curated")
+    total_llm = total_stocks - total_curated
+
+    # ── 批量操作工具栏 ──
+    toolbar = f"""<div class="flex flex-wrap items-center gap-2 mb-3">
+  <span class="text-xs text-gray-500">🗂 {total_stocks} 只标的 · {total_curated} 代表 · {total_llm} 增补</span>
+  <button type="button" onclick="document.querySelectorAll('#ecosystem-stock-pool details').forEach(d=>d.open=true)"
+    class="text-[10px] px-2 py-0.5 rounded border border-gray-200 text-gray-500 hover:bg-gray-50">📋 全部展开</button>
+  <button type="button" onclick="document.querySelectorAll('#ecosystem-stock-pool details').forEach(d=>d.open=false)"
+    class="text-[10px] px-2 py-0.5 rounded border border-gray-200 text-gray-500 hover:bg-gray-50">📁 全部折叠</button>
+  <select onchange="filterStockPool(this.value)" class="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-500">
+    <option value="all">筛选：全部</option>
+    <option value="0.8">综合 ≥80</option>
+    <option value="0.6">综合 ≥60</option>
+    <option value="-0.6">综合 <60</option>
+  </select>
+  <button type="button"
+    class="text-[10px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+    hx-post="/api/strategic/boards/{board_id}/stock/batch-accept"
+    hx-target="#ecosystem-stock-pool" hx-swap="outerHTML">🎯 一键晋级</button>
+</div>
+<script>
+function filterStockPool(val) {{
+  const details = document.querySelectorAll('#ecosystem-stock-pool details');
+  details.forEach(d => {{
+    if (val === 'all') {{ d.style.display = ''; return; }}
+    const badge = d.querySelector('[data-composite]');
+    const score = parseFloat(badge?.dataset?.composite || '0');
+    const op = val.startsWith('-') ? (score < parseFloat(val)) : (score >= parseFloat(val));
+    d.style.display = op ? '' : 'none';
+  }});
+}}
+</script>"""
+
     # BOM 节点 × 标的池
     node_html = ""
-    total_stocks = 0
     for node in bom_nodes:
         nid = node.get("node_id", "?")
         name = node.get("name", "?")
@@ -781,7 +815,6 @@ def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes:
         rationale = node.get("rationale", "")
         layer_label = node.get("ecosystem_layer", "")
         stocks = node.get("stocks", [])
-        total_stocks += len(stocks)
 
         stock_rows = ""
         for st in stocks:
@@ -791,6 +824,13 @@ def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes:
             sd = st.get("scoring_detail") or {}
             ec = st.get("exclusion_check") or {}
             composite = sd.get("composite", 0)
+            stock_source = st.get("stock_source", "llm")
+
+            # 来源徽章
+            if stock_source == "curated":
+                source_badge = '<span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">🏷 代表标的</span>'
+            else:
+                source_badge = '<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">🤖 LLM 增补</span>'
 
             # 排除检查状态
             ec_ok = ec.get("passed", False)
@@ -802,6 +842,19 @@ def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes:
 
             # composite 颜色
             comp_color = "text-emerald-600" if composite >= 0.8 else "text-amber-600" if composite >= 0.6 else "text-rose-500"
+
+            # 操作按钮（HTMX · 可重入）
+            action_btns = f"""<span class="flex gap-1 ml-1" id="stock-actions-{board_id}-{sym}">
+  <button type="button" class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+    hx-post="/api/strategic/boards/{board_id}/stock/{sym}/accept"
+    hx-target="#stock-actions-{board_id}-{sym}" hx-swap="innerHTML"
+    hx-indicator="#stock-actions-{board_id}-{sym}">✓</button>
+  <button type="button" class="text-[10px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100"
+    hx-post="/api/strategic/boards/{board_id}/stock/{sym}/reject"
+    hx-target="#stock-row-{board_id}-{sym}" hx-swap="outerHTML">✗</button>
+  <button type="button" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100"
+    onclick="document.getElementById('score-edit-{board_id}-{sym}')?.classList.toggle('hidden')">📝</button>
+</span>"""
 
             # 5 因子明细
             factor_detail = ""
@@ -834,13 +887,15 @@ def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes:
                 )
 
             stock_rows += (
-                f"<details class='border rounded-lg mb-0.5'>"
+                f"<details class='border rounded-lg mb-0.5' data-composite='{composite}' id='stock-row-{board_id}-{sym}'>"
                 f"<summary class='flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-gray-50 text-xs'>"
                 f"<span class='font-mono font-medium'>{_esc(sym)}</span>"
                 f"<span class='font-medium'>{_esc(name_stock)}</span>"
                 f"<span class='text-[10px] text-gray-400 ml-1'>{_esc(pos)}</span>"
+                f"<span class='ml-1'>{source_badge}</span>"
                 f"<span class='ml-auto font-bold {comp_color}'>{composite:.0%}</span>"
                 f"{ec_badge}"
+                f"{action_btns}"
                 f"</summary>"
                 f"<div class='px-3 py-2 bg-gray-50/70'>"
                 f"<table class='w-full text-xs'>"
@@ -913,6 +968,25 @@ def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes:
     if not node_html:
         node_html = '<p class="text-xs text-gray-400 py-4 text-center">暂未生成标的池</p>'
 
+    # ── CVM 衔接区 ──
+    cvm_section = f"""<div class="mt-4 border border-blue-200 rounded-lg p-3 bg-blue-50/30">
+  <div class="flex items-center justify-between">
+    <div>
+      <p class="text-xs font-medium text-blue-800">🎯 向下游衔接</p>
+      <p class="text-[10px] text-blue-600 mt-0.5">已选标的将自动进入 CVM 矩阵进行 Gate-A 财务交叉验证</p>
+    </div>
+    <div class="flex gap-2">
+      <button type="button" class="text-[10px] px-2 py-1 rounded bg-white text-blue-700 border border-blue-200 hover:bg-blue-50"
+        hx-post="/api/strategic/boards/{board_id}/stock/preview-accepted" hx-target="#accepted-stock-preview" hx-swap="innerHTML">👁 预览已选标的</button>
+      <button type="button" class="text-[10px] px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+        hx-post="/api/strategic/boards/{board_id}/stock/push-to-cvm" hx-target="#cvm-push-result" hx-swap="innerHTML"
+        hx-confirm="确认将当前猎物池标的推送至 CVM 矩阵进行 Gate-A 验证？">🚀 推送到 CVM 矩阵</button>
+    </div>
+  </div>
+  <div id="accepted-stock-preview" class="mt-2"></div>
+  <div id="cvm-push-result" class="mt-2"></div>
+</div>"""
+
     return f"""<div id='ecosystem-section' class='mt-6 border border-emerald-200 rounded-lg p-4 bg-emerald-50/30'>
   <div class='flex items-center justify-between mb-3'>
     <h3 class='text-sm font-semibold text-gray-800'>
@@ -922,17 +996,21 @@ def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes:
     {refresh_btn}
   </div>
   {f'<div class="bg-white border border-emerald-100 rounded-lg p-3 mb-3 text-xs text-gray-700">💡 {_esc(thesis)}</div>' if thesis else ''}
-  <div class='grid grid-cols-1 md:grid-cols-3 gap-3 mb-3'>
-    <div class='bg-white border rounded-lg p-3'>
-      <p class='text-xs font-medium text-gray-700 mb-2'>🏗 产业生态位拓扑</p>
-      {topo_rows}
-    </div>
-    <div class='md:col-span-2'>
-      {node_html}
-      {additions_html}
-      {excluded_html}
+  <div id='ecosystem-stock-pool' class='space-y-2'>
+    {toolbar}
+    <div class='grid grid-cols-1 md:grid-cols-3 gap-3 mb-3'>
+      <div class='bg-white border rounded-lg p-3'>
+        <p class='text-xs font-medium text-gray-700 mb-2'>🏗 产业生态位拓扑</p>
+        {topo_rows}
+      </div>
+      <div class='md:col-span-2'>
+        {node_html}
+        {additions_html}
+        {excluded_html}
+      </div>
     </div>
   </div>
+  {cvm_section}
   {f'<p class="text-[10px] text-gray-400 italic mt-2">{_esc(disclaimer)}</p>' if disclaimer else ''}
 </div>"""
 

@@ -131,23 +131,56 @@ _BOM_GENERATION_SYSTEM_PROMPT = """你是一个中国 A 股产业链深度分解
 
 # ── System Prompt 构建函数（v3.0 · 支持动态 BOM 节点） ──
 
-def _build_bom_prompt(nodes: list[tuple[str, str, str]]) -> str:
-    """将 BOM 节点列表格式化为 Prompt 文本段。"""
+def _normalize_bom_node(node: Any) -> dict:
+    """将 BOM 节点归一化为规范 dict 格式（支持 tuple 和 dict 输入）。"""
+    if isinstance(node, dict):
+        return node
+    if isinstance(node, (list, tuple)) and len(node) >= 3:
+        d: dict = {"node_id": str(node[0]), "name": str(node[1]), "tier": str(node[2])}
+        if len(node) >= 4 and node[3]:
+            d["representative_stocks"] = node[3]
+        return d
+    return {"node_id": "?", "name": "?", "tier": "?"}
+
+
+def _build_bom_prompt(nodes: list[Any]) -> str:
+    """将 BOM 节点列表格式化为 Prompt 文本段（v3.0 · 含代表标的）。"""
     if not nodes:
         return "（暂无 BOM 白名单）"
-    return "\n".join(f"- [{tier}] {name} (node_id: {nid})" for nid, name, tier in nodes)
+    lines = []
+    for node in nodes:
+        nd = _normalize_bom_node(node)
+        nid = nd.get("node_id", "?")
+        name = nd.get("name", "?")
+        tier = nd.get("tier", "配套")
+        reps = nd.get("representative_stocks") or []
+        base = f"- [{tier}] {name} (node_id: {nid})"
+        if reps:
+            rep_texts = []
+            for r in reps[:4]:  # 最多展示 4 只，防 Prompt 过长
+                rname = r.get("name", r.get("symbol", ""))
+                rsym = r.get("symbol", "")
+                rep_texts.append(f"{rsym}({rname})")
+            base += f"\n  代表标的锚点: {', '.join(rep_texts)}"
+        lines.append(base)
+    return "\n".join(lines)
 
 
-def _build_system_prompt(bom_nodes: list[tuple[str, str, str]]) -> str:
-    """根据传入的 BOM 节点列表构建 System Prompt。"""
+def _build_system_prompt(bom_nodes: list[Any]) -> str:
+    """根据传入的 BOM 节点列表构建 System Prompt（v3.0 · 含代表标的锚点）。"""
     bom_text = _build_bom_prompt(bom_nodes)
     return f"""你是一个中国 A 股产业生态分析专家。你的任务是：
 给定一个政策重点赛道和用户选定的 A 股概念板块，根据下发的产业链 BOM 白名单，
 在每个节点范围内生成最具 3-5 年成长潜力的 A 股标的池。
 
-## BOM 白名单（你必须在此范围内映射标的，不得擅自增删）
+## BOM 白名单 + 代表标的锚点（你必须在此范围内映射标的，不得擅自增删）
 
 {bom_text}
+
+**关于「代表标的锚点」**：每个节点中标出的「代表标的」是架构师预先定义的核心参考标的。
+- 对于这些代表标的，你**必须**在输出中保留并完整评分。
+- 你还可以基于产业知识补充同节点的其他标的（如次龙头/新锐），但不得遗漏代表标的。
+- 补充的标的须遵循与代表标的相同的 5 因子评分标准。
 
 ## 标的选择与评分标准
 
@@ -184,6 +217,12 @@ composite = moat × 0.30 + growth × 0.25 + profit × 0.20 + localize × 0.15 + 
 3. 商誉 / 净资产 > 50%
 4. 近 2 年审计意见为「非标准无保留」
 
+## 标的来源标记
+
+输出时，每只标的须在 stock 字段内附带 `stock_source` 字段：
+- `"curated"`：该标的来自 BOM 白名单中的「代表标的锚点」
+- `"llm"`：该标的是你自行补充的
+
 ## 硬约束
 1. 你必须在 BOM 白名单所列节点范围内进行标的映射。不得擅自新增或删除。
 2. 如果你认为白名单外有值得考虑的新节点，写入 suggested_additions 字段。
@@ -191,7 +230,8 @@ composite = moat × 0.30 + growth × 0.25 + profit × 0.20 + localize × 0.15 + 
 4. 每个因子必须附带至少 2 条可验证的 evidence。
 5. 概念标签信息仅用于 policy_bond 加分判断，不可用于限制候选范围。
 6. 排除规则检查必须逐项执行，结果记录在 exclusion_check。
-7. 输出纯 JSON，不要额外解释。"""
+7. 若节点有架构师预设的代表标的锚点，你必须保留并打分，不得遗漏。
+8. 输出纯 JSON，不要额外解释。"""
 
 # ── User Prompt 模板 ──
 _ECOSYSTEM_PROMPT_TPL = Template("""## 赛道信息
@@ -265,6 +305,7 @@ _ECOSYSTEM_PROMPT_TPL = Template("""## 赛道信息
         {
           "symbol": "688256",
           "stock_name": "寒武纪",
+          "stock_source": "curated",
           "ecosystem_position": "AI训练芯片-上游-核心硬件",
           "scoring_detail": {
             "moat": {"score": 0.90, "evidence": ["证据1", "证据2"], "evidence_source": "基于训练知识"},
@@ -289,8 +330,10 @@ _ECOSYSTEM_PROMPT_TPL = Template("""## 赛道信息
 }
 ```
 
-仅输出 JSON，不要额外解释。""")
-
+**重要：每只标的需要增加 `stock_source` 字段**：
+- 来自 BOM 白名单「代表标的锚点」的 → `"stock_source": "curated"`
+- 你自行补充的 → `"stock_source": "llm"`
+""")
 
 def _render_prompt(
     sector: str,
@@ -534,11 +577,26 @@ def _validate_output(parsed: dict[str, Any], valid_node_ids: Optional[set[str]] 
     return None
 
 
-def _clean_output(parsed: dict[str, Any], valid_node_ids: set[str]) -> tuple[list[dict], list[str]]:
-    """宽松过滤：剔除不合格的标的 + 节点，返回 (cleaned_bom_nodes, warnings)。
+# ── 代表标的符号集合（用于判断 stock_source） ──
+def _build_curated_symbols(bom_nodes: list[Any]) -> set[str]:
+    """从 BOM 节点中提取代表标的的 symbol 集合。"""
+    curated = set()
+    for node in bom_nodes:
+        nd = _normalize_bom_node(node)
+        for r in (nd.get("representative_stocks") or []):
+            sym = r.get("symbol", "")
+            if sym:
+                curated.add(sym)
+    return curated
+
+
+def _clean_output(parsed: dict[str, Any], valid_node_ids: set[str], curated_symbols: set[str] | None = None) -> tuple[list[dict], list[str]]:
+    """宽松过滤：剔除不合格的标的 + 节点 + 标记标的来源，返回 (cleaned_bom_nodes, warnings)。
 
     不因个别标的缺分而拒绝整个 LLM 输出。
     """
+    if curated_symbols is None:
+        curated_symbols = set()
     bom_nodes = parsed.get("bom_nodes") or []
     if not bom_nodes:
         return [], ["输出中 bom_nodes 为空"]
@@ -562,12 +620,22 @@ def _clean_output(parsed: dict[str, Any], valid_node_ids: set[str]) -> tuple[lis
             for factor in ("moat", "growth", "profit", "localize"):
                 fv = sd.get(factor) or {}
                 if not isinstance(fv.get("score"), (int, float)):
-                    warnings.append(f"{symbol} 缺少 {factor}.score · 已剔除")
-                    drop = True
-                    break
+                    # 代表标的即使缺分也保留（降级为低置信度）
+                    if symbol in curated_symbols:
+                        fv["score"] = 0.5
+                        fv["evidence"] = fv.get("evidence", ["（代表标的·LLM 未生成功分，使用默认低分）"])
+                    else:
+                        warnings.append(f"{symbol} 缺少 {factor}.score · 已剔除")
+                        drop = True
+                        break
             if drop:
                 total_dropped_stocks += 1
                 continue
+            # 标记标的来源
+            if symbol in curated_symbols:
+                st["stock_source"] = "curated"
+            elif "stock_source" not in st:
+                st["stock_source"] = "llm"
             # 宽松：composite 缺填默认值
             if not isinstance(sd.get("composite"), (int, float)):
                 scores = [sd.get(f, {}).get("score", 0) for f in ("moat", "growth", "profit", "localize")]
@@ -600,14 +668,15 @@ def infer_ecosystem_stock_pool(
     display_name: str,
     z0_plus_breakdown: dict[str, Any],
     selected_concepts: list[dict[str, Any]],
-    bom_nodes: Optional[list[tuple[str, str, str]]] = None,
+    bom_nodes: Optional[list[dict]] = None,
     temperature: float = 0.2,
     max_tokens: int = 32000,
 ) -> dict[str, Any]:
     """同步调用 LLM 推断产业生态位 + BOM 节点标的池（v3.0 · 动态 BOM · 5 因子 + 证据链）。
 
     Args:
-        bom_nodes: 用户选定的 BOM 节点列表 [(node_id, name, tier), ...]；
+        bom_nodes: 用户选定的 BOM 节点列表，每项为 dict 格式
+                   {node_id, name, tier, representative_stocks?}。
                    为 None 时使用默认 _BOM_WHITELIST_NODES。
     Returns:
         {status, sector, bom_nodes, ecosystem_topology, investment_thesis,
@@ -618,7 +687,13 @@ def infer_ecosystem_stock_pool(
     # 确定使用的 BOM 列表 + 构建 system prompt
     effective_bom = bom_nodes if bom_nodes else _BOM_WHITELIST_NODES
     system_prompt = _build_system_prompt(effective_bom)
-    valid_node_ids = {nid for nid, _, _ in effective_bom}
+    # 自适应提取 valid_node_ids（兼容 dict 和 tuple 格式）
+    valid_node_ids = set()
+    for n in effective_bom:
+        if isinstance(n, dict):
+            valid_node_ids.add(n.get("node_id", ""))
+        elif isinstance(n, (list, tuple)) and len(n) >= 1:
+            valid_node_ids.add(str(n[0]))
 
     user_prompt = _render_prompt(
         sector=sector,
@@ -685,7 +760,8 @@ def infer_ecosystem_stock_pool(
         }
 
     # ── 服务端输出校验（宽松：过滤不合格标的，不拒绝整个结果） ──
-    cleaned_bom, warnings = _clean_output(parsed, valid_node_ids=valid_node_ids)
+    curated_symbols = _build_curated_symbols(effective_bom)
+    cleaned_bom, warnings = _clean_output(parsed, valid_node_ids=valid_node_ids, curated_symbols=curated_symbols)
     if warnings:
         logger.warning(f"LLM 输出校验警告: {warnings[:3]}")
     if not cleaned_bom:
@@ -856,8 +932,10 @@ __all__ = [
     "start_ecosystem_inference",
     "get_inference_task",
     "cancel_inference_task",
-    "_build_system_prompt",
+    "_normalize_bom_node",
     "_build_bom_prompt",
+    "_build_curated_symbols",
+    "_build_system_prompt",
     "_BOM_WHITELIST_NODES",
     "_VALID_NODE_IDS",
 ]
