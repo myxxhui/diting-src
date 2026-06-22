@@ -548,8 +548,11 @@ def infer_ecosystem_stock_pool(
         selected_concepts=selected_concepts,
     )
 
+    import time as _time
+    _t0 = _time.monotonic()
     dispatcher = AIDispatcher.default()
     try:
+        logger.info(f"[ecosystem] LLM 调用开始 | sector={sector} | bom_nodes={len(effective_bom)} | concepts={len(selected_concepts)} | max_tokens={max_tokens}")
         result = dispatcher.call(
             scene="genesis_ecosystem",
             messages=[
@@ -560,6 +563,8 @@ def infer_ecosystem_stock_pool(
             max_tokens=max_tokens,
             model_override="deepseek-v4-pro",
         )
+        _elapsed = _time.monotonic() - _t0
+        logger.info(f"[ecosystem] LLM 调用完成 | elapsed={_elapsed:.1f}s | len={len(result.text) if hasattr(result, 'text') else 'n/a'}")
     except Exception as exc:
         logger.exception("LLM 生态位推断调用失败")
         return {

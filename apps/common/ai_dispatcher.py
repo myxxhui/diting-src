@@ -115,6 +115,12 @@ def anthropic_read_timeout_sec(*, scene: Scene, max_tokens: int) -> float:
     return 120.0
 
 
+def deepseek_read_timeout_sec(*, scene: Scene, max_tokens: int) -> float:
+    """DeepSeek 读超时：按 max_tokens ÷ 50 tok/s 估算，加 60s 缓冲。"""
+    estimate = max(max_tokens / 50, 60)
+    return estimate + 60.0
+
+
 def anthropic_use_streaming(*, scene: Scene, max_tokens: int) -> bool:
     """长输出走流式；经 HTTP 代理时默认关闭（3proxy 对 SSE chunked 易 incomplete chunked read）。"""
     if anthropic_https_proxy_url():
@@ -160,6 +166,7 @@ Scene = Literal[
     "radar_assess",
     "radar_chat",
     "radar_distill",
+    "genesis_ecosystem",
 ]
 
 Route = Literal["remote", "deepseek", "local", "mock"]
@@ -176,6 +183,7 @@ _SCENE_ROUTE: dict[Scene, Route] = {
     "radar_assess": "remote",
     "radar_chat": "remote",
     "radar_distill": "deepseek",
+    "genesis_ecosystem": "deepseek",
 }
 
 
@@ -546,7 +554,8 @@ class AIDispatcher:
         try:
             import httpx  # noqa: PLC0415
 
-            client_kw: dict[str, Any] = {"timeout": httpx.Timeout(120.0, connect=30.0)}
+            read_to = deepseek_read_timeout_sec(scene=scene, max_tokens=max_tokens)
+            client_kw: dict[str, Any] = {"timeout": httpx.Timeout(read_to, connect=30.0)}
             payload: dict[str, Any] = {
                 "model": model,
                 "messages": messages,
