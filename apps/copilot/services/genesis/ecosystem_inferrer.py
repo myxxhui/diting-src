@@ -481,7 +481,10 @@ _VALID_NODE_IDS = {nid for nid, _, _ in _BOM_WHITELIST_NODES}
 
 
 def _validate_output(parsed: dict[str, Any], valid_node_ids: Optional[set[str]] = None) -> str | None:
-    """服务端校验 LLM 输出，返回错误信息字符串或 None（通过）。"""
+    """服务端校验 LLM 输出，返回错误信息字符串或 None（通过）。
+
+    注意：此函数仍为严格版（一个标的缺分即拒），infer_ecosystem_stock_pool 已改用 _clean_output() 做宽松过滤。
+    """
     if valid_node_ids is None:
         valid_node_ids = _VALID_NODE_IDS
     bom_nodes = parsed.get("bom_nodes") or []
@@ -495,7 +498,6 @@ def _validate_output(parsed: dict[str, Any], valid_node_ids: Optional[set[str]] 
         stocks = node.get("stocks") or []
         for st in stocks:
             sd = st.get("scoring_detail") or {}
-            # 必须包含 4 个核心因子
             for factor in ("moat", "growth", "profit", "localize"):
                 fv = sd.get(factor) or {}
                 if not isinstance(fv.get("score"), (int, float)):
@@ -503,16 +505,74 @@ def _validate_output(parsed: dict[str, Any], valid_node_ids: Optional[set[str]] 
                 ev = fv.get("evidence") or []
                 if len(ev) < 2:
                     return f"{st.get('symbol')} 的 {factor}.evidence 不足 2 条"
-            # composite 必须存在
             if not isinstance(sd.get("composite"), (int, float)):
                 return f"{st.get('symbol')} 缺少 composite"
-            # exclusion_check 必须存在
             ec = st.get("exclusion_check") or {}
             for key in ("st", "investigation", "goodwill_ratio_ok", "audit_clean", "passed"):
                 if key not in ec:
                     return f"{st.get('symbol')} 缺少 exclusion_check.{key}"
 
     return None
+
+
+def _clean_output(parsed: dict[str, Any], valid_node_ids: set[str]) -> tuple[list[dict], list[str]]:
+    """宽松过滤：剔除不合格的标的 + 节点，返回 (cleaned_bom_nodes, warnings)。
+
+    不因个别标的缺分而拒绝整个 LLM 输出。
+    """
+    bom_nodes = parsed.get("bom_nodes") or []
+    if not bom_nodes:
+        return [], ["输出中 bom_nodes 为空"]
+
+    cleaned: list[dict] = []
+    warnings: list[str] = []
+    total_dropped_stocks = 0
+    total_dropped_nodes = 0
+
+    for node in bom_nodes:
+        nid = node.get("node_id", "")
+        if nid not in valid_node_ids:
+            total_dropped_nodes += 1
+            continue
+        stocks = node.get("stocks") or []
+        kept_stocks = []
+        for st in stocks:
+            symbol = st.get("symbol") or st.get("symbol_name", "?")
+            sd = st.get("scoring_detail") or {}
+            drop = False
+            for factor in ("moat", "growth", "profit", "localize"):
+                fv = sd.get(factor) or {}
+                if not isinstance(fv.get("score"), (int, float)):
+                    warnings.append(f"{symbol} 缺少 {factor}.score · 已剔除")
+                    drop = True
+                    break
+            if drop:
+                total_dropped_stocks += 1
+                continue
+            # 宽松：composite 缺填默认值
+            if not isinstance(sd.get("composite"), (int, float)):
+                scores = [sd.get(f, {}).get("score", 0) for f in ("moat", "growth", "profit", "localize")]
+                sd["composite"] = round(sum(s for s in scores if isinstance(s, (int, float))) / max(len(scores), 1), 1)
+            # 宽松：exclusion_check 缺填默认通过
+            ec = st.get("exclusion_check") or {}
+            for key in ("st", "investigation", "goodwill_ratio_ok", "audit_clean", "passed"):
+                if key not in ec:
+                    ec[key] = True if key != "st" else None
+            st["exclusion_check"] = ec
+            kept_stocks.append(st)
+
+        if not kept_stocks:
+            total_dropped_nodes += 1
+            continue
+        node["stocks"] = kept_stocks
+        cleaned.append(node)
+
+    if total_dropped_stocks:
+        warnings.append(f"共剔除 {total_dropped_stocks} 个不合格标的（缺因子评分）")
+    if total_dropped_nodes:
+        warnings.append(f"共剔除 {total_dropped_nodes} 个无效节点")
+
+    return cleaned, warnings
 
 
 def infer_ecosystem_stock_pool(
@@ -605,19 +665,20 @@ def infer_ecosystem_stock_pool(
             "disclaimer": "当前 AI 服务配额已耗尽。",
         }
 
-    # ── 服务端输出校验 ──
-    validation_error = _validate_output(parsed, valid_node_ids=valid_node_ids)
-    if validation_error:
-        logger.warning(f"LLM 输出校验失败: {validation_error}")
+    # ── 服务端输出校验（宽松：过滤不合格标的，不拒绝整个结果） ──
+    cleaned_bom, warnings = _clean_output(parsed, valid_node_ids=valid_node_ids)
+    if warnings:
+        logger.warning(f"LLM 输出校验警告: {warnings[:3]}")
+    if not cleaned_bom:
         return {
             "status": "error",
-            "error": f"LLM 输出校验失败: {validation_error}",
+            "error": f"LLM 输出校验失败（无有效节点）: {'; '.join(warnings[:2])}",
             "raw_preview": content[:500],
             "disclaimer": "LLM 输出不符合 Schema 要求，请重试或优化 Prompt。",
         }
 
     # ── 转换输出格式（抽取 bom_nodes → 后端统一结构） ──
-    out_bom_nodes = parsed.get("bom_nodes", [])
+    out_bom_nodes = cleaned_bom
 
     return {
         "status": "ok",
@@ -630,6 +691,7 @@ def infer_ecosystem_stock_pool(
         "disclaimer": parsed.get(
             "disclaimer", "本标的池由 LLM 基于公开政策信息推断生成，不构成投资建议。需人工复核后使用。"
         ),
+        "warnings": warnings if warnings else None,
     }
 
 
