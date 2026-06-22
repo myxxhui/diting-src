@@ -130,7 +130,8 @@ sector_name 必须是产业、行业、经济领域名称，**禁止**使用以�
   "doc_metadata": {
     "impl_status": "已发布_待执行|已执行_进行中|已执行_完成|征求意见稿|废止_替代|状态未知",
     "impl_status_reasoning": "推断依据"
-  }
+  },
+  "selected_concepts": "概念名1,概念名2" // ★ v5.0 新增：从下方「概念板选项」中选出的相关概念名，逗号分隔；若都不相关则为 "NONE"
 }
 
 ## 实施工具包评分标准（implementation_toolkit · 0-10）
@@ -298,13 +299,53 @@ def assemble_context(
     return text
 
 
-def build_prompt(context: str) -> str:
-    """构建用户 Prompt — 无预设赛道列表，让 LLM 从文档中提取官方原名。"""
-    return f"""## 政策全文
+def _build_concept_options_all() -> str:
+    """v5.0: 从 YAML 读取全部 canonical_sectors 的 child_concepts，拼接为 LLM 选择列表。
+    
+    往返链路：LLM 输出 concept name → B2 阶段反向查找所属 canonical_sector。
+    """
+    cfg_path = Path(__file__).resolve().parents[4] / "data" / "config" / "metrics" / "z0_policy_keywords.yaml"
+    seen = set()
+    options: list[str] = []
+    try:
+        with cfg_path.open(encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        for sector_key, sector_cfg in (cfg.get("canonical_sectors") or {}).items():
+            for cc in sector_cfg.get("child_concepts") or []:
+                name = str(cc.get("name", "")).strip()
+                code = str(cc.get("code", "")).strip()
+                if name and name not in seen:
+                    seen.add(name)
+                    options.append(f"{name}({code})" if code else name)
+    except Exception:
+        pass
+    return ", ".join(options)
+
+
+def build_prompt(context: str, concept_options: str = "") -> str:
+    """构建用户 Prompt — 无预设赛道列表，让 LLM 从文档中提取官方原名。
+    
+    v5.0: 注入 A股概念板选项，LLM 直接从中多选。
+    """
+    concept_section = ""
+    if concept_options:
+        concept_section = f"""## A股概念板选项（v5.0 · 先读）
+
+本系统覆盖以下A股投资概念板。分析政策时请判断与哪些概念**直接相关**，选出0~N个，输出原始概念名，逗号分隔。都不相关输出 NONE。
+
+[{concept_options}]
+
+**选择原则**：具有实质性影响；宁缺毋滥。
+
+---
+
+"""
+
+    return f"""{concept_section}## 政策全文
 {context}
 
-请输出 JSON 格式的评分结果（包含 sectors、overall_assessment 和 doc_metadata）。
-赛道名称须使用文档中的官方原文术语，不得自行合并或简化。"""
+请输出 JSON（必须含 sectors、overall_assessment、high_value_flag、selected_concepts、doc_metadata 五字段）。
+selected_concepts 必须输出：从上方概念板选项中选中的名称（逗号分隔），都不相关则输出 "NONE"。"""
 
 
 def parse_llm_json(raw: str) -> dict[str, Any]:
@@ -382,6 +423,7 @@ def parse_llm_json(raw: str) -> dict[str, Any]:
         "sectors": validated,
         "overall_assessment": str(data.get("overall_assessment") or ""),
         "high_value_flag": bool(data.get("high_value_flag")),
+        "selected_concepts": str(data.get("selected_concepts") or ""),  # v5.0: LLM 直出概念
         "doc_metadata": {
             "impl_status": impl_status,
             "impl_status_reasoning": impl_reasoning,
@@ -395,7 +437,10 @@ async def score_policy_document(
     model: str = "deepseek-chat",
     temperature: float = 0.1,
 ) -> dict[str, Any]:
-    """单篇政策文档 LLM 语义评分。失败抛异常（无 fallback）。"""
+    """单篇政策文档 LLM 语义评分。失败抛异常（无 fallback）。
+    
+    v5.0: LLM 输出 selected_concepts 字段（从 YAML child_concepts 选项中选择）。
+    """
     from apps.common.ai_dispatcher import AIDispatcher
 
     context = assemble_context(
@@ -403,7 +448,8 @@ async def score_policy_document(
         summary=str(doc.get("summary") or ""),
         full_text=str(doc.get("full_text") or None) or None,
     )
-    prompt = build_prompt(context)
+    concept_options = _build_concept_options_all()
+    prompt = build_prompt(context, concept_options=concept_options)
 
     dispatcher = AIDispatcher.default()
     result = dispatcher.call(
@@ -422,6 +468,9 @@ async def score_policy_document(
     parsed = parse_llm_json(raw)
     token_used = result.tokens_in + result.tokens_out
 
+    # v5.0: 提取 LLM 直出的概念选择
+    selected_concepts_raw = _parse_selected_concepts(parsed.get("selected_concepts") or "")
+
     return {
         "doc_id": str(doc.get("doc_id") or ""),
         "sectors": parsed["sectors"],
@@ -431,10 +480,30 @@ async def score_policy_document(
             "impl_status": "状态未知",
             "impl_status_reasoning": "LLM 未输出",
         },
+        "selected_concepts": selected_concepts_raw,  # v5.0
         "t1_source": f"llm:{model}",
         "llm_confidence": _estimate_confidence(parsed),
         "token_used": token_used,
     }
+
+
+def _parse_selected_concepts(raw: str) -> list[str]:
+    """v5.0: 解析 LLM 输出的 selected_concepts 字段（逗号分隔的概念名列表）。
+    
+    LLM 输出格式：'人工智能(302035),东数西算(算力)(308828)' 
+    → 转换为 ['人工智能', '东数西算(算力)'] （去除末尾 (code) 仅当格式匹配时）
+    """
+    import re
+    if not raw or raw.strip().upper() == "NONE":
+        return []
+    names: list[str] = []
+    for token in raw.split(","):
+        name = token.strip()
+        # 去除末尾 (code) 后缀 e.g. 人工智能(302035) → 人工智能
+        name = re.sub(r'\(\d+\)$', '', name).strip()
+        if name:
+            names.append(name)
+    return names
 
 
 def _estimate_confidence(parsed: dict[str, Any]) -> float:

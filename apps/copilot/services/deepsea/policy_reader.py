@@ -136,9 +136,11 @@ def read_policy_sectors_from_pg(*, top_n: int = 10, lookback_days: int = 730) ->
                         sector,
                         {
                             "sector": sector,
+                            "display_name": item.get("display_name", sector),  # v4.0: 政策官方命名
                             "policy_score": 0.0,
                             "hit_count": 0,
                             "direction": item.get("direction") or item.get("consensus_direction"),
+                            "sub_concepts": item.get("sub_concepts") or [],  # v4.0: 保留A股概念板
                         },
                     )
                     bucket["hit_count"] = doc_count
@@ -146,6 +148,22 @@ def read_policy_sectors_from_pg(*, top_n: int = 10, lookback_days: int = 730) ->
                         max(bucket["policy_score"], score),
                         4,
                     )
+                    # v4.0: 同 sector 多行时合并 sub_concepts
+                    if item.get("sub_concepts"):
+                        existing_subs = {}
+                        for sc in bucket.get("sub_concepts") or []:
+                            existing_subs[sc.get("sub_name", "")] = sc
+                        for sc in item["sub_concepts"]:
+                            sn = sc.get("sub_name", "")
+                            if sn not in existing_subs:
+                                existing_subs[sn] = sc
+                            else:
+                                existing_subs[sn]["doc_count"] = existing_subs[sn].get("doc_count", 0) + sc.get("doc_count", 0)
+                                existing_subs[sn]["avg_composite"] = max(
+                                    existing_subs[sn].get("avg_composite", 0),
+                                    sc.get("avg_composite", 0),
+                                )
+                        bucket["sub_concepts"] = list(existing_subs.values())
                     if item.get("direction"):
                         bucket["direction"] = item.get("direction")
                     quote = row.get("evidence_quote") or item.get("evidence_quote") or ""
@@ -361,6 +379,7 @@ def read_sector_detail(sector: str, *, limit: int = 30) -> dict[str, Any]:
                             "doc_count": ts.get("doc_count"),
                             "tailwind_count": ts.get("tailwind_count"),
                             "headwind_count": ts.get("headwind_count"),
+                            "sub_concepts": ts.get("sub_concepts", []),  # v5.0: A股概念
                         }
                         break
 
@@ -417,6 +436,15 @@ def read_sector_detail(sector: str, *, limit: int = 30) -> dict[str, Any]:
                         "implementation_strength": s.get("implementation_strength"),
                         "implementation_toolkit": s.get("implementation_toolkit"),
                     })
+
+                # v5.1: 按政策权重排序（落地力度优先级 > impact_score 降序）
+                IMP_STRENGTH_ORDER = {"comprehensive": 5, "targeted": 4, "moderate": 3, "light": 2, "symbolic": 1}
+                evidence_docs.sort(
+                    key=lambda ev: (
+                        -IMP_STRENGTH_ORDER.get(str(ev.get("implementation_strength") or "light"), 2),
+                        -(ev.get("impact_score") or 0),
+                    )
+                )
 
                 # 如果没有 T1 LLM 结果，回退到 doc_registry 标题匹配
                 if not evidence_docs:
@@ -677,3 +705,50 @@ def compute_time_weighted_directions() -> dict[str, dict[str, Any]]:
         return {}
     finally:
         engine.dispose()
+
+
+# ══════════════════════════════════════════════════════════════
+# v5.1 概念全量展示：将 YAML child_concepts 合并到 sector detail
+# ══════════════════════════════════════════════════════════════
+def _merge_all_yaml_concepts(detail: dict[str, Any], sector: str) -> None:
+    """将 YAML 中该赛道的全部 child_concepts 合并到 detail['sub_concepts']。
+    
+    - 已命中的概念保留原有 doc_count / avg_composite / evidence_quotes
+    - 未命中的概念补入 doc_count=0，如实展示
+    """
+    try:
+        from pathlib import Path
+        import yaml as _yaml
+        cfg_path = (
+            Path(__file__).resolve().parents[4]
+            / "data" / "config" / "metrics" / "z0_policy_keywords.yaml"
+        )
+        with cfg_path.open(encoding="utf-8") as f:
+            yc = _yaml.safe_load(f) or {}
+    except Exception:
+        return
+
+    cs = (yc.get("canonical_sectors") or {}).get(sector) or {}
+    yaml_children = cs.get("child_concepts") or []
+
+    existing = {}
+    for sc in detail.get("sub_concepts") or []:
+        name = sc.get("sub_name", "")
+        existing[name] = sc
+
+    merged: list[dict[str, Any]] = []
+    for yc_item in yaml_children:
+        yname = str(yc_item.get("name", ""))
+        ycode = str(yc_item.get("code", ""))
+        if yname in existing:
+            merged.append(existing[yname])
+        else:
+            merged.append({
+                "sub_name": yname,
+                "concept_code": ycode,
+                "doc_count": 0,
+                "avg_composite": 0.0,
+                "evidence_quotes": [],
+            })
+
+    detail["sub_concepts"] = merged

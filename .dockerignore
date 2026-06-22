@@ -11,10 +11,15 @@ venv
 !.env.template
 data/
 !data/config/
+!data/config/*.yaml
 !data/config/probe_registry/
 !data/config/probe_registry/**
 !data/config/executing_profiles/
 !data/config/executing_profiles/**
+!data/config/prompts/
+!data/config/prompts/**
+!data/config/metrics/z0_policy_keywords.yaml
+!data/config/metrics/z0_policy_t1_llm.yaml
 dist/
 build/
 *.egg-info

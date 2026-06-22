@@ -78,6 +78,7 @@ async def list_boards_summary(session: AsyncSession) -> list[dict[str, Any]]:
                 "horizon_start": b.horizon_start,
                 "horizon_end": b.horizon_end,
                 "color_token": b.color_token,
+                "is_template": b.is_template,
                 "active_phase_name": active.name if active else "—",
                 "active_phase_id": active.id if active else None,
                 "phase_count": len(b.phases),
@@ -153,6 +154,7 @@ async def get_board_detail(session: AsyncSession, board_id: int) -> Optional[dic
         "horizon_end": board.horizon_end,
         "qualitative_md": board.qualitative_md,
         "barbell_config_json": board.barbell_config_json,
+        "stock_pool_json": board.stock_pool_json,
         "color_token": board.color_token,
         "phases": phases_out,
         "active_phase_id": active.id if active else None,
@@ -320,7 +322,8 @@ async def seed_ai_ecosystem_board(session: AsyncSession) -> StrategicBoard:
     )
     if existing:
         return existing
-    return await _create_board_from_payload(session, AI_ECOSYSTEM_SEED)
+    board, _ = await _create_board_from_payload(session, AI_ECOSYSTEM_SEED)
+    return board
 
 
 async def create_board(
@@ -344,10 +347,13 @@ async def create_board(
         "barbell_config_json": None,
         "phases": [],
     }
-    return await _create_board_from_payload(session, payload)
+    board, _ = await _create_board_from_payload(session, payload)
+    return board
 
 
-async def _create_board_from_payload(session: AsyncSession, payload: dict) -> StrategicBoard:
+async def _create_board_from_payload(
+    session: AsyncSession, payload: dict
+) -> tuple[StrategicBoard, list[StrategicPhase]]:
     board = StrategicBoard(
         name=payload["name"],
         horizon_start=int(payload["horizon_start"]),
@@ -355,10 +361,12 @@ async def _create_board_from_payload(session: AsyncSession, payload: dict) -> St
         qualitative_md=payload.get("qualitative_md"),
         barbell_config_json=payload.get("barbell_config_json"),
         color_token=payload.get("color_token") or "indigo",
+        is_template=bool(payload.get("is_template", False)),
     )
     session.add(board)
     await session.flush()
 
+    created_phases: list[StrategicPhase] = []
     for idx, ph_data in enumerate(payload.get("phases") or []):
         ph = StrategicPhase(
             board_id=board.id,
@@ -373,6 +381,7 @@ async def _create_board_from_payload(session: AsyncSession, payload: dict) -> St
         )
         session.add(ph)
         await session.flush()
+        created_phases.append(ph)
 
         for sym, role in ph_data.get("symbols") or []:
             session.add(
@@ -400,7 +409,59 @@ async def _create_board_from_payload(session: AsyncSession, payload: dict) -> St
             )
 
     await session.flush()
-    return board
+    return board, created_phases
+
+
+async def delete_board(session: AsyncSession, board_id: int) -> bool:
+    """删除板块，级联删除其 phases/symbols/probes/cvm scorecards。"""
+    board = await session.get(StrategicBoard, board_id)
+    if not board:
+        return False
+    await session.delete(board)
+    await session.flush()
+    return True
+
+
+async def update_board(
+    session: AsyncSession,
+    board_id: int,
+    *,
+    name: str,
+    horizon_start: int,
+    horizon_end: int,
+    sector: str,
+    concept_names: list[str],
+    bom_node_ids: list[str] | None = None,
+) -> bool:
+    """更新板块基本信息与赛道/概念/时间骨架。清除生态位分析结果（需重新触发）。"""
+    board = await session.get(StrategicBoard, board_id)
+    if not board:
+        return False
+    board.name = name.strip()
+    board.horizon_start = horizon_start
+    board.horizon_end = horizon_end
+    # 更新 barbell_config_json 中 genesis 相关信息
+    bcj = dict(board.barbell_config_json or {})
+    bcj["genesis_sector"] = sector
+    bcj["genesis_concepts"] = concept_names
+    # 存储选中的 BOM 节点（优先从定制化 YAML 查找节点名称，回退到 ID）
+    from apps.copilot.modules.strategic.render import load_curated_bom
+    curated = load_curated_bom(sector)
+    bom_lookup: dict[str, dict] = {n["node_id"]: n for n in curated if n.get("node_id")}
+    bcj["genesis_bom_nodes"] = [
+        {
+            "node_id": nid,
+            "name": bom_lookup.get(nid, {}).get("name", nid),
+            "tier": bom_lookup.get(nid, {}).get("tier", "配套"),
+            "layer": bom_lookup.get(nid, {}).get("layer") or None,
+        }
+        for nid in bom_node_ids
+    ] if bom_node_ids else []
+    board.barbell_config_json = bcj
+    # 清除旧生态位分析结果（需重新触发）
+    board.stock_pool_json = None
+    await session.flush()
+    return True
 
 
 async def add_phase_review(

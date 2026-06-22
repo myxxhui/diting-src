@@ -16,7 +16,7 @@
   {% if wind_scan and wind_scan.candidates %}
   <ul class="space-y-1">
     {% for c in wind_scan.candidates[:5] %}
-    <li class="truncate">· {{ c.sector }}</li>
+    <li class="truncate">· {{ c.get('display_name') or c.sector }}</li>
     {% endfor %}
   </ul>
   {% else %}
@@ -34,15 +34,30 @@
 <div id="strategic-board-list-inner">
   {% if boards %}
     {% for b in boards %}
-    <div role="button" tabindex="0"
-         class="block px-3 py-3 cursor-pointer border-l-4 {% if b.id == selected_board_id %}border-indigo-500 bg-indigo-50{% else %}border-transparent hover:bg-gray-50{% endif %}"
-         hx-get="/api/strategic/command-center?board_id={{ b.id }}"
-         hx-target="#strategic-command-main"
-         hx-swap="innerHTML"
-         hx-push-url="/planning?view=roadmap&z0_mode=board&board_id={{ b.id }}">
-      <div class="font-semibold text-gray-900 text-sm">{{ b.name }}</div>
-      <div class="text-xs text-gray-500">{{ b.horizon_start }}–{{ b.horizon_end }}</div>
-      <div class="text-xs text-gray-600 truncate">▶ {{ b.active_phase_name or '—' }}</div>
+    <div class="group flex items-center {% if b.id == selected_board_id %}border-l-4 border-indigo-500 bg-indigo-50{% else %}border-l-4 border-transparent hover:bg-gray-50{% endif %}">
+      <div role="button" tabindex="0"
+           class="flex-1 block px-3 py-2.5 cursor-pointer min-w-0"
+           hx-get="/api/strategic/command-center?board_id={{ b.id }}"
+           hx-target="#strategic-command-main"
+           hx-swap="innerHTML"
+           hx-push-url="/planning?view=roadmap&z0_mode=board&board_id={{ b.id }}">
+        <div class="flex items-center gap-1.5">
+          <span class="font-semibold text-gray-900 text-sm truncate">{{ b.name }}</span>
+          {% if b.get('is_template') %}
+          <span class="text-[9px] px-1 py-0 rounded bg-amber-100 text-amber-700 shrink-0">模板</span>
+          {% endif %}
+        </div>
+        <div class="text-xs text-gray-500">{{ b.horizon_start }}–{{ b.horizon_end }}</div>
+        <div class="text-xs text-gray-600 truncate">▶ {{ b.active_phase_name or '—' }}</div>
+      </div>
+      <button type="button"
+              class="shrink-0 px-2 py-1 text-[10px] text-gray-400 hover:text-red-600 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 transition"
+              hx-delete="/api/strategic/boards/{{ b.id }}"
+              hx-target="#strategic-left-sidebar"
+              hx-swap="outerHTML"
+              hx-confirm="确认删除「{{ b.name }}」？此操作不可撤销。">
+        ✕
+      </button>
     </div>
     {% endfor %}
   {% else %}
@@ -51,7 +66,7 @@
     <button type="button" class="text-indigo-600 underline text-xs"
             hx-get="/api/strategic/genesis/wizard?step=1"
             hx-target="#genesis-wizard-root"
-            hx-swap="innerHTML">genesis 建板</button>
+            hx-swap="innerHTML">智能建板</button>
   </div>
   {% endif %}
 </div>

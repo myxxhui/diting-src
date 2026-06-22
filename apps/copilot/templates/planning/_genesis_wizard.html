@@ -1,8 +1,8 @@
-{# 段 B · genesis 四步向导 [Ref: 33_ §4.4] #}
+{# 段 B · 智能建板四步向导 · v3.0 动态 BOM 节点选择 [Ref: 37_ v3.0] #}
 <div class="genesis-wizard-modal fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
   <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5">
     <div class="flex items-center justify-between mb-4">
-      <h3 class="text-base font-bold text-gray-900">Genesis 建板 · 步骤 {{ step }}/4</h3>
+      <h3 class="text-base font-bold text-gray-900">战略建板 · 步骤 {{ step }}/4</h3>
       <button type="button" class="text-gray-400 hover:text-gray-600 text-xl"
               onclick="this.closest('.genesis-wizard-modal').remove()">×</button>
     </div>
@@ -12,119 +12,103 @@
     {% endif %}
 
     <div class="flex gap-1 mb-4 text-[10px]">
+      {% set step_labels = {1: '选赛道', 2: '概念 + 时间', 3: '选择产业链节点', 4: '确认建板'} %}
       {% for s in [1,2,3,4] %}
       <span class="flex-1 text-center py-1 rounded {% if s == step %}bg-indigo-600 text-white{% elif s < step %}bg-indigo-100 text-indigo-800{% else %}bg-gray-100 text-gray-400{% endif %}">
-        {% if s == 1 %}选候选{% elif s == 2 %}时间骨架{% elif s == 3 %}生态位{% else %}确认{% endif %}
+        {{ step_labels[s] }}
       </span>
       {% endfor %}
     </div>
 
-        {% if step == 1 %}
+    {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Step 1 · 选赛道 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+    {% if step == 1 %}
     <form hx-post="/api/strategic/genesis/wizard?step=2" hx-target="#genesis-wizard-root" hx-swap="innerHTML" class="space-y-4 text-sm">
+      <input type="hidden" name="wind_scan_id" value="{{ wind_scan.id if wind_scan else '' }}" />
 
-      {# ── 板块名称：纯 HTML 候选列表 + 搜索过滤（不依赖 Alpine/HTMX 脚本时序）── #}
-      <div class="genesis-board-picker space-y-2">
-        <label class="block text-xs font-medium text-gray-700 mb-1" for="genesis-board-title-input">
-          板块名称 <span class="text-gray-400 font-normal">（点选候选或自由输入）</span>
+      <div class="space-y-2">
+        <label class="block text-xs font-medium text-gray-700">
+          选择赛道 <span class="text-gray-400 font-normal">（Wind Scan 候选赛道 · 按 Z0+ 投资级降序）</span>
         </label>
-        <div class="relative">
-          <input
-            id="genesis-board-title-input"
-            name="board_title"
-            type="text" required
-            data-genesis-filter
-            class="w-full border rounded-lg px-3 py-2 pr-9 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none"
-            placeholder="输入筛选或自定义：AI 算力 / 低空经济 ..."
-            value="{{ preview.board_title if preview and preview.board_title else '' }}" />
-          <button type="button" tabindex="-1" data-genesis-toggle
-                  class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
-                  aria-label="展开/收起候选列表">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-          </button>
-        </div>
-        <input type="hidden" name="wind_scan_id" value="{{ wind_scan.id if wind_scan else '' }}" />
-
-        <div id="genesis-picker-dropdown" class="border border-gray-200 rounded-xl shadow-sm max-h-64 overflow-y-auto text-xs bg-white">
+        <select name="sector" required
+                class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none">
+          <option value="">-- 请选择赛道 --</option>
           {% if candidates %}
-          <div class="px-3 py-1.5 text-[10px] uppercase tracking-wide text-gray-500 bg-gray-50 font-semibold border-b border-gray-100 sticky top-0">
-            🌬 Wind Scan 候选赛道 · 降序（点击选用）
-          </div>
-          {% for c in candidates|sort(attribute='rank') %}
-          <button type="button"
-                  class="genesis-pick-item w-full text-left px-3 py-2 flex items-center justify-between gap-2 hover:bg-indigo-50 border-b border-gray-50 last:border-0 transition-colors"
-                  data-genesis-pick="{{ c.sector }}"
-                  data-label="{{ c.sector }}"
-                  data-wind-id="{{ wind_scan.id if wind_scan else '' }}">
-            <span>
-              <span class="font-medium text-gray-800">{{ c.sector }}</span>
-              <span class="text-[10px] text-gray-400 ml-1.5">rank #{{ c.rank }}</span>
-            </span>
-            {% if c.d1_score is not none %}
-            <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full {% if c.d1_score >= 0.7 %}bg-emerald-50 text-emerald-700{% else %}bg-amber-50 text-amber-700{% endif %}">
-              {{ (c.d1_score * 100)|round(0) }}
-            </span>
-            {% endif %}
-          </button>
+          {% for c in candidates %}
+          {% set dn = c.get('display_name') or c.get('sector','?') %}
+          {% set z0 = c.get('z0_plus_score') %}
+          {% set d1 = c.get('d1_score') %}
+          {% set sc = c.get('sub_concepts') or [] %}
+          <option value="{{ c.sector }}">{{ dn }} · {% if z0 is not none %}Z0+={{ (z0*100)|int }}{% endif %}{% if d1 is not none %} D1={{ (d1*100)|int }}{% endif %} · {{ sc|length }}个概念</option>
           {% endfor %}
           {% endif %}
-
-          {% if boards %}
-          <div class="px-3 py-1.5 text-[10px] uppercase tracking-wide text-gray-500 bg-gray-50 font-semibold border-b border-t border-gray-100 sticky top-0">
-            📋 已有战略板块
-          </div>
-          {% for b in boards %}
-          <button type="button"
-                  class="genesis-pick-item w-full text-left px-3 py-2 flex items-center justify-between gap-2 hover:bg-gray-50 border-b border-gray-50"
-                  data-genesis-pick="{{ b.name }}"
-                  data-label="{{ b.name }}"
-                  data-wind-id="">
-            <span class="font-medium text-gray-700">{{ b.name }}</span>
-            <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">已有 #{{ b.id }}</span>
-          </button>
-          {% endfor %}
-          {% endif %}
-
-          {% if not candidates and not boards %}
-          <p class="px-3 py-4 text-center text-gray-400">暂无候选，请直接在上方输入板块名称</p>
-          {% endif %}
-        </div>
+        </select>
+        <input name="board_title" type="text" required
+               class="w-full border rounded-lg px-3 py-2 text-sm mt-2 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none"
+               placeholder="板块名称（自动填充或自定义）" />
       </div>
 
-      {# ── 绑定 wind_scan 说明 + 当前绑定状态 ── #}
+      {% if wind_scan %}
       <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs space-y-1.5">
-        <p class="font-medium text-blue-800">📡 绑定 wind_scan</p>
-        <p class="text-blue-700">
-          wind_scan 是 <strong>段A 宏观风口扫描</strong>产出的赛道排名快照。
-          绑定后，Genesis 会从它自动导入 <strong>候选赛道</strong> 和 <strong>政策顺风主题词</strong>，
-          用于预填 phase 结构和生态位模板，省去手动配置。
-        </p>
-        {% if wind_scan %}
-        <p class="text-blue-600 font-medium">
-          ✅ 当前绑定: <code>#{{ wind_scan.id }}</code>
-          — 共 {{ candidates | length if candidates else 0 }} 个候选赛道
-          {% if candidates %}(🏆 {{ candidates[0].sector }}){% endif %}
-        </p>
-        {% else %}
-        <p class="text-blue-500 italic">⚠ 未检测到 wind_scan，将使用手动建板模式。</p>
-        {% endif %}
+        <p class="font-medium text-blue-800">📡 已绑定 Wind Scan</p>
+        <p class="text-blue-700">#{{ wind_scan.id }} — 共 {{ candidates|length }} 个候选赛道。</p>
       </div>
-
-      <textarea name="candidates_json" class="hidden">[]</textarea>
+      {% endif %}
 
       <label class="flex items-center gap-2 text-xs">
         <input type="checkbox" name="advisory_ack" value="1" required class="rounded" />
         本人确认本操作为 advisory · 不触发下单
       </label>
-
       <button type="submit" class="w-full py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition">
-        下一步 · 时间骨架
+        下一步 · 选择概念与时间
       </button>
     </form>
 
-{% elif step == 2 %}
-    <form hx-post="/api/strategic/genesis/wizard?step=3" hx-target="#genesis-wizard-root" hx-swap="innerHTML" class="space-y-3 text-sm">
-      <input type="hidden" name="board_title" value="{{ preview.board_title }}" />
-      <input type="hidden" name="wind_scan_id" value="{{ preview.source_wind_scan_id or '' }}" />
+    {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Step 2 · 概念勾选 + 时间骨架 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+    {% elif step == 2 %}
+    <form hx-post="/api/strategic/genesis/wizard?step=3" hx-target="#genesis-wizard-root" hx-swap="innerHTML" class="space-y-4 text-sm">
+      <input type="hidden" name="board_title" value="{{ preview.board_title if preview else '' }}" />
+      <input type="hidden" name="wind_scan_id" value="{{ preview.source_wind_scan_id if preview else '' }}" />
+      <input type="hidden" name="sector" value="{{ sector_data.get('sector','') if sector_data else '' }}" />
+
+      {% if sector_data %}
+      {# ── 赛道信息 ── #}
+      <div class="bg-indigo-50 border border-indigo-100 rounded-lg p-3">
+        <p class="text-xs font-semibold text-indigo-800">
+          已选赛道：{{ sector_data.get('display_name', sector_data.get('sector','?')) }}
+          {% set z0 = sector_data.get('z0_plus_score') %}
+          <span class="ml-2 text-emerald-700 font-bold">{{ "Z0+=%d"|format(z0*100) if z0 else '' }}</span>
+        </p>
+        <p class="text-[10px] text-gray-500 mt-1">接下来需要：① 勾选 A 股概念标签 ② 设定时间骨架 ③ LLM 自动生成产业链节点</p>
+      </div>
+
+      {# ── A股概念勾选（用于 policy_bond 加分） ── #}
+      <div class="bg-indigo-50 border border-indigo-100 rounded-lg p-3 space-y-2">
+        <div class="flex items-center justify-between">
+          <p class="text-xs font-semibold text-indigo-800">勾选 A 股概念板块</p>
+          <span class="text-[10px] text-gray-400">仅用于 policy_bond 加分</span>
+        </div>
+        <p class="text-[10px] text-gray-500">勾选的概念标签将作为 policy_bond 加分的依据，不影响标的候选范围。</p>
+        <div class="max-h-40 overflow-y-auto space-y-0.5 bg-white rounded-lg border border-indigo-100 p-2">
+          {% set sub_concepts = sector_data.get('sub_concepts') or [] %}
+          {% for sc in sub_concepts|sort(attribute='doc_count', reverse=True) %}
+          {% set sn = sc.get('sub_name','?') %}
+          {% set dc = sc.get('doc_count', 0) %}
+          {% set ac = sc.get('avg_composite', 0) %}
+          {% set checked = 'checked' if dc > 0 else '' %}
+          {% set dc_badge = ('%d篇 均分%.0f'|format(dc, ac)) if dc > 0 else '未命中' %}
+          <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-indigo-50 rounded cursor-pointer text-xs">
+            <input type="checkbox" name="concept_{{ sn }}" value="{{ sn }}" {{ checked }} class="rounded" />
+            <span class="font-medium text-gray-800">{{ sn }}</span>
+            <span class="text-gray-400">{{ dc_badge }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      {% else %}
+      <p class="text-amber-600 text-xs bg-amber-50 border border-amber-100 rounded-lg p-3">未获取到赛道数据，请返回选择赛道。</p>
+      {% endif %}
+
+      {# ── 时间骨架 ── #}
       <div class="grid grid-cols-2 gap-3">
         <div>
           <label class="block text-xs font-medium mb-1">战略跨度（年）</label>
@@ -136,54 +120,204 @@
         </div>
         <div>
           <label class="block text-xs font-medium mb-1">起始年</label>
-          <input name="start_year" type="number" value="{{ preview.horizon_start or 2026 }}" class="w-full border rounded-lg px-3 py-2" />
+          <input name="start_year" type="number" value="{{ preview.horizon_start if preview else 2026 }}" class="w-full border rounded-lg px-3 py-2" />
         </div>
       </div>
-      <p class="text-xs text-gray-500">预览：{{ preview.horizon_start }}–{{ preview.horizon_end }} · {{ preview.phases|length }} 个 phase</p>
-      {% if preview.phases %}
-      <ul class="text-xs space-y-1 bg-gray-50 rounded-lg p-2">
-        {% for ph in preview.phases %}
-        <li>🌊{{ ph.wave_no }} {{ ph.name }} ({{ ph.start_year }}–{{ ph.end_year }}) · layer={{ ph.layer }}</li>
+      {% if preview and preview.phases %}
+      <div class="text-xs space-y-1 bg-gray-50 rounded-lg p-2">
+        <p class="text-gray-500">预览：{{ preview.horizon_start }}–{{ preview.horizon_end }} · {{ preview.phases|length }} 个 phase</p>
+        {% for ph in preview.phases[:4] %}
+        <p class="text-gray-600">🌊{{ ph.wave_no }} {{ ph.name }} ({{ ph.start_year }}–{{ ph.end_year }}) · layer={{ ph.layer }}</p>
         {% endfor %}
-      </ul>
+      </div>
       {% endif %}
-      <button type="submit" class="w-full py-2 rounded-lg bg-indigo-600 text-white text-sm">下一步 · 生态位</button>
+
+      <button type="submit" class="w-full py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition">
+        下一步 · 生成产业链节点
+      </button>
     </form>
 
+    {# ━━━━━━━━━━━━━━━━━━━━━━━━━━ Step 3 · BOM 产业链节点选择 ━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
     {% elif step == 3 %}
-    <form hx-post="/api/strategic/genesis/wizard?step=4" hx-target="#genesis-wizard-root" hx-swap="innerHTML" class="space-y-3 text-sm">
-      <input type="hidden" name="board_title" value="{{ preview.board_title }}" />
-      <input type="hidden" name="horizon_years" value="10" />
-      <input type="hidden" name="start_year" value="{{ preview.horizon_start }}" />
-      <input type="hidden" name="wind_scan_id" value="{{ preview.source_wind_scan_id or '' }}" />
-      <p class="text-xs text-gray-600">每 phase 默认 E1–E5 权重 0.25/0.2/0.2/0.2/0.15（可在扩展期细调）</p>
-      <label class="flex items-center gap-2 text-xs">
-        <input type="checkbox" name="niche_default" value="1" checked class="rounded" />
-        使用默认生态位模板
-      </label>
-      <button type="submit" class="w-full py-2 rounded-lg bg-indigo-600 text-white text-sm">下一步 · 确认建板</button>
+    <form hx-post="/api/strategic/genesis/wizard?step=4" hx-target="#genesis-wizard-root" hx-swap="innerHTML" class="space-y-4 text-sm">
+      <input type="hidden" name="board_title" value="{{ preview.board_title if preview else '' }}" />
+      <input type="hidden" name="wind_scan_id" value="{{ preview.source_wind_scan_id if preview else '' }}" />
+      <input type="hidden" name="sector" value="{{ sector if sector else '' }}" />
+      <input type="hidden" name="horizon_years" value="{{ (preview.horizon_end|default(2036)-preview.horizon_start|default(2026)) if preview else 10 }}" />
+      <input type="hidden" name="start_year" value="{{ preview.horizon_start if preview else 2026 }}" />
+      {% for cn in selected_concepts or [] %}
+      <input type="hidden" name="concept_{{ loop.index }}" value="{{ cn }}" />
+      {% endfor %}
+
+      {% if bom_proposal and bom_proposal.status == 'ok' %}
+      {# 存储完整的 bom_proposal 数据（用于 Step 4 展示节点名称） #}
+      {% set bom_json = bom_proposal|tojson %}
+      <input type="hidden" name="bom_proposal_json" value='{{ bom_json }}' />
+      {% set nodes = bom_proposal.get('bom_nodes') or [] %}
+      {% set top_recommendations = bom_proposal.get('top_recommendations') or [] %}
+      {% set industry_summary = bom_proposal.get('industry_summary') or '' %}
+
+      {# ── 产业链概况 ── #}
+      {% if industry_summary %}
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-2 text-[10px] text-gray-600">
+        {{ industry_summary }}
+      </div>
+      {% endif %}
+
+      {# ── BOM 节点选择面板 ── #}
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs font-semibold text-gray-800">
+            📋 产业链 BOM 节点 · 共 {{ nodes|length }} 个
+          </p>
+          <span class="text-[10px] text-gray-400">定制化节点 · 经人工筛选与深度评估</span>
+        </div>
+        <p class="text-[10px] text-gray-500 mb-2">
+          ⭐ <strong>推荐 TOP5</strong>：LLM 基于评分选出的关键节点。可手动增减。
+        </p>
+
+        <div class="space-y-1.5 max-h-64 overflow-y-auto bg-white rounded-lg border border-gray-200 p-2">
+          {% for n in nodes %}
+          {% set nid = n.get('node_id', '') %}
+          {% set name = n.get('name', '?') %}
+          {% set tier = n.get('tier', '配套') %}
+          {% set score = n.get('score', 0) %}
+          {% set rationale = n.get('rationale', '') %}
+          {% set is_top = nid in top_recommendations %}
+
+          {% set tier_color = 'border-l-rose-400 bg-rose-50' if tier == '核心' else 'border-l-amber-400 bg-amber-50' if tier == '重要' else 'border-l-gray-300 bg-gray-50' %}
+          {% set tier_badge = 'text-rose-700 bg-rose-100' if tier == '核心' else 'text-amber-700 bg-amber-100' if tier == '重要' else 'text-gray-600 bg-gray-200' %}
+
+          <label class="flex items-start gap-2 px-3 py-2 rounded-lg border border-l-4 {{ tier_color }} cursor-pointer hover:shadow-sm transition">
+            <input type="checkbox" name="bom_node_{{ nid }}" value="{{ nid }}" {{ 'checked' if is_top else '' }} class="mt-1 rounded" />
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-medium text-gray-800 text-xs">{{ name }}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded {{ tier_badge }}">{{ tier }}</span>
+                {% set layer = n.get('layer') or '' %}
+                {% if layer and layer.startswith('L') %}
+                {% set lc = {'L1': 'bg-purple-100 text-purple-700', 'L2': 'bg-blue-100 text-blue-700', 'L3': 'bg-cyan-100 text-cyan-700', 'L4': 'bg-teal-100 text-teal-700', 'L5': 'bg-green-100 text-green-700'}.get(layer, 'bg-gray-100 text-gray-600') %}
+                <span class="text-[9px] px-1 py-0.5 rounded {{ lc }} font-medium">{{ layer }}</span>
+                {% endif %}
+                {% if is_top %}
+                <span class="text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">⭐ TOP 推荐</span>
+                {% endif %}
+                <span class="text-[10px] text-indigo-600 font-medium">评分 {{ score }}</span>
+              </div>
+              {% if rationale %}
+              <p class="text-[9px] text-gray-500 mt-0.5">{{ rationale }}</p>
+              {% endif %}
+            </div>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="flex gap-2">
+        <button type="button"
+                class="flex-1 text-sm py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
+                hx-post="/api/strategic/genesis/wizard?step=2"
+                hx-target="#genesis-wizard-root"
+                hx-swap="innerHTML">
+          ← 返回修改概念
+        </button>
+        <button type="submit"
+                class="flex-1 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition">
+          下一步 · 确认建板（已选 <span id="bom-count">{{ nodes|selectattr('node_id', 'in', top_recommendations)|list|length }}</span> 个节点）
+        </button>
+      </div>
+
+      {% elif bom_proposal and bom_proposal.status == 'error' %}
+      <div class="bg-red-50 border border-red-100 rounded-lg p-3 text-xs text-red-700">
+        <p class="font-medium">LLM 产业链生成失败</p>
+        <p class="mt-1">{{ bom_proposal.error }}</p>
+      </div>
+      <button type="button"
+              class="w-full py-2 rounded-lg bg-indigo-600 text-white text-sm"
+              hx-post="/api/strategic/genesis/wizard?step=2"
+              hx-target="#genesis-wizard-root"
+              hx-swap="innerHTML">
+        ← 返回重试
+      </button>
+      {% else %}
+      <div class="text-center py-8">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-indigo-200 border-t-indigo-600 mb-3"></div>
+        <p class="text-xs text-gray-500">正在调用 DeepSeek V4-pro 生成产业链节点清单...</p>
+        <p class="text-[10px] text-gray-400 mt-1">约 15-30 秒</p>
+      </div>
+      {% endif %}
     </form>
 
+    {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Step 4 · 确认建板 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
     {% elif step == 4 %}
     <div class="space-y-3 text-sm">
       <div class="bg-gray-50 rounded-lg p-3 text-xs space-y-1">
         <p><strong>板块：</strong>{{ preview.board_title }}</p>
         <p><strong>跨度：</strong>{{ preview.horizon_start }}–{{ preview.horizon_end }}</p>
-        <p><strong>阶段数：</strong>{{ preview.phases|length }}</p>
+        <p><strong>阶段数：</strong>{{ preview.phases|length if preview else 0 }}</p>
+        {% if sector_display_name %}<p><strong>赛道：</strong>{{ sector_display_name }}</p>{% endif %}
+        {% if selected_concepts %}<p><strong>概念标签：</strong>{{ selected_concepts|join(', ') }}</p>{% endif %}
+        {% if selected_bom_nodes %}<p><strong>产业链节点：</strong>{{ selected_bom_nodes|length }} 个已选</p>{% endif %}
       </div>
-      <form hx-post="/api/strategic/genesis/apply" hx-target="body" hx-swap="beforeend" class="space-y-2">
+
+      {# ── 已选 BOM 节点概要 ── #}
+      {% if selected_bom_nodes %}
+      <div class="bg-emerald-50 border border-emerald-100 rounded-lg p-2 text-[10px]">
+        <p class="font-medium text-emerald-800 mb-1">✅ 已选产业链 BOM 节点（{{ selected_bom_nodes|length }} 个）</p>
+        <div class="flex flex-wrap gap-1">
+          {% for n in selected_bom_nodes %}
+          {% set tier_badge = 'text-rose-700 bg-rose-100' if n.tier == '核心' else 'text-amber-700 bg-amber-100' if n.tier == '重要' else 'text-gray-600 bg-gray-200' %}
+          {% set layer = n.get('layer', '') %}
+          {% if layer and layer.startswith('L') %}
+          {% set lc = {'L1': 'bg-purple-100 text-purple-700', 'L2': 'bg-blue-100 text-blue-700', 'L3': 'bg-cyan-100 text-cyan-700', 'L4': 'bg-teal-100 text-teal-700', 'L5': 'bg-green-100 text-green-700'}.get(layer, 'bg-gray-100 text-gray-600') %}
+          {% set layer_badge = '<span class="text-[9px] px-1 py-0.5 rounded ' ~ lc ~ ' font-medium">' ~ layer ~ '</span>' %}
+          {% else %}
+          {% set layer_badge = '' %}
+          {% endif %}
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-emerald-200 bg-white">
+            <span class="font-medium">{{ n.name }}</span>
+            <span class="text-[9px] px-1 py-0.5 rounded {{ tier_badge }}">{{ n.tier }}</span>
+            {{ layer_badge }}
+          </span>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="bg-amber-50 border border-amber-100 rounded-lg p-2 text-[10px] text-amber-700">
+        ⚠️ 标的池推断将在建板后调用 DeepSeek V4-pro 异步处理（约 60-90s），结果存入板块详情页的「生态位」标签。
+      </div>
+      <div class="text-[10px] text-gray-500 bg-gray-50 rounded-lg p-2">
+        <p class="font-medium text-gray-600 mb-1">🔍 生态位推断流程</p>
+        <ol class="list-decimal pl-4 space-y-0.5">
+          <li>在已选 BOM 节点内逐节点映射 A 股标的</li>
+          <li>每只标的按 5 因子打分（壁垒/成长/盈利/国产替代/政策映射）+ 证据链</li>
+          <li>排除规则检查（ST/立案/商誉/审计非标）→ 一票否决</li>
+          <li>建议新增节点 → 架构师审批</li>
+        </ol>
+      </div>
+      <form hx-post="/api/strategic/genesis/apply" hx-swap="none" class="space-y-2">
         <input type="hidden" name="board_title" value="{{ preview.board_title }}" />
-        <input type="hidden" name="horizon_years" value="10" />
-        <input type="hidden" name="start_year" value="{{ preview.horizon_start }}" />
+        <input type="hidden" name="horizon_years" value="{{ (preview.horizon_end|default(2036)-preview.horizon_start|default(2026)) if preview else 10 }}" />
+        <input type="hidden" name="start_year" value="{{ preview.horizon_start if preview else 2026 }}" />
         <input type="hidden" name="wind_scan_id" value="{{ preview.source_wind_scan_id or '' }}" />
+        <input type="hidden" name="sector" value="{{ sector if sector else '' }}" />
         <input type="hidden" name="niche_default" value="1" />
+        {% for cn in selected_concepts or [] %}
+        <input type="hidden" name="concept_{{ loop.index }}" value="{{ cn }}" />
+        {% endfor %}
+        {% for n in selected_bom_nodes or [] %}
+        <input type="hidden" name="bom_selected_id_{{ loop.index }}" value="{{ n.node_id }}" />
+        <input type="hidden" name="bom_selected_name_{{ loop.index }}" value="{{ n.name }}" />
+        <input type="hidden" name="bom_selected_tier_{{ loop.index }}" value="{{ n.tier }}" />
+        <input type="hidden" name="bom_selected_layer_{{ loop.index }}" value="{{ n.get('layer', '') }}" />
+        {% endfor %}
         <label class="flex items-center gap-2 text-xs">
           <input type="checkbox" name="advisory_ack" value="1" required class="rounded" />
           本人确认 advisory · 确认建板
         </label>
-        <button type="submit" class="w-full py-2 rounded-lg bg-emerald-600 text-white"
-                onclick="this.closest('.genesis-wizard-modal').remove()">
-          确认建板 · 落库
+        <button type="submit" class="w-full py-2 rounded-lg bg-emerald-600 text-white">
+          确认建板 · 落库（生态位后续分析）
         </button>
       </form>
     </div>

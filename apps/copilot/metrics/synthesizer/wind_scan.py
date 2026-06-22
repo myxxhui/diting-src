@@ -19,6 +19,69 @@ def _clamp01(x: float) -> float:
     return max(0.0, min(1.0, x))
 
 
+# ═══════════════ S0 聚合直读（PG 真相源） ═══════════════
+
+def _read_s0_aggregate_from_pg() -> list[dict[str, Any]]:
+    """从 PG deepsea_indicator_state S0 scope 读取最新聚合数据。"""
+    import json, os
+    try:
+        from sqlalchemy import create_engine, text as sa_text
+        raw = os.environ.get("COPILOT_DB_URL", "").replace("asyncpg", "psycopg2")
+        if not raw:
+            return []
+        engine = create_engine(raw, future=True)
+        with engine.begin() as conn:
+            row = conn.execute(
+                sa_text("SELECT snapshot FROM deepsea_indicator_state WHERE scope='S0' ORDER BY inferred_at DESC LIMIT 1")
+            ).fetchone()
+            if not row:
+                return []
+            snap = row[0]
+            if isinstance(snap, str):
+                snap = json.loads(snap)
+            if not isinstance(snap, dict):
+                return []
+            return snap.get("top_sectors") or []
+    except Exception:
+        logger.exception("读取 PG S0 aggregate 失败")
+        return []
+
+
+# ═══════════════ YAML 概念全量合并 ═══════════════
+
+def _merge_all_yaml_concepts(sub_concepts: list[dict], sector: str) -> list[dict]:
+    """将 YAML child_concepts 全量补入（doc_count=0 标注未命中）。"""
+    try:
+        from pathlib import Path
+        import yaml as _yaml
+        cfg_path = Path(__file__).resolve().parents[4] / "data" / "config" / "metrics" / "z0_policy_keywords.yaml"
+        with cfg_path.open(encoding="utf-8") as f:
+            yc = _yaml.safe_load(f) or {}
+    except Exception:
+        return sub_concepts
+
+    cs = (yc.get("canonical_sectors") or {}).get(sector) or {}
+    yaml_children = cs.get("child_concepts") or []
+    if not yaml_children:
+        return sub_concepts
+
+    existing = {}
+    for sc in (sub_concepts or []):
+        n = sc.get("sub_name", "")
+        if n:
+            existing[n] = sc
+
+    merged = []
+    for yci in yaml_children:
+        yn = str(yci.get("name", ""))
+        yc_code = str(yci.get("code", ""))
+        if yn in existing:
+            merged.append(existing[yn])
+        else:
+            merged.append({"sub_name": yn, "concept_code": yc_code, "doc_count": 0, "avg_composite": 0.0, "evidence_quotes": []})
+    return merged
+
+
 def _parse_float(v, default: float = 0.0) -> float:
     if v is None:
         return default
@@ -259,9 +322,36 @@ async def review_high_tier_sector(
 # ═══════════════ 数据合并（仅保留政策入口） ═══════════════
 
 def _merge_sector_inputs(metrics: dict[str, Any]) -> list[dict[str, Any]]:
-    """v5.0 Pure Policy：仅合并政策数据。"""
+    """v5.1: 主源为 PG S0 aggregate（单一真相源），Redis 仅作兜底。"""
     merged: dict[str, dict[str, Any]] = {}
 
+    # ── 主源：PG deepsea_indicator_state S0 scope ──
+    s0_sectors = _read_s0_aggregate_from_pg()
+    if s0_sectors:
+        for item in s0_sectors:
+            sector = str(item.get("sector", "")).strip()
+            if not sector or sector.startswith("_unmapped"):
+                continue
+            merged[sector] = {
+                "sector": sector,
+                "display_name": item.get("display_name", sector),
+                "sector_type": item.get("sector_type", "canonical"),
+                "policy_score": float(item.get("composite_score", 0)),
+                "high_value_flag": bool(item.get("high_value_flag")),
+                "hit_count": int(item.get("doc_count", 0)),
+                "direction": item.get("consensus_direction") or "tailwind",
+                "sub_concepts": item.get("sub_concepts") or [],
+                "dominant_revenue_model": str(item.get("dominant_revenue_model", "political_rhetoric")),
+                "dominant_narrative_type": str(item.get("dominant_narrative_type", "political_slogan")),
+                "dominant_policy_phase": str(item.get("dominant_policy_phase", "maturation")),
+                "regime_change_doc_count": int(item.get("regime_change_doc_count") or 0),
+                "policy_acceleration": float(item.get("policy_acceleration") or 1.0),
+                "best_imp_strength": str(item.get("best_imp_strength", "light")),
+                "avg_toolkit": item.get("avg_toolkit") or {},
+            }
+        return list(merged.values())
+
+    # ── 兜底：Redis（旧数据兼容） ──
     policy = metrics.get("M.sector.policy_direction") or {}
     if policy.get("status") != "ok":
         return []
@@ -275,13 +365,13 @@ def _merge_sector_inputs(metrics: dict[str, Any]) -> list[dict[str, Any]]:
         high_val = bool(item.get("high_value_flag"))
         merged[sector] = {
             "sector": sector,
+            "display_name": item.get("display_name", sector),
             "sector_type": item.get("sector_type", "canonical"),
             "policy_score": raw_score,
             "high_value_flag": high_val,
             "hit_count": int(item.get("hit_count", 0)),
             "direction": item.get("direction") or item.get("consensus_direction"),
-            "sub_concepts": item.get("sub_concepts") or [],  # v2.1
-            # v3.0 Z0+: 投资级评分字段
+            "sub_concepts": item.get("sub_concepts") or [],
             "dominant_revenue_model": str(item.get("dominant_revenue_model", "political_rhetoric")),
             "dominant_narrative_type": str(item.get("dominant_narrative_type", "political_slogan")),
             "dominant_policy_phase": str(item.get("dominant_policy_phase", "maturation")),
@@ -352,8 +442,11 @@ def synthesize_wind_scan(metrics: dict[str, Any], *, top_n: int = 30) -> dict[st
         z0_plus_breakdown: dict[str, Any] | None = None
         if s.get("sector_type") == "canonical":
             from apps.copilot.metrics.synthesizer.investment_scorer import score_investment_grade
+            # composite_score 优先从时间加权方向取，兜底用 S0 aggregate 的 policy_score（0-100 归一化到 0-1）
+            s0_stored_score = float(s.get("policy_score", 0))
+            fallback_composite = s0_stored_score / 100.0 if s0_stored_score > 1.0 else s0_stored_score
             b2_agg = {
-                "composite_score": float(td.get("net_direction", 0)) if td else 0,
+                "composite_score": float(td.get("net_direction", 0)) if (td and td.get("net_direction")) else fallback_composite,
                 "policy_acceleration": float(s.get("policy_acceleration", 1.0)),
                 "regime_change_doc_count": int(s.get("regime_change_doc_count", 0)),
                 "dominant_policy_phase": str(s.get("dominant_policy_phase", "maturation")),
@@ -368,6 +461,7 @@ def synthesize_wind_scan(metrics: dict[str, Any], *, top_n: int = 30) -> dict[st
 
         candidates.append({
             "sector": sn,
+            "display_name": s.get("display_name", sn),  # v4.0: 政策官方命名
             "sector_type": s.get("sector_type", "canonical"),
             "d1_score": d1,
             "d1_tier": tier,
@@ -376,7 +470,7 @@ def synthesize_wind_scan(metrics: dict[str, Any], *, top_n: int = 30) -> dict[st
             "high_value_flag": high_value_flag,
             "needs_review": needs_review,
             "review_status": "pending" if needs_review else None,
-            "sub_concepts": s.get("sub_concepts") or [],  # v2.1：A股概念板
+            "sub_concepts": _merge_all_yaml_concepts(s.get("sub_concepts") or [], sn),  # v5.1：YAML全量对齐
             "d1_detail": {
                 "net_direction": round(float(td.get("net_direction", 0)), 4) if td else None,
                 "quality": round(float(td.get("quality", 0)), 4) if td else None,
@@ -396,8 +490,8 @@ def synthesize_wind_scan(metrics: dict[str, Any], *, top_n: int = 30) -> dict[st
             ),
         })
 
-    # D1 排序（政策视角）
-    candidates.sort(key=lambda x: (x["d1_score"] is not None, x["d1_score"] or 0), reverse=True)
+    # D1 排序（Z0+ 投资级优先，D1 政策方向兜底）
+    candidates.sort(key=lambda x: (x["z0_plus_score"] is not None, x["z0_plus_score"] or 0), reverse=True)
     candidates = candidates[:top_n]
     for i, c in enumerate(candidates, start=1):
         c["rank"] = i

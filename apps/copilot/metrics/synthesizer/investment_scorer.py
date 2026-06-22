@@ -22,7 +22,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 _PROFILE_CFG = (
-    Path(__file__).resolve().parents[3]
+    Path(__file__).resolve().parents[4]
     / "data" / "config" / "metrics" / "z0_investment_profile.yaml"
 )
 
@@ -31,18 +31,25 @@ def _clamp01(x: float) -> float:
     return max(0.0, min(1.0, x))
 
 
+_METADATA_KEYS = {"profile_version", "profile_updated_at", "score_mapping"}
+
 def _load_profile() -> dict[str, Any]:
     """加载投资画像配置。"""
     if not _PROFILE_CFG.is_file():
-        return {"investment_profiles": {}, "score_mapping": {}}
+        return {"_profiles": {}, "score_mapping": {}}
     with _PROFILE_CFG.open(encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
 
 def _get_profile(sector: str) -> dict[str, Any]:
-    """获取单个赛道的投资画像。"""
-    profiles = _load_profile().get("investment_profiles") or {}
-    return profiles.get(sector) or {}
+    """获取单个赛道的投资画像（从 YAML 根级读取，跳过元数据键）。"""
+    raw = _load_profile()
+    # 根级所有非元数据 key 即为赛道名
+    for key in raw:
+        if key not in _METADATA_KEYS and isinstance(raw[key], dict):
+            if key == sector:
+                return raw[key]
+    return {}
 
 
 def _get_mapping() -> dict[str, dict[str, float]]:

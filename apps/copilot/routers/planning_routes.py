@@ -146,6 +146,7 @@ async def _strategic_roadmap_context(session: AsyncSession, request: Request) ->
     """
     from apps.copilot.modules.strategic.render import (
         render_command_center_main,
+        render_ecosystem_section,
         render_phase_panel,
     )
     from apps.copilot.modules.strategic.service import (
@@ -220,7 +221,7 @@ async def _strategic_roadmap_context(session: AsyncSession, request: Request) ->
         "strategic_board_list_html": left_html,
         "strategic_main_html": render_command_center_main(
             detail, selected_phase_id=phase_id
-        ),
+        ) + (render_ecosystem_section(detail) if detail else ""),
         "strategic_panel_html": render_phase_panel(phase_detail) if phase_detail else "",
         "strategic_cvm_html": cvm_html,
         "strategic_core_pool_html": core_pool_html,

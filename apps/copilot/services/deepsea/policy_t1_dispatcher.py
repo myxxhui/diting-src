@@ -279,8 +279,27 @@ def _reverse_lookup_canonical(raw_sector_name: str) -> str | None:
     return None
 
 
+def _load_display_name(canonical_sector: str) -> str:
+    """从 YAML 读取赛道前端展示名（政策官方命名体系）。"""
+    if canonical_sector.startswith("_unmapped:"):
+        return canonical_sector.split(":", 1)[-1]
+    try:
+        from pathlib import Path
+        import yaml as _yaml
+        cfg_path = Path(__file__).resolve().parents[4] / "data" / "config" / "metrics" / "z0_policy_keywords.yaml"
+        with cfg_path.open(encoding="utf-8") as f:
+            cfg = _yaml.safe_load(f) or {}
+        cs = (cfg.get("canonical_sectors") or {}).get(canonical_sector) or {}
+        return str(cs.get("display_name") or canonical_sector)
+    except Exception:
+        return canonical_sector
+
+
 def _load_child_concepts(canonical_sector: str) -> list[dict[str, str]]:
-    """懒加载规范赛道 → A股概念板列表（含 code）+ ingest_keywords 作为模糊匹配源。"""
+    """懒加载规范赛道 → A股概念板列表（仅 child_concepts，不含 ingest/llm_aliases）。
+    
+    v4.0: ingest_keywords 和 llm_aliases 仅用于文档→赛道映射（不纳入 concept 列表）。
+    """
     if canonical_sector in _CONCEPT_CACHE:
         return _CONCEPT_CACHE[canonical_sector]
     from pathlib import Path
@@ -293,12 +312,6 @@ def _load_child_concepts(canonical_sector: str) -> list[dict[str, str]]:
         cs = (cfg.get("canonical_sectors") or {}).get(canonical_sector) or {}
         for cc in cs.get("child_concepts") or []:
             concepts.append({"concept_name": str(cc["name"]), "concept_code": str(cc.get("code", ""))})
-        # ingest_keywords 同样作为候选概念名（帮助 LLM 原文术语命中）
-        for kw in (cs.get("ingest_keywords") or []):
-            concepts.append({"concept_name": str(kw), "concept_code": ""})
-        # llm_aliases 加入匹配
-        for alias in (cs.get("llm_aliases") or []):
-            concepts.append({"concept_name": str(alias), "concept_code": ""})
     except Exception:
         pass
     # 去重
@@ -312,21 +325,177 @@ def _load_child_concepts(canonical_sector: str) -> list[dict[str, str]]:
     return deduped
 
 
+# ─── 同义词白名单（精确匹配之外允许的映射） ───
+_CONCEPT_SYNONYM_WHITELIST: dict[str, list[str]] = {
+    "人工智能": ["人工智能产业", "新一代人工智能", "大模型训练", "生成式人工智能"],
+    "芯片概念": ["集成电路", "芯片产业", "半导体芯片", "先进计算"],
+    "东数西算(算力)": ["算力基础设施", "智算中心", "算力网络", "算力枢纽"],
+    "数据中心(AIDC)": ["数据中心", "智能计算中心", "AIDC"],
+    "算力租赁": ["算力租赁", "算力服务"],
+    "多模态AI": ["多模态大模型", "多模态"],
+    "AI智能体": ["AI Agent", "智能体", "AI智能体"],
+    "第三代半导体": ["碳化硅", "氮化镓", "SiC", "GaN", "第三代半导体"],
+    "存储芯片": ["HBM", "高带宽存储", "存储芯片"],
+    "MCU芯片": ["MCU", "微控制器", "车规级芯片"],
+}
+
+def _normalize_name(name: str) -> str:
+    """去除空格、标点，统一小写。"""
+    import re
+    return re.sub(r"[\s\-\(\)（）]", "", name.lower())
+
+def _exact_match_concept_name(concept_name: str, candidate_name: str) -> bool:
+    """精确匹配：两端标准化后完全相等 → True。否则查同义词白名单。"""
+    nn = _normalize_name(concept_name)
+    cn = _normalize_name(candidate_name)
+    if nn == cn:
+        return True
+    # 查白名单：candidate_name 是否在 concept_name 的允许同义词中
+    synonyms = _CONCEPT_SYNONYM_WHITELIST.get(concept_name) or []
+    for syn in synonyms:
+        if _normalize_name(syn) == cn:
+            return True
+    # 双向查白名单
+    for cname, slist in _CONCEPT_SYNONYM_WHITELIST.items():
+        if _normalize_name(cname) == cn:
+            for syn in slist:
+                if _normalize_name(syn) == nn:
+                    return True
+    return False
+
+
 def _match_child_concepts(canonical_sector: str, sector_name: str) -> list[dict[str, str]]:
     """将 LLM 输出的原文术语 sector_name 匹配到规范赛道下的 A股概念板名称列表。
-    未匹配到时，将 sector_name 本身作为一个新概念加入（确保所有原文名称都有归集）。"""
+    
+    v4.0 变更（§5.5.3）：
+    - 禁止子串匹配 → 仅精确匹配 + 同义词白名单
+    - 未匹配到时不自动创建新概念（避免命名污染）
+    - 仅返回 YAML 中配置的 child_concepts
+    """
     candidates = _load_child_concepts(canonical_sector)
     matches: list[dict[str, str]] = []
-    sn = sector_name.lower()
     for c in candidates:
-        cn = c["concept_name"].lower()
-        # 双向包含匹配
-        if sn and cn and (cn in sn or sn in cn):
+        if _exact_match_concept_name(c["concept_name"], sector_name):
             matches.append(c)
-    # 未匹配到时，将原文术语本身作为一个概念
+    # 未匹配到不自动创建新概念（v4.0 禁）
     if not matches:
-        matches.append({"concept_name": sector_name, "concept_code": ""})
+        # 只保留与原文术语精确匹配或白名单匹配的
+        return []
     return matches[:3]
+
+
+def _reverse_lookup_concept_to_sector(concept_name: str) -> tuple[str | None, dict[str, str] | None]:
+    """v5.0: 根据概念名反查其所属的规范赛道。
+    
+    从 YAML 的 canonical_sectors 反向遍历 child_concepts 找匹配。
+    返回 (sector_key, concept_info_dict) 或 (None, None)。
+    """
+    try:
+        cfg_path = Path(__file__).resolve().parents[4] / "data" / "config" / "metrics" / "z0_policy_keywords.yaml"
+        with cfg_path.open(encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        for sector_key, sector_cfg in (cfg.get("canonical_sectors") or {}).items():
+            for cc in sector_cfg.get("child_concepts") or []:
+                if str(cc.get("name", "")).strip() == concept_name:
+                    return sector_key, {
+                        "concept_name": concept_name,
+                        "concept_code": str(cc.get("code", "")),
+                    }
+    except Exception:
+        pass
+    return None, None
+
+
+async def _llm_semantic_map_to_concept(
+    term: str,
+    canonical_sector: str,
+    *,
+    model: str = "deepseek-chat",
+) -> str | None:
+    """v5.0 语义映射兜底：将 LLM 自由术语映射到最近的 child_concept。
+    
+    仅作兜底用；新文档通过 T1 prompt 改造应不触发此路径。
+    """
+    concept_list = _load_child_concepts(canonical_sector)
+    if not concept_list:
+        return None
+    options = ", ".join(c["concept_name"] for c in concept_list)
+    prompt = f"""赛道「{canonical_sector}」下有这些A股概念板：
+[{options}]
+
+政策原文术语「{term}」最贴近其中哪个概念板？仅输出一个名字。如果都不贴近，输出 NONE。"""
+
+    try:
+        from apps.common.ai_dispatcher import AIDispatcher
+
+        dispatcher = AIDispatcher.default()
+        result = dispatcher.call(
+            scene="z0_concept_semantic_map",
+            messages=[
+                {"role": "system", "content": "只输出概念名或 NONE，无其他内容。"},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.0,
+            max_tokens=30,
+            model_override=model,
+            force_route="deepseek",
+        )
+        resp = str(result.text or "").strip()
+        if resp.upper() == "NONE":
+            return None
+        # 验证输出是合法概念名
+        valid_names = {c["concept_name"] for c in concept_list}
+        if resp in valid_names:
+            return resp
+        # 模糊匹配一次
+        for name in valid_names:
+            if resp in name or name in resp:
+                return name
+        return None
+    except Exception:
+        return None
+
+
+async def _verify_concept_relevance(
+    concept_name: str,
+    canonical_sector: str,
+    policy_term: str,
+    *,
+    model: str = "deepseek-chat",
+) -> bool:
+    """v4.0 概念相关性校验闸：LLM 判断匹配是否合理。
+
+    Returns True 仅当 LLM 回答 YES；超时/失败时默认保守处理为 False。
+    """
+    prompt = f"""你是A股行业分类专家。请判断以下匹配是否正确：
+
+- 政策文档原文术语：「{policy_term}」
+- 被匹配到的规范赛道：「{canonical_sector}」
+- 被匹配到的A股概念板：「{concept_name}」
+
+问题：这个A股概念板「{concept_name}」是否真正属于「{canonical_sector}」赛道，且与原文术语「{policy_term}」在A股投资逻辑上直接相关？
+
+只回答一个词：YES 或 NO。如果原文术语是泛化/跨领域表述，或该概念与赛道核心定义无关，回答 NO。"""
+
+    try:
+        from apps.common.ai_dispatcher import AIDispatcher
+
+        dispatcher = AIDispatcher.default()
+        result = dispatcher.call(
+            scene="z0_concept_verify",
+            messages=[
+                {"role": "system", "content": "只回答 YES 或 NO。"},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.0,
+            max_tokens=10,
+            model_override=model,
+            force_route="deepseek",
+        )
+        resp_text = str(result.text or "").strip().upper()[:3]
+        return "YES" in resp_text
+    except Exception:
+        return False
 
 
 def _aggregate_with_decay(
@@ -396,6 +565,7 @@ def _aggregate_with_decay(
 
             bucket = sector_scores.setdefault(sector, {
                 "sector": sector,
+                "display_name": _load_display_name(sector),  # v4.0: 政策官方命名
                 "composite_score": 0.0,
                 "total_weight": 0.0,
                 "doc_count": 0,
@@ -418,29 +588,50 @@ def _aggregate_with_decay(
             if b1.get("high_value_flag"):
                 bucket["high_value_flag"] = True
 
-            # 子概念计数（v2.1：按 A股概念板匹配 + 证据引用归属）
-            child_matches = _match_child_concepts(sector, sub_name) if not sector.startswith("_unmapped:") else []
-            for cm in child_matches:
-                sub = bucket["sub_concepts"].setdefault(cm["concept_name"], {
-                    "sub_name": cm["concept_name"],
-                    "concept_code": cm.get("concept_code", ""),
-                    "doc_count": 0,
-                    "composite_score": 0.0,
-                    "total_weight": 0.0,
-                    "evidence_quotes": [],  # v2.1：每个A股概念归集原文引用
-                })
-                sub["doc_count"] += 1
-                sub["composite_score"] += effective
-                sub["total_weight"] += w_total
-                # 归集属于该子概念的证据原文
-                for quote in item.get("evidence_quotes") or []:
-                    if len(sub["evidence_quotes"]) < 10:
-                        sub["evidence_quotes"].append({
-                            "quote": quote[:500],
-                            "doc_id": did,
-                            "direction": direction,
-                            "impact_score": impact,
+            # v5.0 A股概念板标记（优先级：LLM直出 selected_concepts > 规则匹配兜底）
+            selected_concepts = b1.get("selected_concepts") or []
+            _concept_by_sector = {}
+            if selected_concepts and not sector.startswith("_unmapped:"):
+                for concept_name in selected_concepts:
+                    # 反查该概念属于哪个规范赛道
+                    belonging_sector, concept_info = _reverse_lookup_concept_to_sector(concept_name)
+                    if belonging_sector and concept_info:
+                        _concept_by_sector.setdefault(belonging_sector, []).append(concept_info)
+                # 将属于当前 sector 的概念归入 sub_concepts
+                for cn_info in _concept_by_sector.get(sector, []):
+                    sub = bucket["sub_concepts"].setdefault(cn_info["concept_name"], {
+                        "sub_name": cn_info["concept_name"],
+                        "concept_code": cn_info.get("concept_code", ""),
+                        "doc_count": 0,
+                        "composite_score": 0.0,
+                        "total_weight": 0.0,
+                        "evidence_quotes": [],
+                    })
+                    sub["doc_count"] += 1
+                    sub["composite_score"] += effective
+                    sub["total_weight"] += w_total
+                    for quote in item.get("evidence_quotes") or []:
+                        if len(sub["evidence_quotes"]) < 10:
+                            sub["evidence_quotes"].append({
+                                "quote": quote[:500],
+                                "doc_id": did,
+                                "direction": direction,
+                                "impact_score": impact,
+                            })
+            elif not selected_concepts:
+                # 兜底：v4.0 规则匹配（历史数据兼容）
+                if not sector.startswith("_unmapped:"):
+                    child_matches = _match_child_concepts(sector, sub_name)
+                    for cm in child_matches:
+                        sub = bucket["sub_concepts"].setdefault(cm["concept_name"], {
+                            "sub_name": cm["concept_name"],
+                            "concept_code": cm.get("concept_code", ""),
+                            "doc_count": 0,
+                            "composite_score": 0.0,
+                            "total_weight": 0.0,
+                            "evidence_quotes": [],
                         })
+                        sub["doc_count"] += 1
 
             # v3.0 Z0+: 收集新字段
             rev_type = str(item.get("revenue_transmission_type") or "political_rhetoric")
@@ -788,6 +979,7 @@ def _insert_policy_indicator_state(
         "policy_sectors": sectors,
         "overall_assessment": signal.get("overall_assessment", ""),
         "high_value_flag": signal.get("high_value_flag", False),
+        "selected_concepts": signal.get("selected_concepts", []),  # v5.0
         "t1_source": signal.get("t1_source", T1_SOURCE),
         "llm_confidence": signal.get("llm_confidence", 0.0),
         "token_used": signal.get("token_used", 0),

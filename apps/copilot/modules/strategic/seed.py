@@ -9,6 +9,7 @@ AI_ECOSYSTEM_SEED: dict = {
     "horizon_start": 2026,
     "horizon_end": 2036,
     "color_token": "indigo",
+    "is_template": True,
     "qualitative_md": (
         "战略定性：Beta 利润尾声 · Alpha 硬核技术爆发前夜，"
         "向全栈国产替代、算力精算、B 端私有化、具身智能四波次演进。"

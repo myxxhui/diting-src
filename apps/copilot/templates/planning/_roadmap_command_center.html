@@ -6,7 +6,7 @@
         <span class="text-lg">🧭</span>
         <h2 class="text-base font-semibold text-gray-900">产业风向台 · 战略指挥台</h2>
       </div>
-      <p class="text-sm text-gray-500 mt-0.5">指标先行 A→B→C→D · wind_scan · genesis · CVM · 派单 Z1</p>
+      <p class="text-sm text-gray-500 mt-0.5">指标先行 A→B→C→D · wind_scan · 智能建板 · CVM · 派单 Z1</p>
     </div>
     <div class="flex flex-wrap gap-2">
       <a href="/z0/policy/admin"
@@ -18,7 +18,7 @@
               hx-get="/api/strategic/genesis/wizard?step=1"
               hx-target="#genesis-wizard-root"
               hx-swap="innerHTML">
-        Genesis 建板
+        Genesis 智能建板
       </button>
       <button type="button"
               class="text-sm px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
@@ -31,6 +31,7 @@
   </div>
 
   <div id="genesis-wizard-root"></div>
+  <div id="genesis-toast"></div>
 
   <div class="flex flex-col xl:flex-row min-h-[28rem]">
     <aside class="xl:w-60 shrink-0 border-b xl:border-b-0 xl:border-r border-gray-100 bg-gray-50/50"
@@ -51,7 +52,7 @@
            id="strategic-phase-panel">
       {% if z0_mode == 'wind' %}
         {{ strategic_p0_banner_html|default('')|safe }}
-        <p class="text-xs text-gray-400 text-center py-6">完成 genesis 建板后切换「战略板块」模式</p>
+        <p class="text-xs text-gray-400 text-center py-6">完成智能建板后切换「战略板块」模式</p>
       {% elif strategic_panel_html %}
         {{ strategic_panel_html|safe }}
         {% if strategic_core_pool_html %}{{ strategic_core_pool_html|safe }}{% endif %}

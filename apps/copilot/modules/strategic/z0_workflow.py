@@ -360,7 +360,7 @@ async def genesis_preview(
     return {
         "board_title": title,
         "horizon_start": start_year,
-        "horizon_end": min(end_year, cursor - 1),
+        "horizon_end": end_year,
         "source_wind_scan_id": wind_id,
         "candidates": candidates,
         "phases": phases,
@@ -372,26 +372,86 @@ async def genesis_apply(session: AsyncSession, payload: dict[str, Any]) -> Strat
     from apps.copilot.modules.strategic.service import _create_board_from_payload
 
     preview = await genesis_preview(session, payload)
+    barbell = payload.get("barbell_config_json") or None
+    selected_concepts = payload.get("selected_concepts") or []
+    selected_sector = payload.get("sector") or ""
+    selected_bom_nodes = payload.get("selected_bom_nodes") or []
+    if not barbell and (selected_concepts or selected_sector or selected_bom_nodes):
+        # 查找官方展示名（AI算力 → 人工智能产业）
+        _dname = selected_sector
+        try:
+            from pathlib import Path
+            import yaml as _yaml
+            _p = Path(__file__).resolve().parents[4] / "data" / "config" / "metrics" / "z0_policy_keywords.yaml"
+            with _p.open(encoding="utf-8") as _f:
+                _cfg = _yaml.safe_load(_f) or {}
+            _cs = (_cfg.get("canonical_sectors") or {}).get(selected_sector) or {}
+            _dname = str(_cs.get("display_name") or selected_sector)
+        except Exception:
+            pass
+        barbell = {
+            "genesis_sector": selected_sector,
+            "genesis_sector_display_name": _dname,
+            "genesis_concepts": selected_concepts,
+            "genesis_bom_nodes": [
+                {"node_id": n["node_id"], "name": n.get("name", n["node_id"]), "tier": n.get("tier", "配套"), "layer": n.get("layer") or None}
+                for n in selected_bom_nodes
+            ],
+        }
     board_payload = {
         "name": preview["board_title"],
         "horizon_start": preview["horizon_start"],
         "horizon_end": preview["horizon_end"],
         "qualitative_md": (payload.get("qualitative_md") or "").strip()
-        or f"Genesis 建板 · 候选 {len(preview.get('candidates') or [])} 项",
+        or f"智能建板 · 候选 {len(preview.get('candidates') or [])} 项",
         "color_token": "indigo",
-        "barbell_config_json": None,
+        "barbell_config_json": barbell,
         "phases": preview.get("phases") or [],
     }
-    board = await _create_board_from_payload(session, board_payload)
+    board, phases = await _create_board_from_payload(session, board_payload)
     if preview.get("source_wind_scan_id"):
         board.source_wind_scan_id = int(preview["source_wind_scan_id"])
+
+    # v5.1: 保存 LLM 生态位推断标的池
+    stock_pool_raw = payload.get("stock_pool_json")
+    if stock_pool_raw:
+        import json as _json
+        if isinstance(stock_pool_raw, str):
+            try:
+                stock_pool_raw = _json.loads(stock_pool_raw)
+            except _json.JSONDecodeError:
+                pass
+        if isinstance(stock_pool_raw, dict):
+            board.stock_pool_json = stock_pool_raw
+
+            # 自动填充第一阶段 symbols
+            pools = stock_pool_raw.get("concept_pools") or []
+            seen_symbols: set[str] = set()
+            first_phase = phases[0] if phases else None
+            if first_phase:
+                for pool in pools:
+                    for stock in (pool.get("stocks") or []):
+                        sym = str(stock.get("symbol", "")).strip()
+                        if not sym or not sym.isdigit() or len(sym) != 6:
+                            continue
+                        if sym in seen_symbols:
+                            continue
+                        seen_symbols.add(sym)
+                        from apps.copilot.db.models import StrategicPhaseSymbol
+                        session.add(StrategicPhaseSymbol(
+                            phase_id=first_phase.id,
+                            symbol=sym,
+                            role_tag=str(stock.get("ecosystem_position", "")),
+                            watch_only=True,
+                            source="genesis_llm",
+                        ))
 
     niche_layers = payload.get("niche_layers") or []
     default_weights = (_load_genesis_template().get("niche_defaults") or {}).get(
         "e1_e5_weights"
     ) or {"e1": 0.25, "e2": 0.2, "e3": 0.2, "e4": 0.2, "e5": 0.15}
 
-    for i, ph in enumerate(board.phases):
+    for i, ph in enumerate(phases):
         niche = niche_layers[i] if i < len(niche_layers) else {}
         ph.niche_template_json = {
             "niche_id": niche.get("niche_id") or f"niche-{ph.wave_no}",

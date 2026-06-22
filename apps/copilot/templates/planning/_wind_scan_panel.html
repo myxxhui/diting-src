@@ -79,7 +79,7 @@
     {% set tier = c.get('d1_tier') or {} %}
     {% set is_canonical = c.get('sector_type', 'canonical') == 'canonical' %}
     {% set border_style = 'border-l-4 border-l-sky-500' if is_canonical else 'border-l-4 border-l-amber-400 opacity-75' %}
-    {% set display_name = c.sector[10:] if c.sector.startswith('_unmapped:') else c.sector %}
+    {% set display_name = c.get('display_name') or (c.sector[10:] if c.sector.startswith('_unmapped:') else c.sector) %}
     <details class="sector-wind-card rounded-lg border {{ rank_class }} shadow-sm overflow-hidden {{ border_style }}"
              hx-get="/api/strategic/z0/sector-detail?sector={{ c.sector }}"
              hx-target="#sector-detail-body-{{ loop.index }}"
@@ -173,7 +173,7 @@
             hx-get="/api/strategic/genesis/wizard?step=1"
             hx-target="#genesis-wizard-root"
             hx-swap="innerHTML">
-      从候选建板（genesis）
+      从候选智能建板
     </button>
     {% if scan and scan.p0_snapshot %}
     <span class="text-[10px] text-gray-500 self-center">

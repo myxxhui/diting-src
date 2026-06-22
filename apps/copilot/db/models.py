@@ -1304,6 +1304,8 @@ class StrategicBoard(Base):
     barbell_config_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)
     color_token: Mapped[str] = mapped_column(String(32), nullable=False, default="indigo")
     source_wind_scan_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # v5.4: 模板板可删除
+    stock_pool_json: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, nullable=True)  # v5.1: Genesis 生态位推断标的池
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )

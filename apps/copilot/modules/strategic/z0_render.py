@@ -36,6 +36,13 @@ def render_genesis_wizard(
     error: str = "",
     candidates: Optional[list[dict[str, Any]]] = None,
     boards: Optional[list[dict[str, Any]]] = None,
+    sector_data: Optional[dict[str, Any]] = None,
+    selected_concepts: Optional[list[str]] = None,
+    sector: str = "",
+    sector_display_name: str = "",
+    bom_nodes: Optional[list[tuple[str, str, str]]] = None,
+    bom_proposal: Optional[dict[str, Any]] = None,
+    selected_bom_nodes: Optional[list[dict[str, str]]] = None,
 ) -> str:
     return _render(
         "_genesis_wizard.html",
@@ -45,6 +52,13 @@ def render_genesis_wizard(
         error=error,
         candidates=candidates or [],
         boards=boards or [],
+        sector_data=sector_data,
+        selected_concepts=selected_concepts or [],
+        sector=sector,
+        sector_display_name=sector_display_name,
+        bom_nodes=bom_nodes or [],
+        bom_proposal=bom_proposal,
+        selected_bom_nodes=selected_bom_nodes or [],
     )
 
 
