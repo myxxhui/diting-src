@@ -454,18 +454,37 @@ def _parse_json_output(raw: str) -> dict[str, Any]:
                 continue
 
     # 5. 全部失败，尝试截断修复：补全不完整的括号和引号
-    # ── 日志：解析失败详情 ──
-    _last_200 = text[-200:] if len(text) > 200 else text
-    _ends_with_brace = text.rstrip().endswith("}")
-    # 尝试修复截断的 JSON（LLM max_tokens 不够导致输出被截）
-    try:
-        # 找到最后一个完整的 JSON 值边界
-        # 策略：从尾部逐字符向前找最后一个完整的 }, ], " 或数字
-        _fixed = _fix_truncated_json(text)
-        if _fixed:
+    _fixed = _fix_truncated_json(text)
+    if _fixed and _fixed != text:
+        try:
             parsed = json.loads(_fixed)
             if isinstance(parsed, dict):
                 return parsed
+        except Exception:
+            pass
+
+    # 6. 最后手段：用 raw_decode 定位错误，跳过问题字符后重试
+    try:
+        _decoder = json.JSONDecoder()
+        parsed, _end = _decoder.raw_decode(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError as e:
+        # 尝试跳过错误字符 (e.pos) 后的内容重新拼接
+        _err_pos = e.pos
+        if _err_pos > 0:
+            # 在错误位置附近找一个安全的断点（前一个 } 或 , 后）
+            _safe = max(text.rfind('}', 0, _err_pos), text.rfind('"', 0, _err_pos))
+            if _safe > 0:
+                _trimmed = text[:_safe + 1]
+                # 用 _close_json 补全
+                _fixed2 = _close_json(_trimmed)
+                try:
+                    parsed = json.loads(_fixed2)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except json.JSONDecodeError:
+                    pass
     except Exception:
         pass
 
