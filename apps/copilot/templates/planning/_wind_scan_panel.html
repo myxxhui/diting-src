@@ -1,7 +1,29 @@
-{# 段 A · 宏观风向标 [Ref: 33_ §4.3] #}
+{# 段 A · 宏观政策风向标 · v5.1 Policy + Investment Grade [Ref: 33_ §4.3] #}
 <div id="wind-scan-panel" class="space-y-4">
   <div class="flex flex-wrap items-center justify-between gap-2">
-    <h3 class="text-sm font-semibold text-gray-800">宏观风向标 · wind_scan</h3>
+    <div class="flex items-center gap-2">
+      <h3 class="text-sm font-semibold text-gray-800">政策风向标</h3>
+      <!-- Z0/Z0+ 视角切换 -->
+      {% if scan and scan.available_views %}
+      <input type="hidden" id="current-view" name="current_view" value="investment">
+      <div class="flex rounded-lg border border-gray-200 overflow-hidden text-xs" x-data="{ view: 'investment' }">
+        <button type="button"
+                class="px-2 py-1"
+                :class="view === 'policy' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                @click="view = 'policy'; $dispatch('view-change', 'policy')"
+                title="纯政策信号视角：按政策文档评分排序">
+          📊 政策
+        </button>
+        <button type="button"
+                class="px-2 py-1"
+                :class="view === 'investment' ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
+                @click="view = 'investment'; $dispatch('view-change', 'investment')"
+                title="投资级视角：叠加商业轨迹、资本引力、落地质量四轴评分排序">
+          💎 投资
+        </button>
+      </div>
+      {% endif %}
+    </div>
     <div class="flex flex-wrap gap-2">
       <button type="button"
               class="text-xs px-3 py-1.5 rounded-lg border border-sky-200 text-sky-800 hover:bg-sky-50"
@@ -21,9 +43,9 @@
   </div>
 
   {% if scan and scan.status == 'ready' %}
-  <div class="rounded-lg border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs text-emerald-900 space-y-1">
-    <p>段 A 就绪 · {{ scan.candidates|length }} 个候选赛道 · advisory_only</p>
-    <p class="text-emerald-800/90">说明：启动期为<strong>政策标题关键词 + 概念热度</strong>规则合成，<strong>不是</strong>未来 5～10 年「最具潜力板块」排名；扩展期接规划纲要与 LLM T2 再升维。</p>
+  <div class="rounded-lg border border-emerald-100 bg-gradient-to-r from-emerald-50/80 to-white px-3 py-2 text-xs text-emerald-900 space-y-1">
+    <p>Z0 纯政策风向 + Z0+ 投资级评分 · {{ scan.candidates|length }} 个候选赛道</p>
+    <p class="text-emerald-800/90">支持「政策」和「投资」双视角切换。投资视角叠加商业轨迹(30%)、资本引力(25%)、落地质量(15%)。</p>
   </div>
   {% elif scan and scan.status == 'error' %}
   <div class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
@@ -31,38 +53,117 @@
   </div>
   {% elif scan and scan.status == 'empty' %}
   <div class="rounded-lg border border-amber-100 bg-amber-50/80 px-3 py-2 text-xs text-amber-900">
-    暂无显著风口偏移 · {{ scan.blocker or '待宏观采集就绪' }}
+    暂无政策风向偏移 · {{ scan.blocker or '待采集就绪' }}
   </div>
-  {% elif scan and scan.candidates %}
-  <div class="overflow-x-auto border border-gray-100 rounded-lg">
-    <table class="min-w-full text-xs">
-      <thead class="bg-gray-50 text-gray-600">
-        <tr>
-          <th class="px-2 py-2 text-left w-8">#</th>
-          <th class="px-2 py-2 text-left">赛道</th>
-          <th class="px-2 py-2 text-left w-24">wind_score</th>
-          <th class="px-2 py-2 text-left">证据摘要</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for c in scan.candidates %}
-        <tr class="border-t border-gray-50">
-          <td class="px-2 py-2">{{ loop.index }}</td>
-          <td class="px-2 py-2 font-medium">{{ c.sector }}</td>
-          <td class="px-2 py-2">
-            {% if c.wind_score is not none %}
-            <div class="h-1.5 bg-gray-100 rounded-full"><div class="h-full bg-sky-500 rounded-full" style="width: {{ (c.wind_score * 100)|int }}%"></div></div>
-            {% else %}—{% endif %}
-          </td>
-          <td class="px-2 py-2 text-gray-500 truncate max-w-[200px]">{{ c.evidence_summary or '—' }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  {% endif %}
+
+  {% if scan and scan.candidates %}
+  {% set canonical_cands = scan.candidates | selectattr('sector_type', 'equalto', 'canonical') | list %}
+  {% set unmapped_cands = scan.candidates | selectattr('sector_type', 'equalto', 'unmapped') | list %}
+  <div class="text-xs text-gray-500 mb-2">
+    规范赛道 {{ canonical_cands|length }} 个 · 未映射 {{ unmapped_cands|length }} 个 · 共 {{ scan.candidates|length }} 个
+    <span class="text-gray-300 ml-2">|</span>
+    <span class="text-emerald-600 font-medium">投资视角</span>
   </div>
-  {% else %}
+  <div class="space-y-2" id="sector-ranking-cards">
+    {% for c in scan.candidates %}
+    {# 投资视角下用 z0_plus_score 排序，无 z0+ 的用 d1_score #}
+    {% set display_score = c.get('z0_plus_score') or c.get('d1_score') or 0 %}
+    {% if c.get('z0_plus_score') is not none %}
+      {% set sort_key = c.z0_plus_score %}
+    {% else %}
+      {% set sort_key = c.d1_score or 0 %}
+    {% endif %}
+    {# 在模板中不做排序，后端已经按 d1 排序，前端 JS 渲染时再由 sorted_candidates 控制 #}
+    {% set rank_class = 'bg-sky-50 border-sky-200' if loop.index == 1 else ('bg-white border-gray-200' if loop.index <= 3 else 'bg-white border-gray-100') %}
+    {% set tier = c.get('d1_tier') or {} %}
+    {% set is_canonical = c.get('sector_type', 'canonical') == 'canonical' %}
+    {% set border_style = 'border-l-4 border-l-sky-500' if is_canonical else 'border-l-4 border-l-amber-400 opacity-75' %}
+    {% set display_name = c.sector[10:] if c.sector.startswith('_unmapped:') else c.sector %}
+    <details class="sector-wind-card rounded-lg border {{ rank_class }} shadow-sm overflow-hidden {{ border_style }}"
+             hx-get="/api/strategic/z0/sector-detail?sector={{ c.sector }}"
+             hx-target="#sector-detail-body-{{ loop.index }}"
+             hx-swap="innerHTML"
+             hx-trigger="click once"
+             hx-indicator="#sector-loading-{{ loop.index }}">
+      <summary class="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50/50 list-none">
+        <span class="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold
+                     {% if loop.index == 1 %}bg-emerald-600 text-white
+                     {% elif loop.index == 2 %}bg-emerald-500 text-white
+                     {% elif loop.index == 3 %}bg-emerald-400 text-white
+                     {% else %}bg-gray-200 text-gray-600{% endif %}">
+          {{ loop.index }}
+        </span>
+        <div class="flex-1 min-w-0">
+          <span class="text-sm font-semibold text-gray-900">{{ display_name }}</span>
+          <div class="flex items-center gap-1.5 mt-0.5">
+            <!-- D1 政策分（灰色小字）-->
+            {% if c.d1_score is not none %}
+            <span class="text-[9px] text-gray-400" title="政策方向分">D1 {{ "%.0f"|format(c.d1_score*100) }}</span>
+            {% endif %}
+            <!-- Z0+ 投资分 -->
+            {% set zplus = c.get('z0_plus_score') %}
+            {% if zplus is not none %}
+            <span class="text-[9px] font-bold text-emerald-700" title="投资级综合分">Z0+ {{ "%.0f"|format(zplus*100) }}</span>
+            {% endif %}
+            <!-- 子概念数量 -->
+            {% set subs = c.get('sub_concepts') or [] %}
+            {% if subs %}
+            <span class="text-[9px] text-gray-400">· {{ subs|length }}个概念</span>
+            {% endif %}
+            {% if c.needs_review %}
+            <span class="text-[9px] text-amber-500 font-bold" title="D1≥{{ scan.review_threshold|default(60)|int }}分，需高级模型复审防止误判">⏳复审</span>
+            {% endif %}
+            {% if c.high_value_flag %}
+            <span class="text-[9px] text-red-500 font-bold" title="国家级专项规划/点名具体赛道">⚡高价值</span>
+            {% endif %}
+            {% set d1d = c.get('d1_detail') or {} %}
+            {% set ifl = d1d.get('imp_force_label', '') %}
+            {% if ifl and ifl != '方向性鼓励' %}
+            <span class="text-[9px] px-1 py-0 rounded bg-teal-100 text-teal-700 font-medium" title="落地力度：{{ ifl }}">
+              {{ ifl }}
+            </span>
+            {% endif %}
+          </div>
+        </div>
+        <!-- Z0+ 评分条（主评分） -->
+        {% if zplus is not none %}
+        <div class="flex items-center gap-2">
+          <div class="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div class="h-full rounded-full bg-emerald-500" style="width: {{ (zplus*100)|int }}%"></div>
+          </div>
+          <span class="text-xs font-mono font-bold text-emerald-700">{{ "%.0f"|format(zplus * 100) }}</span>
+        </div>
+        {% elif c.d1_score is not none %}
+        <div class="flex items-center gap-2">
+          <div class="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div class="h-full rounded-full" style="width: {{ (c.d1_score*100)|int }}%; background: {{ tier.get('color', '#60a5fa') }}"></div>
+          </div>
+          <span class="text-xs font-mono font-medium text-gray-700">{{ "%.0f"|format(c.d1_score * 100) }}</span>
+        </div>
+        {% endif %}
+        <span class="text-[10px] text-gray-400">▾</span>
+      </summary>
+      <div id="sector-detail-body-{{ loop.index }}"
+           class="px-4 pb-4 border-t border-gray-100">
+        <div id="sector-loading-{{ loop.index }}" class="py-4 text-center text-xs text-gray-400">
+          <svg class="animate-spin h-3 w-3 inline mr-1" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+          </svg>
+          加载详情…
+        </div>
+      </div>
+    </details>
+    {% endfor %}
+  </div>
+  <style>
+    .sector-wind-card summary::-webkit-details-marker { display: none; }
+    .sector-wind-card summary::marker { content: ''; }
+  </style>
+  {% elif not scan %}
   <div class="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-500">
-    尚未运行风向标 · 点击「刷新风向标」开始段 A
+    尚未运行风向标 · 点击「刷新风向标」开始
   </div>
   {% endif %}
 

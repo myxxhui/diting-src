@@ -37,12 +37,20 @@ def _sync_db_url() -> str:
 
 def load_policy_keywords() -> dict[str, Any]:
     if not _POLICY_CFG.is_file():
-        return {"queries": [], "sector_aliases": {}}
+        return {"queries": [], "sector_aliases": {}, "canonical_sectors": {}}
     with _POLICY_CFG.open(encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+        cfg = yaml.safe_load(f) or {}
+    # v2.0 兼容：为依赖 sector_aliases 的旧代码生成该字段
+    if not cfg.get("sector_aliases") and cfg.get("canonical_sectors"):
+        cfg["sector_aliases"] = {
+            name: sec.get("ingest_keywords") or []
+            for name, sec in cfg["canonical_sectors"].items()
+        }
+    return cfg
 
 
 def _match_sectors(text: str, aliases: dict[str, list[str]]) -> list[str]:
+    """返回匹配到的赛道名列表。"""
     matched: list[str] = []
     for sector, kws in aliases.items():
         if any(kw in text for kw in kws):
@@ -121,18 +129,21 @@ def read_policy_sectors_from_pg(*, top_n: int = 10, lookback_days: int = 730) ->
                     sector = str(item["sector"]).strip()
                     if not sector:
                         continue
+                    # T2 LLM 聚合使用 composite_score，旧规则使用 policy_score
+                    score = float(item.get("composite_score") or item.get("policy_score") or 1.0)
+                    doc_count = int(item.get("doc_count") or item.get("hit_count") or 1)
                     bucket = sector_scores.setdefault(
                         sector,
                         {
                             "sector": sector,
                             "policy_score": 0.0,
                             "hit_count": 0,
-                            "direction": item.get("direction"),
+                            "direction": item.get("direction") or item.get("consensus_direction"),
                         },
                     )
-                    bucket["hit_count"] += int(item.get("hit_count") or 1)
+                    bucket["hit_count"] = doc_count
                     bucket["policy_score"] = round(
-                        max(bucket["policy_score"], float(item.get("policy_score") or 1.0)),
+                        max(bucket["policy_score"], score),
                         4,
                     )
                     if item.get("direction"):
@@ -309,5 +320,360 @@ def check_deepsea_pg_ready() -> dict[str, Any]:
         return {"status": "ok", "tables": 3}
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "error": str(exc)[:200]}
+    finally:
+        engine.dispose()
+
+
+def read_sector_detail(sector: str, *, limit: int = 30) -> dict[str, Any]:
+    """查询单个赛道的详细证据（T2 结论 + 文档原文引用 + 发布时间线）。"""
+    engine = create_engine(_sync_db_url(), future=True)
+    try:
+        with engine.connect() as conn:
+            # 查询 S0 聚合行（T2 结论）
+            agg = conn.execute(
+                text(
+                    """
+                    SELECT snapshot, inferred_at, signal_status
+                    FROM deepsea_indicator_state
+                    WHERE probe_key = :probe_key AND scope = :scope
+                    ORDER BY inferred_at DESC LIMIT 1
+                    """
+                ),
+                {"probe_key": POLICY_PROBE_KEY, "scope": S0_SCOPE},
+            ).mappings().first()
+
+            sector_info: dict[str, Any] = {"sector": sector}
+            if agg:
+                snap_raw = agg.get("snapshot")
+                if isinstance(snap_raw, str):
+                    try:
+                        snap_raw = json.loads(snap_raw)
+                    except json.JSONDecodeError:
+                        snap_raw = {}
+                snapshot = snap_raw if isinstance(snap_raw, dict) else {}
+                top = snapshot.get("top_sectors") or []
+                for ts in top:
+                    if isinstance(ts, dict) and ts.get("sector") == sector:
+                        sector_info = {
+                            "sector": sector,
+                            "composite_score": ts.get("composite_score"),
+                            "consensus_direction": ts.get("consensus_direction"),
+                            "doc_count": ts.get("doc_count"),
+                            "tailwind_count": ts.get("tailwind_count"),
+                            "headwind_count": ts.get("headwind_count"),
+                        }
+                        break
+
+                # 查询与赛道相关的政策文档证据（用 JSONB 在 DB 侧直接过滤）
+                # v2.0: 同时匹配 sector_name 和 canonical_sector
+                evidence_query = text(
+                    """
+                    SELECT s.snapshot, s.evidence_quote, s.signal_status, s.inferred_at, s.doc_id,
+                           sec.value as matched_sector
+                    FROM deepsea_indicator_state s,
+                         jsonb_array_elements(s.snapshot -> 'policy_sectors') as sec
+                    WHERE s.probe_key = :probe_key
+                      AND s.scope = :scope_doc
+                      AND (sec ->> 'sector_name' = :sector
+                           OR sec ->> 'canonical_sector' = :sector)
+                    ORDER BY s.inferred_at DESC
+                    LIMIT :lim
+                    """
+                )
+                doc_rows = conn.execute(
+                    evidence_query,
+                    {"probe_key": POLICY_PROBE_KEY, "scope_doc": "S0_doc", "sector": sector, "lim": limit},
+                ).mappings().all()
+
+                evidence_docs: list[dict[str, Any]] = []
+                for row in doc_rows:
+                    snap_raw = row.get("snapshot")
+                    if isinstance(snap_raw, str):
+                        try:
+                            snap_raw = json.loads(snap_raw)
+                        except json.JSONDecodeError:
+                            continue
+                    snapshot = snap_raw if isinstance(snap_raw, dict) else {}
+                    # 取该文档中匹配到的 sector 对象
+                    matched_raw = row.get("matched_sector")
+                    if isinstance(matched_raw, str):
+                        try:
+                            matched_raw = json.loads(matched_raw)
+                        except json.JSONDecodeError:
+                            continue
+                    s = matched_raw if isinstance(matched_raw, dict) else {}
+                    quotes = s.get("evidence_quotes") or []
+                    doc_title = snapshot.get("title") or row.get("doc_id") or ""
+                    if len(doc_title) > 80:
+                        doc_title = str(doc_title)[:80] + "..."
+                    evidence_docs.append({
+                        "doc_id": str(row.get("doc_id") or ""),
+                        "title": doc_title,
+                        "direction": s.get("direction", "neutral"),
+                        "impact_score": s.get("impact_score"),
+                        "evidence_quotes": [str(q)[:300] for q in quotes[:3]],
+                        "reasoning": str(s.get("reasoning") or "")[:200],
+                        "inferred_at": str(row.get("inferred_at") or ""),
+                        "implementation_strength": s.get("implementation_strength"),
+                        "implementation_toolkit": s.get("implementation_toolkit"),
+                    })
+
+                # 如果没有 T1 LLM 结果，回退到 doc_registry 标题匹配
+                if not evidence_docs:
+                    cutoff = datetime.now(timezone.utc) - timedelta(days=730)
+                    cfg = load_policy_keywords()
+                    aliases: dict[str, list[str]] = cfg.get("sector_aliases") or {}
+                    kws = aliases.get(sector, [sector])
+                    doc_rows = conn.execute(
+                        text(
+                            """
+                            SELECT doc_id, published_at, lineage_tags
+                            FROM deepsea_doc_registry
+                            WHERE doc_type = :doc_type
+                              AND (published_at IS NULL OR published_at >= :cutoff)
+                            ORDER BY published_at DESC
+                            LIMIT :lim
+                            """
+                        ),
+                        {"doc_type": POLICY_DOC_TYPE, "cutoff": cutoff.replace(tzinfo=None), "lim": limit},
+                    ).mappings().all()
+
+                    for doc in doc_rows:
+                        tags = doc.get("lineage_tags") or {}
+                        if isinstance(tags, str):
+                            try:
+                                tags = json.loads(tags)
+                            except json.JSONDecodeError:
+                                tags = {}
+                        title = str(tags.get("title") or "")
+                        if any(kw in title for kw in kws):
+                            evidence_docs.append({
+                                "doc_id": str(doc.get("doc_id") or ""),
+                                "title": title[:80],
+                                "direction": "neutral",
+                                "impact_score": None,
+                                "evidence_quotes": [],
+                                "reasoning": "",
+                                "published_at": str(doc.get("published_at") or ""),
+                            })
+                    evidence_docs = evidence_docs[:limit]
+
+                sector_info["evidence_docs"] = evidence_docs
+                sector_info["status"] = "ok"
+            else:
+                # 无 S0 聚合数据
+                sector_info = {
+                    "sector": sector,
+                    "composite_score": None,
+                    "consensus_direction": None,
+                    "doc_count": 0,
+                    "tailwind_count": 0,
+                    "headwind_count": 0,
+                    "evidence_docs": [],
+                    "status": "no_data",
+                }
+
+            return sector_info
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("赛道详情读取失败 sector=%s: %s", sector, exc)
+        return {"sector": sector, "status": "error", "detail": str(exc)[:200]}
+    finally:
+        engine.dispose()
+
+
+def compute_time_weighted_directions() -> dict[str, dict[str, Any]]:
+    """对每个赛道，按时间衰减加权计算利好 vs 利空的方向得分。
+
+    返回 dict[sector] = {
+        net_direction: -1~+1（+1=全利好，-1=全利空）
+        quality: composite_score / 100
+        doc_count, tailwind_count, headwind_count
+    }
+
+    时效逻辑：每篇文档按 published_at 距今天数做时间衰减（L0/L1/L2/L3 不同衰减曲线），
+    衰减后的 evidence_weight = impact_score × doc_type_weight × impl_status × time_decay
+    """
+    from datetime import datetime, timezone
+    from pathlib import Path as _Path
+    import math as _math
+
+    cfg_path = _Path(__file__).resolve().parents[4] / "data" / "config" / "metrics" / "z0_policy_t1_llm.yaml"
+    cfg: dict[str, Any] = {}
+    if cfg_path.is_file():
+        with cfg_path.open(encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+
+    doc_w = cfg.get("source_authority") or {}
+    if not doc_w:
+        doc_w = cfg.get("doc_type_weights") or {}
+    impl_m = cfg.get("impl_status_multipliers", {
+        "已发布_待执行": 1.0, "已执行_进行中": 0.8, "已执行_完成": 0.3,
+        "征求意见稿": 0.5, "废止_替代": 0.0, "状态未知": 0.6,
+    })
+    tdecay_cfg = cfg.get("time_decay", {})
+
+    def _t_decay(doc_type: str, days: int) -> float:
+        tc = tdecay_cfg.get(doc_type, tdecay_cfg.get("L1", {}))
+        fw = int(tc.get("full_weight_days", 90))
+        dtd = int(tc.get("decay_to_days", 1095))
+        if days <= fw:
+            return 1.0
+        if days >= dtd:
+            return 0.0
+        return round(1.0 - (days - fw) / (dtd - fw), 4)
+
+    engine = create_engine(_sync_db_url(), future=True)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    try:
+        with engine.connect() as conn:
+            # 读取 S0 聚合以获得 composite_score 等
+            agg = conn.execute(
+                text(
+                    "SELECT snapshot FROM deepsea_indicator_state "
+                    "WHERE probe_key = :pk AND scope = :sc ORDER BY inferred_at DESC LIMIT 1"
+                ),
+                {"pk": POLICY_PROBE_KEY, "sc": S0_SCOPE},
+            ).mappings().first()
+
+            aggregate_sectors: dict[str, dict[str, Any]] = {}
+            if agg:
+                snap = agg["snapshot"]
+                if isinstance(snap, str):
+                    snap = json.loads(snap)
+                for ts in (snap.get("top_sectors") or []):
+                    aggregate_sectors[str(ts.get("sector", ""))] = ts
+
+            # 读取所有 S0_doc 行 + 关联 doc_registry 获取发布时间
+            doc_rows = conn.execute(
+                text(
+                    """
+                    SELECT s.snapshot, d.published_at, d.lineage_tags
+                    FROM deepsea_indicator_state s
+                    JOIN deepsea_doc_registry d ON d.doc_id = s.doc_id
+                    WHERE s.probe_key = :pk AND s.scope = :sc
+                    """
+                ),
+                {"pk": POLICY_PROBE_KEY, "sc": "S0_doc"},
+            ).mappings().all()
+
+            # 按赛道累计
+            from collections import defaultdict as _dd
+            acc = _dd(lambda: {
+                "bullish_w": 0.0, "bearish_w": 0.0, "total_w": 0.0, "high_value": False,
+                "best_imp_strength": "symbolic",
+                "toolkit": {k: 0.0 for k in ["fiscal_support", "talent_programs", "land_infra", "regulatory_fast_track", "standards_legislation", "quantitative_targets"]},
+                "toolkit_count": 0,
+            })
+
+            for row in doc_rows:
+                snap = row["snapshot"]
+                if isinstance(snap, str):
+                    snap = json.loads(snap)
+                pub = row.get("published_at")
+                days = (now - pub).days if pub else 999
+
+                tags = row.get("lineage_tags") or {}
+                if isinstance(tags, str):
+                    try:
+                        tags = json.loads(tags)
+                    except json.JSONDecodeError:
+                        tags = {}
+                source = str(tags.get("source", "unknown"))
+
+                doc_meta = snap.get("doc_metadata") or {}
+                impl_status = str(doc_meta.get("impl_status", "状态未知"))
+
+                td = _t_decay("L1", days)
+                wd = doc_w.get(source, doc_w.get("default", 0.6))
+                ms = impl_m.get(impl_status, 0.6)
+                hv = bool(snap.get("high_value_flag"))
+
+                for s in snap.get("policy_sectors") or []:
+                    sn = str(s.get("sector_name", "")).strip()
+                    canonical = str(s.get("canonical_sector", "")).strip()
+                    if not sn:
+                        continue
+                    direction = str(s.get("direction", "neutral"))
+                    impact = float(s.get("impact_score", 0))
+                    ew = impact * wd * ms * td
+
+                    # v2.1: 同时往 sector_name 和 canonical_sector 两个维度聚合
+                    agg_keys = [sn]
+                    if canonical and canonical.lower() != "null" and canonical != sn:
+                        agg_keys.append(canonical)
+
+                    for key in agg_keys:
+                        if direction in ("strong_tailwind", "weak_tailwind"):
+                            acc[key]["bullish_w"] += ew
+                        elif direction in ("strong_headwind", "weak_headwind"):
+                            acc[key]["bearish_w"] += ew
+                        acc[key]["total_w"] += ew
+                        if hv:
+                            acc[key]["high_value"] = True
+
+                        # 落地力度追踪
+                        imp_str = str(s.get("implementation_strength") or "symbolic")
+                        _imp_order = {"comprehensive": 5, "targeted": 4, "moderate": 3, "light": 2, "symbolic": 1}
+                        if _imp_order.get(imp_str, 0) > _imp_order.get(acc[key]["best_imp_strength"], 0):
+                            acc[key]["best_imp_strength"] = imp_str
+
+                        # 累积实施工具包
+                        toolkit = s.get("implementation_toolkit") or {}
+                        if isinstance(toolkit, dict):
+                            for k in acc[key]["toolkit"]:
+                                acc[key]["toolkit"][k] += float(toolkit.get(k, 0))
+                            acc[key]["toolkit_count"] += 1
+
+            result: dict[str, dict[str, Any]] = {}
+            max_dc = max((int(ts.get("doc_count", 1)) for ts in aggregate_sectors.values()), default=1)
+
+            for sector, ts in aggregate_sectors.items():
+                a = acc.get(sector, {"bullish_w": 0.0, "bearish_w": 0.0, "total_w": 0.0, "high_value": False, "toolkit": {}, "toolkit_count": 0})
+                tw = a["total_w"]
+                net = round((a["bullish_w"] - a["bearish_w"]) / max(tw, 0.01), 4)
+                quality = round(float(ts.get("composite_score", 0)) / 100.0, 4)
+                dc = int(ts.get("doc_count", 1))
+                tcnt = int(ts.get("tailwind_count", 0))
+                hcnt = int(ts.get("headwind_count", 0))
+                confidence = round(_math.log(1 + dc) / _math.log(1 + max_dc), 4)
+                purity = round((tcnt + hcnt) / max(dc, 1), 4)
+
+                # 平均实施工具包（平均后0-10分）
+                tc = max(a.get("toolkit_count", 1), 1)
+                avg_toolkit = {
+                    k: round(v / tc, 1)
+                    for k, v in (a.get("toolkit") or {}).items()
+                } if a.get("toolkit") else {}
+                toolkit_total = sum(avg_toolkit.values()) if avg_toolkit else 0
+                # implementation_bonus: 总分60→最多加30%
+                impl_bonus = round(min(0.30, toolkit_total / 60 * 0.30), 4)
+
+                # 落地力度多级系数（v5.1）
+                from apps.copilot.services.deepsea.policy_t1_dispatcher import IMPLEMENTATION_FORCE_MULTIPLIER, IMPLEMENTATION_FORCE_LABELS
+                imp_strength = a.get("best_imp_strength", "light")
+                imp_mult = IMPLEMENTATION_FORCE_MULTIPLIER.get(imp_strength, 1.0)
+                imp_label = IMPLEMENTATION_FORCE_LABELS.get(imp_strength, "方向性鼓励")
+
+                result[sector] = {
+                    "net_direction": net,
+                    "quality": quality,
+                    "doc_count": dc,
+                    "tailwind_count": tcnt,
+                    "headwind_count": hcnt,
+                    "confidence": confidence,
+                    "purity": purity,
+                    "high_value_flag": a.get("high_value", False),
+                    "imp_strength": imp_strength,
+                    "imp_force_multiplier": imp_mult,
+                    "imp_force_label": imp_label,
+                    "avg_toolkit": avg_toolkit,
+                    "toolkit_total": toolkit_total,
+                    "implementation_bonus": impl_bonus,
+                }
+
+            return result
+    except Exception:
+        logger.exception("时间加权方向计算失败")
+        return {}
     finally:
         engine.dispose()

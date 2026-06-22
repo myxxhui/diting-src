@@ -48,6 +48,7 @@ async def z0_policy_admin_sources():
 async def z0_policy_admin_documents(
     source: str = Query(""),
     sector: str = Query(""),
+    concept: str = Query(""),
     limit: int = Query(100),
     offset: int = Query(0),
 ):
@@ -55,6 +56,7 @@ async def z0_policy_admin_documents(
     docs, total = query_documents(
         source=source or None,
         sector=sector or None,
+        concept=concept or None,
         limit=limit,
         offset=offset,
     )
@@ -62,14 +64,22 @@ async def z0_policy_admin_documents(
     all_sources_list = get_all_configured_source_keys()
     source_display = get_source_display_map()
     kws = load_policy_keywords()
-    all_sectors_list = sorted((kws.get("sector_aliases") or {}).keys())
+    all_sectors_list = sorted((kws.get("canonical_sectors") or {}).keys())
+    # v2.1: 构建当前赛道下的子概念列表
+    concept_options: list[str] = []
+    if sector:
+        cs = (kws.get("canonical_sectors") or {}).get(sector) or {}
+        for cc in cs.get("child_concepts") or []:
+            concept_options.append(str(cc["name"]))
     return render_documents_page(
         docs=docs,
         total=total,
         all_sources=all_sources_list,
         all_sectors=all_sectors_list,
+        concept_options=concept_options,
         current_source=source,
         current_sector=sector,
+        current_concept=concept,
         source_display=source_display,
     )
 
@@ -86,7 +96,7 @@ async def z0_policy_admin_matrix():
     """赛道×数据源矩阵（Partial HTML）。"""
     matrix = get_sector_source_matrix()
     source_display = get_source_display_map()
-    all_sectors = sorted((load_policy_keywords().get("sector_aliases") or {}).keys())
+    all_sectors = sorted((load_policy_keywords().get("canonical_sectors") or {}).keys())
     return render_matrix_page(matrix, source_display=source_display, all_sectors=all_sectors)
 
 

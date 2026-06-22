@@ -150,38 +150,67 @@ def fetch_industry_boards_pct_3d() -> list[dict[str, Any]]:
     return out
 
 
-def fetch_concept_boards(*, page_size: int = 200) -> list[dict[str, Any]]:
-    """概念板块列表 · push2delay clist（fs=m:90+t:3 · 涨跌幅 f3）。"""
-    data = em_get_json(
-        f"{_PUSH2}/api/qt/clist/get",
-        params={
-            "pn": "1",
-            "pz": str(page_size),
-            "po": "1",
-            "np": "1",
-            "ut": "b2884a393a59ad64002292a3e90d46a5",
-            "fltt": "2",
-            "invt": "2",
-            "fid0": "f3",
-            "fs": "m:90+t:3",
-            "stat": "1",
-            "fields": "f12,f14,f3,f62,f184",
-        },
-        referer="https://data.eastmoney.com/bkzj/gn.html",
-    )
-    if not data:
-        return []
-    diff = (data.get("data") or {}).get("diff") or []
+def fetch_concept_boards(*, page_size: int = 100, max_pages: int = 4) -> list[dict[str, Any]]:
+    """概念板块列表 · push2delay clist（fs=m:90+t:3 · 涨跌幅 f3）。
+    v2.6 扩展字段：f8换手率/f9市盈率/f10量比/f20总市值/f104上涨家数/f105下跌家数/f164主力5日/f174主力10日/f184净占比
+    v2.7 多页分页：max_pages=4 拉取前 400 只概念板块，确保下跌的 AI/半导体等板块不被遗漏。
+    
+    [数据源优先级 §L3] Tushare ths_daily 无权限 · akshare stock_board_concept_index_ths 需预知概念名不支持全量筛查
+    → 唯一可行的一键全量筛查源：Eastmoney push2delay（Tier 3 降级）
+    """
+    all_items: list[dict[str, Any]] = []
+    for page in range(1, max_pages + 1):
+        data = em_get_json(
+            f"{_PUSH2}/api/qt/clist/get",
+            params={
+                "pn": str(page),
+                "pz": str(page_size),
+                "po": "1",
+                "np": "1",
+                "ut": "b2884a393a59ad64002292a3e90d46a5",
+                "fltt": "2",
+                "invt": "2",
+                "fid0": "f3",
+                "fs": "m:90+t:3",
+                "stat": "1",
+                "fields": "f12,f14,f3,f6,f8,f9,f10,f20,f62,f104,f105,f164,f174,f184",
+            },
+            referer="https://data.eastmoney.com/bkzj/gn.html",
+        )
+        if not data:
+            break
+        diff = (data.get("data") or {}).get("diff") or []
+        if not diff:
+            break
+        for item in diff:
+            if not isinstance(item, dict):
+                continue
+            all_items.append(item)
+        if len(diff) < page_size:
+            break  # 最后一页
     out: list[dict[str, Any]] = []
-    for item in diff:
-        if not isinstance(item, dict):
-            continue
+    for item in all_items:
+        def _f(key: str) -> Any:
+            v = item.get(key)
+            if v in (None, "-", ""):
+                return None
+            return v
         out.append(
             {
-                "board_code": item.get("f12"),
-                "board_name": item.get("f14"),
-                "pct_chg": item.get("f3"),
-                "net_inflow": item.get("f62"),
+                "board_code": _f("f12"),
+                "board_name": _f("f14"),
+                "pct_chg": _f("f3"),
+                "turnover_amount": _f("f6"),
+                "turnover_rate": _f("f8"),
+                "pe_dynamic": _f("f9"),
+                "volume_ratio": _f("f10"),
+                "total_mv": _f("f20"),
+                "net_inflow": _f("f62"),
+                "up_count": _f("f104"),
+                "down_count": _f("f105"),
+                "net_inflow_5d": _f("f164"),
+                "net_inflow_10d": _f("f174"),
+                "net_inflow_ratio": _f("f184"),
             }
         )
     return out

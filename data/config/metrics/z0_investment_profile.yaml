@@ -1,0 +1,192 @@
+# Z0+ 投资级评估 · 赛道商业画像
+# 本文档为 Z0+ 四轴评估框架的「商业轨迹」和「资本引力」维度的配置数据源。
+# 
+# 数据来源区分：
+#   📄 LLM提取（从T0政策文档逐篇推理，经B2聚合）
+#   📋 人工研究预配置（行业知识，定期更新）
+#
+# 更新时间线：每月复审一次；重大行业事件（如AI突破、新产业政策）后即时更新
+# [Ref: 36_ §5.5 · 34_ §3.0a Z0+]
+#
+# TRACEBACK 锚点：
+# - L1 哲学: 06_投资哲学体系总纲.md（②多源验证 / ⑧归因闭环）
+# - L2 实践: 06_标的深度分析实践规划
+# - DNA: dna_stage_1_启动期.yaml · investment_profiles 子树
+# - 代码落点: diting-src/apps/copilot/metrics/synthesizer/investment_scorer.py
+
+# ═══════════════════════════════════════════════
+# 投资画像版本
+# ═══════════════════════════════════════════════
+profile_version: "1.0"
+profile_updated_at: "2026-06-22"
+
+# ═══════════════════════════════════════════════
+# 一、赛道投资画像
+# ═══════════════════════════════════════════════
+# 每个规范赛道映射到从政策文档本身无法直接推断的行业知识维度：
+#   growth_stage        行业成长阶段（爆发/快速/稳定/成熟/衰退）
+#   profit_pool         利润池集中度（技术寡头/寡头/差异化/分散）
+#   valuation_tier      估值弹性层级（科技成长/消费/医药/工业科技/传统制造/防御）
+#   institutional_flow  机构资金覆盖（有ETF/宽基覆盖/少覆盖）
+
+# ──────────── 科技成长赛道 ────────────
+AI算力:
+  description: "人工智能、算力基础设施、芯片半导体、大模型、6G通信"
+  growth_stage: "explosive"              # 爆发期，AI革命驱动
+  profit_pool: "tech_oligopoly"          # GPU/ASIC寡头+算力租赁差异化
+  valuation_tier: "tech_growth"          # PE 30-80x 可扩张
+  institutional_flow: "dedicated_etf"    # AI ETF/芯片ETF/算力ETF
+
+低空经济:
+  description: "无人机、eVTOL、通用航空、低空基础设施"
+  growth_stage: "explosive"              # 从0到1的爆发期
+  profit_pool: "oligopoly_premium"       # eVTOL适航证壁垒极高
+  valuation_tier: "tech_growth"          # 新概念 PE 40-80x
+  institutional_flow: "dedicated_etf"    # 低空经济ETF
+
+数字经济:
+  description: "数据要素市场、工业互联网、5G/6G、物联网"
+  growth_stage: "rapid_growth"           # 20-40% CAGR
+  profit_pool: "differentiated"          # 各子领域有技术壁垒
+  valuation_tier: "industrial_tech"      # PE 20-40x
+  institutional_flow: "broad_coverage"   # 宽基覆盖+数字化主题基金
+
+# ──────────── 产业升级赛道 ────────────
+新能源:
+  description: "光伏、储能、风电、氢能、新能源汽车"
+  growth_stage: "steady_growth"          # 已过爆发期，进入稳定增长
+  profit_pool: "fragmented"              # 产能过剩+价格战
+  valuation_tier: "industrial_tech"      # PE从60x压缩到20x
+  institutional_flow: "dedicated_etf"    # 新能源ETF
+
+医药创新:
+  description: "创新药、生物医药、医疗器械、中医药"
+  growth_stage: "rapid_growth"           # 创新药+银发经济驱动
+  profit_pool: "differentiated"          # 专利壁垒+差异化管线
+  valuation_tier: "healthcare_biotech"   # PE 30-60x
+  institutional_flow: "dedicated_etf"    # 医药ETF/创新药ETF
+
+军工国防:
+  description: "国防军工、军民融合、航空航天"
+  growth_stage: "steady_growth"          # 国防预算稳定增长
+  profit_pool: "oligopoly_premium"       # 军工资质壁垒+国企主导
+  valuation_tier: "industrial_tech"      # PE 20-40x
+  institutional_flow: "dedicated_etf"    # 军工ETF
+
+# ──────────── 传统/防御型赛道 ────────────
+消费内需:
+  description: "消费电子、跨境电商、以旧换新、消费升级"
+  growth_stage: "mature"                 # 存量市场博弈
+  profit_pool: "fragmented"              # 竞争激烈
+  valuation_tier: "premium_consumer"     # PE 25-50x但增速低
+  institutional_flow: "broad_coverage"   # 宽基覆盖
+
+新质生产力:
+  description: "新质生产力、未来产业、先进制造业（泛化概念）"
+  growth_stage: "mature"                 # 覆盖行业太广，平均增长平庸
+  profit_pool: "fragmented"              # 300+公司，利益高度分散
+  valuation_tier: "traditional_manufacturing"
+  institutional_flow: "broad_coverage"
+
+农业粮食:
+  description: "粮食安全、种业、乡村振兴、智慧农业"
+  growth_stage: "mature"                 # 低增长
+  profit_pool: "fragmented"              # 完全竞争+政府限价
+  valuation_tier: "utility_defensive"    # PE 5-15x
+  institutional_flow: "limited_coverage"
+
+基建交通:
+  description: "基础设施、铁路、水利、城市更新"
+  growth_stage: "mature"                 # 成熟期
+  profit_pool: "fragmented"              # 央企为主+低利润率
+  valuation_tier: "utility_defensive"    # PE 5-15x
+  institutional_flow: "limited_coverage"
+
+金融国资:
+  description: "国资改革、资本市场改革"
+  growth_stage: "steady_growth"          # 金融行业稳定
+  profit_pool: "differentiated"          # 银行/券商/保险差异大
+  valuation_tier: "traditional_manufacturing"
+  institutional_flow: "broad_coverage"
+
+环保节能:
+  description: "碳中和、绿色转型、环保治理、节能减排"
+  growth_stage: "steady_growth"          # 政策驱动但PE低
+  profit_pool: "fragmented"              # 竞争壁垒低
+  valuation_tier: "utility_defensive"    # PE 10-20x
+  institutional_flow: "broad_coverage"
+
+# ═══════════════════════════════════════════════
+# 二、评分映射表
+# ═══════════════════════════════════════════════
+# 每个分类标签 → 0-1 分数；由 investment_scorer.py 引用
+score_mapping:
+  # ─── 子维度1：收入传导类型（📄 LLM从文档提取） ───
+  revenue_transmission_type:
+    direct_cash: 1.00          # 直接资金注入：补贴/退税/专项拨款
+    market_creation: 0.85      # 创造新市场：新牌照/新准入/新试点
+    government_procurement: 0.70   # 政府采购：政府作直接买家
+    cost_reduction: 0.55       # 降成本：降低行业运营成本
+    standards_enabler: 0.45    # 标准赋能：行业标准打开市场
+    political_rhetoric: 0.15   # 政治表态：无收入转化路径
+
+  # ─── 子维度2：行业成长阶段（📋 YAML预配置） ───
+  growth_stage:
+    explosive: 1.00            # >40% CAGR · 爆发期
+    rapid_growth: 0.85         # 20-40% CAGR · 快速成长期
+    steady_growth: 0.60        # 10-20% CAGR · 稳定增长期
+    mature: 0.35               # 3-10% CAGR · 成熟期
+    declining: 0.10            # <3% · 衰退期
+
+  # ─── 子维度3：利润池集中度（📋 YAML预配置） ───
+  profit_pool:
+    tech_oligopoly: 1.00       # 技术寡头（GPU/ASIC/专利壁垒）
+    oligopoly_premium: 0.90    # 行政/资质寡头（军工/适航证）
+    differentiated: 0.75       # 差异化竞争（品牌/技术差异）
+    fragmented: 0.40           # 高度分散/商品化
+
+  # ─── 子维度4：估值弹性层级（📋 YAML预配置） ───
+  valuation_tier:
+    tech_growth: 1.00          # 科技成长 PE 30-80x 可扩张
+    healthcare_biotech: 0.80   # 医药生物 PE 30-60x
+    premium_consumer: 0.75     # 消费 PE 25-50x
+    industrial_tech: 0.65      # 工业科技 PE 20-40x
+    traditional_manufacturing: 0.40  # 传统制造 PE 10-20x
+    utility_defensive: 0.20    # 公用事业/防御 PE 5-15x
+
+  # ─── 子维度5：叙事催化类型（📄 LLM从文档提取） ───
+  narrative_catalyst_type:
+    national_strategy_tech: 1.00      # 国家战略+技术突破
+    new_industry_birth: 0.90           # 全新产业诞生
+    modernization_leap: 0.70          # 产业现代化跨越
+    consumption_lifestyle: 0.65       # 消费与生活方式
+    regulator_fix: 0.40               # 监管修复
+    basic_necessity_security: 0.25    # 基础民生与安全
+    political_slogan: 0.10            # 政治口号
+
+  # ─── 子维度6：机构覆盖程度（📋 YAML预配置） ───
+  institutional_flow:
+    dedicated_etf: 1.00        # 有专属ETF/主题基金
+    broad_coverage: 0.70       # 被宽基指数覆盖
+    limited_coverage: 0.30     # 机构覆盖少
+
+  # ─── 子维度7：政策阶段加成（📄 LLM从文档提取） ───
+  policy_phase_bonus:
+    initiation: 1.15           # 初启期：最大预期差
+    acceleration: 1.10         # 加速期：持续催化
+    maturation: 1.00           # 成熟期：常规
+    phase_out: 0.85            # 退出期：利空出清
+
+  # ─── 子维度8：落地力度降权版本（📄 LLM提取 · 仅轴四） ───
+  implementation_quality:
+    comprehensive: 0.90        # 多重配套
+    targeted: 0.75             # 实质性扶持
+    moderate: 0.55             # 量化规划
+    light: 0.30                # 方向性鼓励
+    symbolic: 0.10             # 仅提及
+
+  # ─── 轴四：工具包丰富度微调 ———
+  toolkit_richness:
+    base_score: 0.30           # 无toolkit时默认
+    per_point_bonus: 0.03      # toolkit平均分每超过3分加X
+    max_multiplier: 1.20       # 工具包最多加成到1.2x

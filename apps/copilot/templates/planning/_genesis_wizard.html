@@ -59,9 +59,9 @@
               <span class="font-medium text-gray-800">{{ c.sector }}</span>
               <span class="text-[10px] text-gray-400 ml-1.5">rank #{{ c.rank }}</span>
             </span>
-            {% if c.wind_score is not none %}
-            <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full {% if c.wind_score >= 0.7 %}bg-emerald-50 text-emerald-700{% else %}bg-amber-50 text-amber-700{% endif %}">
-              {{ (c.wind_score * 100)|round(0) }}
+            {% if c.d1_score is not none %}
+            <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full {% if c.d1_score >= 0.7 %}bg-emerald-50 text-emerald-700{% else %}bg-amber-50 text-amber-700{% endif %}">
+              {{ (c.d1_score * 100)|round(0) }}
             </span>
             {% endif %}
           </button>

@@ -22,6 +22,20 @@ S0_SCOPE = "S0"
 SCOPE_DOC = "S0_doc"
 T1_SOURCE = "llm:deepseek-chat"
 
+# 落地力度多级加权系数（v5.1 · 替代 binary high_value_flag）
+IMPLEMENTATION_FORCE_MULTIPLIER: dict[str, float] = {
+    "comprehensive": 1.30,   # L4 多重配套：财政+税收+基金+审批 ≥3项
+    "targeted":      1.20,   # L3 实质性扶持：≥1项实质性措施+量化目标
+    "moderate":      1.10,   # L2 量化规划：有量化目标，无配套措施
+    "light":         1.00,   # L1 方向性鼓励：鼓励/支持，无量化无配套（默认）
+    "symbolic":      0.85,   # L0 仅提及：顺带提及/无针对性措施
+}
+
+IMPLEMENTATION_FORCE_LABELS: dict[str, str] = {
+    "comprehensive": "多重配套", "targeted": "实质性扶持",
+    "moderate": "量化规划", "light": "方向性鼓励", "symbolic": "仅提及",
+}
+
 _LLM_CFG = (
     Path(__file__).resolve().parents[4]
     / "data" / "config" / "metrics" / "z0_policy_t1_llm.yaml"
@@ -120,8 +134,13 @@ def _load_time_decay_config() -> dict[str, Any]:
     return cfg.get("time_decay") or {}
 
 
-def _load_doc_type_weights() -> dict[str, float]:
+def _load_source_authority() -> dict[str, float]:
+    """读取数据源权威权重（按 source 域名 → 权重，合并 W_tier+W_source）。"""
     cfg = _load_llm_config()
+    sa = cfg.get("source_authority") or {}
+    if sa:
+        return {k: float(v) for k, v in sa.items() if isinstance(v, (int, float))}
+    # 回退到旧 doc_type_weights
     return cfg.get("doc_type_weights") or {}
 
 
@@ -151,15 +170,16 @@ def compute_time_decay_weight(
 
 def compute_composite_score(
     impact_score: float,
-    doc_type: str,
+    source: str,
     impl_status: str,
     days_since_published: int,
 ) -> float:
-    """三因子加权：impact × W_type × M_status × D_time。"""
-    w_type = _load_doc_type_weights().get(doc_type, 0.7)
+    """三因子加权：impact × W_source × M_status × D_time。source 为域名如 gov.cn。"""
+    sa = _load_source_authority()
+    w_source = sa.get(source, sa.get("default", 0.6))
     m_status = _load_impl_status_multipliers().get(impl_status, 0.6)
-    d_time = compute_time_decay_weight(doc_type, days_since_published)
-    return round(impact_score * w_type * m_status * d_time, 4)
+    d_time = compute_time_decay_weight("L1", days_since_published)  # 时间衰减仍按旧分层（后续可改进）
+    return round(impact_score * w_source * m_status * d_time, 4)
 
 
 # ──────────────────────────────────────────────
@@ -222,6 +242,93 @@ def _fetch_pending_docs(
 # §5 Phase B2 · 聚合 + 三因子衰减
 # ──────────────────────────────────────────────
 
+# ──────────────────────────────────────────────
+# v2.1: A股概念子概念匹配
+# ──────────────────────────────────────────────
+_CONCEPT_CACHE: dict[str, list[dict[str, str]]] = {}
+
+def _reverse_lookup_canonical(raw_sector_name: str) -> str | None:
+    """反向查找：给定 LLM 返回的原始术语，找到它属于哪个规范赛道（用于 canonical_sector 为空时）。"""
+    sn = raw_sector_name.lower().strip()
+    if not sn:
+        return None
+    from pathlib import Path
+    import yaml as _yaml
+    cfg_path = Path(__file__).resolve().parents[4] / "data" / "config" / "metrics" / "z0_policy_keywords.yaml"
+    try:
+        with cfg_path.open(encoding="utf-8") as f:
+            cfg = _yaml.safe_load(f) or {}
+        for cs_name, cs_data in (cfg.get("canonical_sectors") or {}).items():
+            # 先检查 child_concepts 名称（模糊匹配：包含关系）
+            for cc in cs_data.get("child_concepts") or []:
+                ccn = str(cc["name"]).lower()
+                if ccn and (ccn in sn or sn in ccn):
+                    return cs_name
+            # 再检查 llm_aliases
+            for alias in cs_data.get("llm_aliases") or []:
+                al = str(alias).lower()
+                if al and (al in sn or sn in al):
+                    return cs_name
+            # 再检查 ingest_keywords
+            for kw in cs_data.get("ingest_keywords") or []:
+                kwl = str(kw).lower()
+                if kwl and (kwl in sn or sn in kwl):
+                    return cs_name
+    except Exception:
+        pass
+    return None
+
+
+def _load_child_concepts(canonical_sector: str) -> list[dict[str, str]]:
+    """懒加载规范赛道 → A股概念板列表（含 code）+ ingest_keywords 作为模糊匹配源。"""
+    if canonical_sector in _CONCEPT_CACHE:
+        return _CONCEPT_CACHE[canonical_sector]
+    from pathlib import Path
+    import yaml as _yaml
+    cfg_path = Path(__file__).resolve().parents[4] / "data" / "config" / "metrics" / "z0_policy_keywords.yaml"
+    concepts: list[dict[str, str]] = []
+    try:
+        with cfg_path.open(encoding="utf-8") as f:
+            cfg = _yaml.safe_load(f) or {}
+        cs = (cfg.get("canonical_sectors") or {}).get(canonical_sector) or {}
+        for cc in cs.get("child_concepts") or []:
+            concepts.append({"concept_name": str(cc["name"]), "concept_code": str(cc.get("code", ""))})
+        # ingest_keywords 同样作为候选概念名（帮助 LLM 原文术语命中）
+        for kw in (cs.get("ingest_keywords") or []):
+            concepts.append({"concept_name": str(kw), "concept_code": ""})
+        # llm_aliases 加入匹配
+        for alias in (cs.get("llm_aliases") or []):
+            concepts.append({"concept_name": str(alias), "concept_code": ""})
+    except Exception:
+        pass
+    # 去重
+    seen = set()
+    deduped = []
+    for c in concepts:
+        if c["concept_name"] not in seen:
+            seen.add(c["concept_name"])
+            deduped.append(c)
+    _CONCEPT_CACHE[canonical_sector] = deduped
+    return deduped
+
+
+def _match_child_concepts(canonical_sector: str, sector_name: str) -> list[dict[str, str]]:
+    """将 LLM 输出的原文术语 sector_name 匹配到规范赛道下的 A股概念板名称列表。
+    未匹配到时，将 sector_name 本身作为一个新概念加入（确保所有原文名称都有归集）。"""
+    candidates = _load_child_concepts(canonical_sector)
+    matches: list[dict[str, str]] = []
+    sn = sector_name.lower()
+    for c in candidates:
+        cn = c["concept_name"].lower()
+        # 双向包含匹配
+        if sn and cn and (cn in sn or sn in cn):
+            matches.append(c)
+    # 未匹配到时，将原文术语本身作为一个概念
+    if not matches:
+        matches.append({"concept_name": sector_name, "concept_code": ""})
+    return matches[:3]
+
+
 def _aggregate_with_decay(
     b1_results: list[dict[str, Any]],
     docs: list[dict[str, Any]],
@@ -243,7 +350,7 @@ def _aggregate_with_decay(
                     days = 999
 
             doc_map[did] = {
-                "doc_type": str(doc.get("feed_tier") or "L1"),
+                "source": str(doc.get("source") or "unknown"),
                 "days_since_published": max(0, days),
                 "title": str(doc.get("title") or ""),
             }
@@ -254,7 +361,7 @@ def _aggregate_with_decay(
     for b1 in b1_results:
         did = str(b1.get("doc_id") or "")
         meta = doc_map.get(did, {})
-        doc_type = str(meta.get("doc_type") or "L1")
+        source = str(meta.get("source") or "unknown")
         days = int(meta.get("days_since_published") or 0)
 
         # impl_status 来自 B1 LLM 推理（§5.0）
@@ -265,16 +372,26 @@ def _aggregate_with_decay(
             impl_status = "状态未知"  # fallback 防御
 
         for item in b1.get("sectors") or []:
-            sector = str(item.get("sector_name") or "").strip()
-            if not sector:
-                continue
+            sector = str(item.get("canonical_sector") or "").strip()
+            raw_name = str(item.get("sector_name") or "").strip()
+            if not sector or sector.lower() == "null":
+                # 尝试逆向查找匹配规范赛道
+                sector = _reverse_lookup_canonical(raw_name) or ""
+            if not sector or sector.lower() == "null":
+                # 仍然无法匹配：扔到 unmapped 桶
+                if not raw_name:
+                    continue
+                sector = f"_unmapped:{raw_name}"
+            # 子概念记录（用于二次排名）
+            sub_name = str(item.get("sector_name") or "").strip()
 
             impact = float(item.get("impact_score") or 0)
-            effective = compute_composite_score(impact, doc_type, impl_status, days)
+            direction = str(item.get("direction") or "neutral")
+            effective = compute_composite_score(impact, source, impl_status, days)
             w_total = (
-                _load_doc_type_weights().get(doc_type, 0.7)
+                _load_source_authority().get(source, _load_source_authority().get("default", 0.6))
                 * _load_impl_status_multipliers().get(impl_status, 0.6)
-                * compute_time_decay_weight(doc_type, days)
+                * compute_time_decay_weight("L1", days)
             )
 
             bucket = sector_scores.setdefault(sector, {
@@ -286,12 +403,80 @@ def _aggregate_with_decay(
                 "headwind_count": 0,
                 "tailwind_weight": 0.0,
                 "headwind_weight": 0.0,
+                "best_imp_strength": "symbolic",
+                "sub_concepts": {},  # v2.0: 子概念证据收集
+                # v3.0 Z0+: 新增字段累积
+                "rev_type_votes": {},      # revenue_transmission_type 投票
+                "narr_type_votes": {},      # narrative_catalyst_type 投票
+                "phase_votes": {},          # policy_phase 投票
+                "regime_change_count": 0,   # 政策拐点文档数
+                "_published_dates": [],     # 聚合：收集发布时间用于加速度计算
             })
             bucket["composite_score"] += effective
             bucket["total_weight"] += w_total
             bucket["doc_count"] += 1
+            if b1.get("high_value_flag"):
+                bucket["high_value_flag"] = True
 
-            direction = str(item.get("direction") or "neutral")
+            # 子概念计数（v2.1：按 A股概念板匹配 + 证据引用归属）
+            child_matches = _match_child_concepts(sector, sub_name) if not sector.startswith("_unmapped:") else []
+            for cm in child_matches:
+                sub = bucket["sub_concepts"].setdefault(cm["concept_name"], {
+                    "sub_name": cm["concept_name"],
+                    "concept_code": cm.get("concept_code", ""),
+                    "doc_count": 0,
+                    "composite_score": 0.0,
+                    "total_weight": 0.0,
+                    "evidence_quotes": [],  # v2.1：每个A股概念归集原文引用
+                })
+                sub["doc_count"] += 1
+                sub["composite_score"] += effective
+                sub["total_weight"] += w_total
+                # 归集属于该子概念的证据原文
+                for quote in item.get("evidence_quotes") or []:
+                    if len(sub["evidence_quotes"]) < 10:
+                        sub["evidence_quotes"].append({
+                            "quote": quote[:500],
+                            "doc_id": did,
+                            "direction": direction,
+                            "impact_score": impact,
+                        })
+
+            # v3.0 Z0+: 收集新字段
+            rev_type = str(item.get("revenue_transmission_type") or "political_rhetoric")
+            bucket["rev_type_votes"][rev_type] = bucket["rev_type_votes"].get(rev_type, 0) + 1
+
+            narr_type = str(item.get("narrative_catalyst_type") or "political_slogan")
+            bucket["narr_type_votes"][narr_type] = bucket["narr_type_votes"].get(narr_type, 0) + 1
+
+            phase = str(item.get("policy_phase") or "maturation")
+            bucket["phase_votes"][phase] = bucket["phase_votes"].get(phase, 0) + 1
+
+            if item.get("policy_regime_change_flag"):
+                bucket["regime_change_count"] = bucket.get("regime_change_count", 0) + 1
+
+            # 收集发布时间（用于政策加速度）
+            if days > 0:
+                bucket["_published_dates"].append(
+                    datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+                )
+
+            # 落地力度：取多篇文档中的最强级别（comprehensive > targeted > moderate > light > symbolic）
+            imp_str = str(item.get("implementation_strength") or "symbolic")
+            _imp_order = {"comprehensive": 5, "targeted": 4, "moderate": 3, "light": 2, "symbolic": 1}
+            if _imp_order.get(imp_str, 0) > _imp_order.get(bucket["best_imp_strength"], 0):
+                bucket["best_imp_strength"] = imp_str
+
+            # 累积实施工具包评分（按总权重归一化）
+            toolkit = item.get("implementation_toolkit") or {}
+            if isinstance(toolkit, dict) and toolkit:
+                if "acc_toolkit" not in bucket:
+                    bucket["acc_toolkit"] = {k: 0.0 for k in ["fiscal_support", "talent_programs", "land_infra", "regulatory_fast_track", "standards_legislation", "quantitative_targets"]}
+                    bucket["toolkit_count"] = 0
+                for k in bucket["acc_toolkit"]:
+                    bucket["acc_toolkit"][k] += float(toolkit.get(k, 0))
+                bucket["toolkit_count"] += 1
+
             if direction in ("strong_tailwind", "weak_tailwind"):
                 bucket["tailwind_count"] += 1
                 bucket["tailwind_weight"] += w_total
@@ -307,11 +492,36 @@ def _aggregate_with_decay(
                     "direction": direction,
                 })
 
+    # 计算政策加速度（近30天 vs 前60天的文档密度比）
+    _now = datetime.now(timezone.utc).replace(tzinfo=None)
+    _cutoff_30 = _now - timedelta(days=30)
+    _cutoff_90 = _now - timedelta(days=90)
+
     # 计算最终综合评分
     ranked: list[dict[str, Any]] = []
     for sector, bucket in sector_scores.items():
         tw = bucket["total_weight"]
         composite = round(bucket["composite_score"] / tw, 2) if tw > 0 else 0.0
+
+        # 政策加速度计算
+        dates = bucket.get("_published_dates") or []
+        if dates:
+            recent_30 = sum(1 for d in dates if d >= _cutoff_30)
+            prior_60 = sum(1 for d in dates if _cutoff_90 <= d < _cutoff_30)
+            acceleration = (recent_30 / max(prior_60, 1)) if prior_60 > 0 else (1.5 if recent_30 > 0 else 0.5)
+        else:
+            acceleration = 1.0
+
+        # 主导类型提取（取票数最多的类型）
+        def _dominant(votes: dict[str, int], default: str) -> str:
+            if not votes:
+                return default
+            return max(votes, key=votes.get)
+
+        dominant_rev = _dominant(bucket.get("rev_type_votes", {}), "political_rhetoric")
+        dominant_narr = _dominant(bucket.get("narr_type_votes", {}), "political_slogan")
+        dominant_phase = _dominant(bucket.get("phase_votes", {}), "maturation")
+        regime_change_cnt = bucket.get("regime_change_count", 0)
 
         # 方向共识（加权投票）
         total_senti_w = bucket["tailwind_weight"] + bucket["headwind_weight"]
@@ -333,11 +543,41 @@ def _aggregate_with_decay(
 
         ranked.append({
             "sector": sector,
+            "sector_type": "unmapped" if sector.startswith("_unmapped:") else "canonical",
             "composite_score": composite,
             "consensus_direction": consensus,
             "doc_count": bucket["doc_count"],
             "tailwind_count": bucket["tailwind_count"],
             "headwind_count": bucket["headwind_count"],
+            "high_value_flag": bucket.get("high_value_flag", False),
+            "imp_force_multiplier": IMPLEMENTATION_FORCE_MULTIPLIER.get(bucket.get("best_imp_strength", "light"), 1.0),
+            "imp_force_label": IMPLEMENTATION_FORCE_LABELS.get(bucket.get("best_imp_strength", "light"), "方向性鼓励"),
+            "best_imp_strength": bucket.get("best_imp_strength", "light"),
+            "avg_toolkit": {
+                k: round(v / max(bucket.get("toolkit_count", 1), 1), 1)
+                for k, v in (bucket.get("acc_toolkit") or {}).items()
+            } if bucket.get("acc_toolkit") else {},
+            # v2.1: 子概念排名（按 A股概念板块归集 + 证据原文引用）
+            "sub_concepts": sorted(
+                [
+                    {
+                        "sub_name": sc["sub_name"],
+                        "concept_code": sc.get("concept_code", ""),
+                        "doc_count": sc["doc_count"],
+                        "avg_composite": round(sc["composite_score"] / sc["total_weight"], 2) if sc["total_weight"] > 0 else 0.0,
+                        "evidence_quotes": sc.get("evidence_quotes", [])[:5],
+                    }
+                    for sc in bucket.get("sub_concepts", {}).values()
+                ],
+                key=lambda x: x["doc_count"],
+                reverse=True,
+            )[:10],
+            # v3.0 Z0+: 投资级评分字段
+            "dominant_revenue_model": dominant_rev,
+            "dominant_narrative_type": dominant_narr,
+            "dominant_policy_phase": dominant_phase,
+            "regime_change_doc_count": regime_change_cnt,
+            "policy_acceleration": round(acceleration, 2),
         })
 
     ranked.sort(key=lambda x: x["composite_score"], reverse=True)
@@ -547,6 +787,7 @@ def _insert_policy_indicator_state(
         "title": signal.get("doc_id", ""),
         "policy_sectors": sectors,
         "overall_assessment": signal.get("overall_assessment", ""),
+        "high_value_flag": signal.get("high_value_flag", False),
         "t1_source": signal.get("t1_source", T1_SOURCE),
         "llm_confidence": signal.get("llm_confidence", 0.0),
         "token_used": signal.get("token_used", 0),

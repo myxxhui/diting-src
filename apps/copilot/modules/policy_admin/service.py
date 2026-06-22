@@ -159,10 +159,13 @@ def get_source_health() -> list[dict[str, Any]]:
 def query_documents(
     source: str | None = None,
     sector: str | None = None,
+    concept: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> tuple[list[dict[str, Any]], int]:
     """查询政策文档列表，Python 层过滤。
+
+    新增 concept 参数：在指定赛道下进一步按 A股概念板筛选。
 
     Returns (docs, total_count).
     """
@@ -177,6 +180,17 @@ def query_documents(
         if sector:
             themes = tags.get("themes") or []
             if sector not in themes:
+                continue
+        if concept:
+            # concept 过滤：检查文档的 policy_sectors 中是否有 sector_name 匹配
+            snapshot = d.get("snapshot") or {}
+            policy_sectors = snapshot.get("policy_sectors") or []
+            concept_match = False
+            for ps in policy_sectors:
+                if str(ps.get("sector_name", "")).strip() == concept:
+                    concept_match = True
+                    break
+            if not concept_match:
                 continue
         filtered.append(d)
 

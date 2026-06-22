@@ -92,3 +92,7 @@ def render_left_sidebar_z0(
         selected_board_id=selected_board_id,
         wind_scan=wind_scan,
     )
+
+
+def render_sector_detail_body(detail: dict[str, Any]) -> str:
+    return _render("_sector_detail_body.html", detail=detail)

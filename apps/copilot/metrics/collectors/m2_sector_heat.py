@@ -35,17 +35,37 @@ def _err(detail: str) -> dict[str, Any]:
 
 
 def _rows_from_boards(boards: list[dict[str, Any]], *, name_key: str = "board_name") -> list[dict[str, Any]]:
+    """v2.6：输出全维度数据（涨跌幅/换手率/PE/量比/总市值/涨跌家数/5日10日净流入/净占比）。"""
     rows: list[dict[str, Any]] = []
     for b in boards:
         sector = str(b.get(name_key) or b.get("board_name") or "").strip()
-        chg = b.get("pct_chg")
         if not sector:
             continue
         try:
-            chg_f = float(chg)
+            row = {"sector": sector, "change_pct": float(b.get("pct_chg") or 0)}
+            if b.get("turnover_rate") is not None:
+                row["turnover_rate"] = float(b["turnover_rate"])
+            if b.get("pe_dynamic") is not None:
+                row["pe_dynamic"] = float(b["pe_dynamic"])
+            if b.get("volume_ratio") is not None:
+                row["volume_ratio"] = float(b["volume_ratio"])
+            if b.get("total_mv") is not None:
+                row["total_mv"] = float(b["total_mv"])
+            if b.get("up_count") is not None:
+                row["up_count"] = int(b["up_count"])
+            if b.get("down_count") is not None:
+                row["down_count"] = int(b["down_count"])
+            if b.get("net_inflow") is not None:
+                row["net_inflow"] = float(b["net_inflow"])
+            if b.get("net_inflow_5d") is not None:
+                row["net_inflow_5d"] = float(b["net_inflow_5d"])
+            if b.get("net_inflow_10d") is not None:
+                row["net_inflow_10d"] = float(b["net_inflow_10d"])
+            if b.get("net_inflow_ratio") is not None:
+                row["net_inflow_ratio"] = float(b["net_inflow_ratio"])
         except (TypeError, ValueError):
             continue
-        rows.append({"sector": sector, "change_pct": chg_f})
+        rows.append(row)
     return rows
 
 
@@ -72,7 +92,12 @@ def _finalize(rows: list[dict[str, Any]], source: str, *, top_n: int) -> dict[st
     top = rows[:top_n]
     bottom = sorted(rows, key=lambda x: x["change_pct"])[:5]
     return _ok(
-        {"top_sectors": top, "weak_sectors": bottom, "universe_size": len(rows)},
+        {
+            "top_sectors": top,
+            "weak_sectors": bottom,
+            "universe_size": len(rows),
+            "all_rows": rows,  # v2.6：全量数据供 wind_scan 三维度评分
+        },
         source,
     )
 
@@ -90,12 +115,13 @@ def _try_tushare_concept(*, top_n: int) -> dict[str, Any] | None:
 
 
 def collect_concept_sector_heat(*, top_n: int = 15) -> dict[str, Any]:
+    """v2.6：全量采集概念板块（全部 ~200 个），top_n 仅控制 top_sectors 展示数量，全量数据通过 all_rows 返回。"""
     errors: list[str] = []
 
     _try_tushare_concept(top_n=top_n)
 
     try:
-        boards = fetch_concept_boards()
+        boards = fetch_concept_boards(page_size=100, max_pages=4)  # 全量拉取 ~400 个概念板块
         rows = _rows_from_boards(boards)
         if rows:
             return _finalize(rows, "eastmoney:push2delay_concept", top_n=top_n)

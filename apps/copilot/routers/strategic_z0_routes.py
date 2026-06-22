@@ -4,7 +4,7 @@
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -26,6 +26,7 @@ from apps.copilot.modules.strategic.z0_render import (
     render_core_pool_panel,
     render_genesis_wizard,
     render_p0_regime_banner,
+    render_sector_detail_body,
     render_wind_scan_panel,
 )
 from apps.copilot.modules.strategic.z0_workflow import (
@@ -313,3 +314,156 @@ async def api_dispatch_revoke(dispatch_id: int, session: AsyncSession = Depends(
         + f"<div id='cvm-matrix-panel' hx-swap-oob='outerHTML'>"
         f"{render_cvm_matrix_table(disp['phase_id'], rows)}</div>"
     )
+
+
+@router.get("/api/strategic/z0/sector-detail", response_class=HTMLResponse)
+async def api_sector_detail(sector: str = Query(...)):
+    """赛道详情：T2 结论 + 原文证据 + 政策风向标（v5.0 Pure Policy HTMX partial）。"""
+    from apps.copilot.services.deepsea.policy_reader import read_sector_detail
+
+    detail = read_sector_detail(sector)
+
+    # 附上 wind_scan 政策风向标（从 PG wind_scans 最新快照读取）
+    d1_info: dict[str, Any] = {"d1_score": None, "d1_tier": None, "needs_review": False, "review_status": None, "high_value_flag": False}
+    try:
+        from apps.copilot.db.database import AsyncSessionLocal
+        from apps.copilot.db.models import WindScan
+        from sqlalchemy import select
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(WindScan).order_by(WindScan.created_at.desc()).limit(1)
+            )
+            ws = result.scalar_one_or_none()
+            if ws and ws.candidates_json:
+                for c in ws.candidates_json:
+                    if str(c.get("sector", "")).strip() == sector:
+                        d1_info = {
+                            "d1_score": c.get("d1_score"),
+                            "d1_tier": c.get("d1_tier"),
+                            "z0_plus_score": c.get("z0_plus_score"),  # v3.0
+                            "z0_plus_breakdown": c.get("z0_plus_breakdown"),  # v3.0
+                            "needs_review": bool(c.get("needs_review")),
+                            "review_status": c.get("review_status"),
+                            "high_value_flag": bool(c.get("high_value_flag")),
+                            "d1_detail": c.get("d1_detail"),
+                            "sub_concepts": c.get("sub_concepts") or [],  # v2.0
+                        }
+                        if d1_info["high_value_flag"]:
+                            detail["high_value_flag"] = True
+                        break
+    except Exception:
+        pass
+
+    detail["wind_info"] = d1_info
+    # 附丰富标签解释（供前端面板渲染）
+    from apps.copilot.metrics.synthesizer.wind_scan import get_tier_specs
+    specs = get_tier_specs()
+    detail["rich_tier_explanations"] = specs.get("rich_tier_explanations", {})
+    detail["review_threshold"] = specs.get("review_threshold", 0.60)
+    return HTMLResponse(render_sector_detail_body(detail))
+
+
+@router.get("/api/z0/policy/admin/concepts", response_class=HTMLResponse)
+async def api_concept_options(sector: str = Query("")):
+    """根据赛道动态返回 AI概念下拉选项（Partial HTML <select>）。"""
+    from apps.copilot.services.deepsea.policy_reader import load_policy_keywords
+    kws = load_policy_keywords()
+    concept_options: list[str] = []
+    if sector:
+        cs = (kws.get("canonical_sectors") or {}).get(sector) or {}
+        for cc in cs.get("child_concepts") or []:
+            concept_options.append(str(cc["name"]))
+    # 返回 <select> 标签（替换原有的概念下拉）
+    opts_html = '<select name="concept" class="text-xs border border-gray-200 rounded px-2 py-1">'
+    opts_html += '<option value="">全部</option>'
+    for cc in concept_options:
+        opts_html += f'<option value="{cc}">{cc}</option>'
+    opts_html += '</select>'
+    return HTMLResponse(opts_html)
+
+
+@router.post("/api/strategic/z0/concept-analysis", response_class=HTMLResponse)
+async def api_concept_analysis(
+    concept: str = Query(...),
+    parent: str = Query(""),
+):
+    """T2 深度分析：对单个A股概念板，基于其政第原文引用进行LLM深度解读。"""
+    from apps.copilot.services.deepsea.policy_reader import read_sector_detail
+    from apps.copilot.services.deepsea.policy_t1_llm_scorer import _call_llm
+
+    detail = read_sector_detail(parent)
+    # 收集该概念下所有证据引用
+    sub_concepts = []
+    try:
+        from apps.copilot.db.database import AsyncSessionLocal
+        from apps.copilot.db.models import WindScan
+        from sqlalchemy import select
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(WindScan).order_by(WindScan.created_at.desc()).limit(1)
+            )
+            ws = result.scalar_one_or_none()
+            if ws and ws.candidates_json:
+                for c in ws.candidates_json:
+                    if str(c.get("sector", "")).strip() == parent:
+                        sub_concepts = c.get("sub_concepts") or []
+                        break
+    except Exception:
+        pass
+
+    target = None
+    for sc in sub_concepts:
+        if sc.get("sub_name", "") == concept:
+            target = sc
+            break
+    if not target:
+        return HTMLResponse(f'<div class="mt-2 p-2 text-[10px] text-red-500">未找到概念 "{concept}" 的证据数据</div>')
+
+    quotes = target.get("evidence_quotes") or []
+    doc_count = target.get("doc_count", 0)
+    avg_score = target.get("avg_composite", 0)
+
+    if not quotes:
+        return HTMLResponse(f'<div class="mt-2 p-2 text-[10px] text-gray-500">该概念暂无原文引用数据（doc_count={doc_count}）</div>')
+
+    # 拼接引用给LLM做深度分析（兼容字符串和字典两种格式）
+    def _fmt_quote(q) -> str:
+        if isinstance(q, dict):
+            return f"[{q.get('direction','')}·score={q.get('impact_score','')}] {q.get('quote','')[:500]}"
+        else:
+            return f"[quote] {str(q)[:500]}"
+    quote_text = "\n".join(
+        f"[{i+1}] {_fmt_quote(q)}"
+        for i, q in enumerate(quotes[:10])
+    )
+
+    prompt = f"""你是政策分析专家。以下是与「{concept}」概念相关的 {doc_count} 篇政策文档中的关键原文引用（共 {len(quotes)} 条）：
+
+{quote_text}
+
+请从以下维度进行深度解读（200-300字，bullet points）：
+1. **国家战略意图**：这些政策表达背后，国家对该行业的真实意图是什么？是核心战略还是配套措施？
+2. **政策分量评估**：从措施强度（拨款/立法/标准/鼓励）、发文主体级别、时效性综合判断，该概念的实际政策分量有多大？
+3. **落地方向**：利好集中在哪些具体子领域？是否有明确的量化目标或时间节点？
+4. **风险与不足**：是否存在负面表述、监管重、或政策扶持停留在纸面的风险？
+5. **对「{parent}」赛道的贡献度**：该概念在上级赛道中的权重和支撑作用如何？
+
+用中文回答，每点1-2句话，不要过度展开。"""
+
+    try:
+        llm_resp = _call_llm(prompt, model="deepseek-chat", max_tokens=600)
+        analysis = llm_resp.strip() if llm_resp else "T2分析暂不可用（LLM未返回）"
+    except Exception as e:
+        analysis = f"T2分析失败：{str(e)[:100]}"
+
+    return HTMLResponse(f"""
+<div class="mt-2 p-3 rounded border border-amber-200 bg-amber-50/80">
+  <div class="flex items-center gap-2 mb-2">
+    <span class="text-xs font-medium text-amber-800">T2 深度分析 · {concept}</span>
+    <span class="text-[9px] text-amber-600">基于 {doc_count} 篇文档 · {len(quotes)} 条引用</span>
+  </div>
+  <div class="text-[11px] text-gray-700 leading-relaxed whitespace-pre-line space-y-1">
+{analysis}
+  </div>
+</div>
+""")

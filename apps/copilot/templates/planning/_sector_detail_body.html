@@ -1,0 +1,279 @@
+{# 赛道详情展开体 · v5.1 Policy + Investment Grade #}
+{% if detail and detail.get('status') == 'ok' %}
+<div class="space-y-3">
+  {% set wi = detail.get('wind_info') or {} %}
+  {% set tier = wi.get('d1_tier') or {} %}
+
+  <!-- 双视角面板：政策方向 + 投资级评分 -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+    <!-- 左侧：政策方向卡片 -->
+    {% if wi.get('d1_score') is not none %}
+    <div class="rounded-lg border border-blue-200 bg-gradient-to-br from-blue-50 to-white px-3 py-2">
+      <div class="flex items-center gap-1 mb-1">
+        <span class="text-[11px] font-medium text-blue-700">📊 政策方向 D1</span>
+        {% if wi.get('high_value_flag') %}
+        <span class="text-[9px] px-1 py-0 rounded bg-red-100 text-red-700 font-bold">⚡高价值</span>
+        {% endif %}
+      </div>
+      <div class="flex items-end gap-2 mb-1">
+        <span class="text-2xl font-bold text-blue-700">{{ "%.0f"|format(wi.get('d1_score', 0) * 100) }}</span>
+        <span class="inline-block text-[11px] font-bold px-1.5 py-0 rounded-full {{ tier.get('css', 'bg-gray-200 text-gray-500') }}">
+          {{ tier.get('label', '—') }}
+        </span>
+      </div>
+      {% set d1d = wi.get('d1_detail') or {} %}
+      {% if d1d.get('doc_count') %}
+      <div class="flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] text-gray-500">
+        <span>文档 {{ d1d.doc_count }}</span>
+        {% if d1d.tailwind_count %}<span class="text-emerald-600">利好 {{ d1d.tailwind_count }}</span>{% endif %}
+        {% if d1d.headwind_count %}<span class="text-red-600">利空 {{ d1d.headwind_count }}</span>{% endif %}
+        {% if d1d.imp_force_label and d1d.imp_force_label != '方向性鼓励' %}
+        <span class="text-teal-700">·{{ d1d.imp_force_label }}</span>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- 右侧：投资级评分 Z0+ 四轴卡 -->
+    {% set zplus = wi.get('z0_plus_score') %}
+    {% set zb = wi.get('z0_plus_breakdown') or {} %}
+    {% if zplus is not none %}
+    <div class="rounded-lg border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white px-3 py-2">
+      <div class="flex items-center gap-1 mb-1">
+        <span class="text-[11px] font-medium text-emerald-700">💎 投资级 Z0+</span>
+      </div>
+      <div class="flex items-end gap-2 mb-1">
+        <span class="text-2xl font-bold text-emerald-700">{{ "%.0f"|format(zplus * 100) }}</span>
+        <span class="text-[10px] text-emerald-600 font-medium">
+          {% if zplus >= 0.75 %}强配置
+          {% elif zplus >= 0.55 %}推荐关注
+          {% elif zplus >= 0.35 %}可选
+          {% else %}观望
+          {% endif %}
+        </span>
+      </div>
+      <!-- 四轴迷你条形图 -->
+      <div class="space-y-1 mt-1">
+        {% set axes = [
+          ('政策动量', zb.get('policy_acceleration', 0)|string, 'policy_momentum', 'blue'),
+          ('商业轨迹', zb.get('growth_stage', ''), 'commercial_trajectory', 'emerald'),
+          ('资本引力', zb.get('valuation_tier', ''), 'capital_gravity', 'violet'),
+        ] %}
+        {% for label, _, key, color in axes %}
+        {% set val = {'policy_momentum': wi.get('z0_plus_score', 0) if loop.first else 0.5}.get(key, 0.5) %}
+        {% endfor %}
+        {# 四轴名称标签 #}
+        <div class="flex items-center justify-between text-[9px] text-gray-500">
+          <div class="flex gap-2">
+            <span class="inline-flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span>动量</span>
+            <span class="inline-flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>商业</span>
+            <span class="inline-flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full bg-violet-400"></span>资本</span>
+            <span class="inline-flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>落地</span>
+          </div>
+          <span class="text-emerald-600">{{ zb.get('revenue_model', '') }}</span>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- 评级详解面板（可折叠） -->
+  <div x-data="{ open: {{ 'true' if wi.get('d1_score') is not none and wi.get('d1_score', 0) >= 0.4 else 'false' }} }" class="mt-1">
+    <button type="button"
+            class="text-[11px] text-blue-600 hover:text-blue-800 flex items-center gap-1"
+            @click="open = !open">
+      <span x-show="!open">▶</span><span x-show="open">▼</span>
+      「{{ tier.get('label', '') }}」评级详解
+    </button>
+    <div x-show="open" class="mt-2 space-y-2 text-xs">
+      <div class="rounded border border-blue-100 bg-blue-50/50 px-3 py-2">
+        <p class="font-medium text-blue-800 mb-1">概览</p>
+        <p class="text-gray-700 leading-relaxed">{{ tier.get('summary', '暂无解释') }}</p>
+      </div>
+      <div class="rounded border border-gray-100 bg-white px-3 py-2">
+        <p class="font-medium text-gray-800 mb-1">典型证据特征</p>
+        <p class="text-gray-600 leading-relaxed">{{ tier.get('typical_evidence', '暂无') }}</p>
+      </div>
+      {% if zb %}
+      <div class="rounded border border-emerald-100 bg-emerald-50/80 px-3 py-2">
+        <p class="font-medium text-emerald-800 mb-1">投资画像拆解</p>
+        <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-gray-700">
+          <span>收入传导：<span class="font-medium">{{ zb.get('revenue_model', '—') }}</span></span>
+          <span>成长阶段：<span class="font-medium">{{ zb.get('growth_stage', '—') }}</span></span>
+          <span>利润池：<span class="font-medium">{{ zb.get('profit_pool', '—') }}</span></span>
+          <span>估值弹性：<span class="font-medium">{{ zb.get('valuation_tier', '—') }}</span></span>
+          <span>叙事类型：<span class="font-medium">{{ zb.get('narrative_type', '—') }}</span></span>
+          <span>机构覆盖：<span class="font-medium">{{ zb.get('institutional_flow', '—') }}</span></span>
+          {% if zb.get('policy_acceleration') %}
+          <span>政策加速度：<span class="font-medium">×{{ "%.1f"|format(zb.get('policy_acceleration', 1.0)) }}</span></span>
+          {% endif %}
+          {% if zb.get('regime_change_count', 0) > 0 %}
+          <span>政策拐点：<span class="font-medium text-amber-700">有 {{ zb.regime_change_count }} 篇</span></span>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- D1 细分因子 -->
+  {% set d1d = wi.get('d1_detail') or {} %}
+  {% if d1d.get('doc_count') %}
+  <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-gray-500 px-1">
+    <span>方向净值 {{ "%.2f"|format(d1d.get('net_direction', 0)) }}</span>
+    <span>质量 {{ "%.2f"|format(d1d.get('quality', 0)) }}</span>
+    <span>置信度 {{ "%.2f"|format(d1d.get('confidence', 0)) }}</span>
+    <span>关联文档 {{ d1d.get('doc_count', 0) }} 篇</span>
+    {% if d1d.get('toolkit_total') %}
+    <span>工具包 {{ "%.0f"|format(d1d.toolkit_total) }}</span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- T2 结论摘要 -->
+  <div class="flex flex-wrap items-center gap-2 pt-1">
+    <span class="text-xs text-gray-500">共识方向：</span>
+    {% set direction = detail.get('consensus_direction') %}
+    {% if direction %}
+    <span class="text-xs font-medium px-1.5 py-0.5 rounded
+      {% if direction in ('strong_tailwind','tailwind') %}bg-emerald-100 text-emerald-800
+      {% elif direction in ('strong_headwind','headwind') %}bg-red-100 text-red-700
+      {% elif direction == 'mixed' %}bg-amber-100 text-amber-800
+      {% else %}bg-gray-100 text-gray-600{% endif %}">
+      {{ direction }}
+    </span>
+    {% endif %}
+    {% if detail.get('doc_count') %}
+    <span class="text-xs text-gray-300">|</span>
+    <span class="text-xs text-gray-500">关联文档 {{ detail.doc_count }} 篇</span>
+    {% if detail.get('tailwind_count') %}<span class="text-xs text-emerald-600">· 利好 {{ detail.tailwind_count }}</span>{% endif %}
+    {% if detail.get('headwind_count') %}<span class="text-xs text-red-600">· 利空 {{ detail.headwind_count }}</span>{% endif %}
+    {% endif %}
+  </div>
+
+  <!-- v2.1: A股概念板列表 + v3.0: 二次排名对齐 -->
+  {% set sub_concepts = wi.get('sub_concepts') or [] %}
+  {% if sub_concepts %}
+  <div class="rounded-lg border border-sky-200 bg-gradient-to-br from-sky-50/50 to-white px-4 py-3">
+    <div class="text-xs font-medium text-sky-700 mb-2 flex items-center gap-1">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+      A股概念板映射（按政策权重 · 二次排名）
+    </div>
+    {% for sc in sub_concepts[:12] %}
+    {% set max_dc = sub_concepts[0].doc_count if sub_concepts else 1 %}
+    {% set pct = (sc.doc_count / max_dc * 100)|int if max_dc > 0 else 0 %}
+    {% set sc_weight = '高' if pct > 60 else ('中' if pct > 25 else '低') %}
+    <div class="mb-2 pb-2 {% if not loop.last %}border-b border-sky-100{% endif %}">
+      <div class="flex items-center justify-between text-xs mb-1">
+        <div class="flex items-center gap-2">
+          <span class="font-medium text-gray-800">{{ sc.sub_name }}</span>
+          {% if sc.concept_code %}
+          <span class="text-[9px] text-gray-400 tabular-nums">{{ sc.concept_code }}</span>
+          {% endif %}
+          <span class="text-[9px] px-1 py-0 rounded-full {% if sc_weight == '高' %}bg-sky-100 text-sky-700 font-medium{% elif sc_weight == '中' %}bg-gray-100 text-gray-600{% else %}bg-gray-50 text-gray-400{% endif %}">权重: {{ sc_weight }}</span>
+          <!-- 投资评分标签 -->
+          {% set zsub = sc.get('avg_composite', 0) %}
+          {% if zsub >= 0.6 %}
+          <span class="text-[9px] text-emerald-700 font-medium">高潜力</span>
+          {% elif zsub >= 0.3 %}
+          <span class="text-[9px] text-amber-600">关注</span>
+          {% else %}
+          <span class="text-[9px] text-gray-400">参考</span>
+          {% endif %}
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-gray-500 tabular-nums">{{ sc.doc_count }}篇</span>
+          <span class="text-sky-600 tabular-nums font-mono">{{ "%.1f"|format(sc.avg_composite) }}</span>
+          <!-- T2 深度分析按钮 -->
+          <button type="button"
+                  class="text-[9px] px-2 py-0.5 rounded border border-amber-300 text-amber-700 hover:bg-amber-50"
+                  hx-post="/api/strategic/z0/concept-analysis?concept={{ sc.sub_name|urlencode }}&parent={{ detail.get('sector','')|urlencode }}"
+                  hx-target="#concept-{{ loop.index }}-analysis"
+                  hx-swap="innerHTML">
+            T2分析
+          </button>
+        </div>
+      </div>
+      <!-- 原文证据引用 -->
+      {% set quotes = sc.get('evidence_quotes') or [] %}
+      {% if quotes %}
+      <div class="mt-1 space-y-0.5 max-h-[300px] overflow-y-auto">
+        {% for q in quotes[:8] %}
+        <p class="text-[10px] text-gray-600 leading-snug border-l-2 border-sky-200 pl-2 italic">
+          「{{ q.quote[:300] if q is mapping and q.quote is defined else (q[:300] if q is string else q) }}{% if q is string and q|length > 300 or (q is mapping and q.quote is defined and q.quote|length > 300) %}…{% endif %}」
+        </p>
+        {% endfor %}
+        {% if quotes|length > 8 %}
+        <p class="text-[9px] text-gray-400 pl-2">… 还有 {{ quotes|length - 8 }} 条引用</p>
+        {% endif %}
+      </div>
+      {% endif %}
+      <!-- T2 深度分析结果区 -->
+      <div id="concept-{{ loop.index }}-analysis" class="mt-1"></div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- 证据文档时间线 -->
+  {% set evidence_docs = detail.get('evidence_docs') or [] %}
+  {% if evidence_docs|length > 0 %}
+  <div class="border-t border-gray-100 pt-2">
+    <p class="text-xs text-gray-500 mb-2">
+      判断依据原文引用（{{ evidence_docs|length }} 篇）：
+    </p>
+    <div class="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+      {% for ev in evidence_docs %}
+      <div class="rounded border border-gray-100 bg-gray-50/50 px-3 py-2">
+        <div class="flex items-start justify-between gap-2 mb-1">
+          <span class="text-xs font-medium text-gray-800 line-clamp-2">{{ ev.title }}</span>
+          <span class="text-[10px] text-gray-400 shrink-0">
+            {{ ev.get('inferred_at', ev.get('published_at', ''))[:10] }}
+          </span>
+        </div>
+        {% if ev.get('direction') %}
+        <span class="inline-block text-[10px] px-1.5 py-0.5 rounded mb-1
+          {% if ev.direction in ('strong_tailwind','tailwind') %}bg-emerald-50 text-emerald-700
+          {% elif ev.direction in ('strong_headwind','headwind') %}bg-red-50 text-red-700
+          {% elif ev.direction == 'neutral' %}bg-gray-100 text-gray-500
+          {% else %}bg-gray-50 text-gray-500{% endif %}">
+          {{ ev.direction }}
+          {% if ev.get('impact_score') is not none %} · {{ "%.0f"|format(ev.impact_score) }}{% endif %}
+        </span>
+        {% endif %}
+        {% set imp_str = ev.get('implementation_strength') %}
+        {% if imp_str %}
+        {% set imp_labels = {'comprehensive': '多重配套', 'targeted': '实质性扶持', 'moderate': '量化规划', 'light': '方向性鼓励', 'symbolic': '仅提及'} %}
+        {% set imp_colors = {'comprehensive': 'bg-teal-100 text-teal-700', 'targeted': 'bg-teal-50 text-teal-600', 'moderate': 'bg-blue-50 text-blue-600', 'light': 'bg-gray-100 text-gray-500', 'symbolic': 'bg-gray-100 text-gray-400'} %}
+        <span class="inline-block text-[10px] px-1.5 py-0.5 rounded mb-1 ml-1 {{ imp_colors.get(imp_str, 'bg-gray-100 text-gray-500') }}">
+          {{ imp_labels.get(imp_str, imp_str) }}
+        </span>
+        {% endif %}
+        {% for q in ev.get('evidence_quotes') or [] %}
+        <p class="text-xs text-gray-600 leading-relaxed mt-1 border-l-2 border-indigo-200 pl-2">
+          「{{ q }}」
+        </p>
+        {% endfor %}
+        {% if ev.get('reasoning') %}
+        <p class="text-[11px] text-gray-400 mt-1">{{ ev.reasoning }}</p>
+        {% endif %}
+       </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% else %}
+  <div class="border-t border-gray-100 pt-3">
+    <p class="text-xs text-gray-400">暂无 T2 详细证据 · T1 LLM 评分尚未执行</p>
+  </div>
+  {% endif %}
+</div>
+{% elif detail and detail.get('status') == 'error' %}
+<div class="py-3 text-xs text-red-500">
+  读取失败：{{ detail.get('detail', '') }}
+</div>
+{% else %}
+<div class="py-3 text-xs text-gray-400">
+  暂无 {{ detail.get('sector', '') if detail else '' }} 的 T2 结论 · 待政策数据 T1 LLM 处理后生成
+</div>
+{% endif %}

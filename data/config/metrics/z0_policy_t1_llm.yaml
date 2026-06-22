@@ -26,12 +26,30 @@ cost_control:
       input_per_1M_yuan: 15.0
       output_per_1M_yuan: 75.0
 
-# --- 文档类型权重（36_ §5.1） ---
+# --- 数据源权威权重（替换 doc_type_weights · 按具体 source 域名直接映射）---
+source_authority:
+  # 国务院直属（最高权威）
+  gov.cn: 1.0                               # 国务院政策文件库 · 国发/国办文件
+  # 核心经济综合部门
+  ndrc.gov.cn: 0.95                         # 发改委 · 产业政策最高权威
+  miit.gov.cn: 0.90                         # 工信部 · 工业/信息/通信/新兴产业
+  # 重要经济职能部委
+  pbc.gov.cn: 0.88                          # 央行 · 货币政策/金融稳定
+  mof.gov.cn: 0.85                          # 财政部 · 财税政策
+  # 专业领域部委
+  most.gov.cn: 0.82                         # 科技部 · 研发/创新/卡脖子攻关
+  mofcom.gov.cn: 0.80                       # 商务部 · 贸易/产业安全/反垄断
+  csrc.gov.cn: 0.78                         # 证监会 · 资本市场改革
+  nea.gov.cn: 0.82                          # 国家能源局 · 能源政策
+  mee.gov.cn: 0.80                          # 生态环境部 · 环保/双碳/绿色转型
+  mot.gov.cn: 0.78                          # 交通运输部 · 低空/自动驾驶/智慧交通
+  moa.gov.cn: 0.78                          # 农业农村部 · 乡村振兴/粮食安全
+  # 默认（未匹配到具体 source 时）
+  default: 0.60
+
+# --- 文档类型权重（已废弃，由 source_authority 替代 · 保留键名防止报错）---
 doc_type_weights:
-  L0: 1.0                                  # 国家级规划/立法
-  L1: 0.7                                  # 部委专项政策
-  L2: 0.4                                  # 会议精神/讲话
-  L3: 0.2                                  # 地方/行业动态
+  _deprecated: true
 
 # --- 实施状态乘数（36_ §5.1） ---
 impl_status_multipliers:
