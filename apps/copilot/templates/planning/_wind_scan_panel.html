@@ -43,9 +43,17 @@
   </div>
 
   {% if scan and scan.status == 'ready' %}
-  <div class="rounded-lg border border-emerald-100 bg-gradient-to-r from-emerald-50/80 to-white px-3 py-2 text-xs text-emerald-900 space-y-1">
-    <p>Z0 纯政策风向 + Z0+ 投资级评分 · {{ scan.candidates|length }} 个候选赛道</p>
-    <p class="text-emerald-800/90">支持「政策」和「投资」双视角切换。投资视角叠加商业轨迹(30%)、资本引力(25%)、落地质量(15%)。</p>
+  <div class="rounded-lg border border-emerald-100 bg-gradient-to-r from-emerald-50/80 to-white px-3 py-2 text-xs text-emerald-900 flex items-center gap-2">
+    <span class="font-medium">{{ scan.candidates|length }} 个候选赛道</span>
+    <span class="relative inline-block align-middle">
+      <span class="info-tip" role="button" tabindex="0" title="点击查看说明">📖</span>
+      <div class="info-tip-popover hidden">
+        <p><strong>双视角说明</strong></p>
+        <p><strong>政策视角</strong>：纯政策信号，按政策文档 D1 评分排序。</p>
+        <p><strong>投资视角</strong>：叠加商业轨迹(30%)、资本引力(25%)、落地质量(15%) 四轴综合评分 Z0+。</p>
+        <p class="text-gray-400 mt-1">点击赛道卡片展开详情可见政策方向/投资级双面板。</p>
+      </div>
+    </span>
   </div>
   {% elif scan and scan.status == 'error' %}
   <div class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">

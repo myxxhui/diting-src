@@ -83,6 +83,54 @@
   .executing-fold-summary { display: block; }
   .executing-fold-summary::-webkit-details-marker { display: none; }
   .executing-fold-summary::marker { content: ''; }
+  /* info-tip 组件 */
+  .info-tip {
+    @apply inline-flex items-center justify-center w-4 h-4 rounded-full
+           bg-gray-100 text-gray-400 text-[10px] cursor-pointer
+           hover:bg-indigo-100 hover:text-indigo-600 transition-colors
+           select-none align-middle;
+    font-weight: 600;
+    line-height: 1;
+  }
+  .info-tip-popover {
+    position: absolute;
+    z-index: 40;
+    width: 18rem;
+    padding: 0.75rem;
+    background: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1), 0 4px 10px -6px rgba(0,0,0,0.1);
+    border: 1px solid #e5e7eb;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: #4b5563;
+    margin-top: 6px;
+    margin-left: -8px;
+  }
+  .info-tip-popover::before {
+    content: '';
+    position: absolute;
+    top: -5px;
+    left: 12px;
+    width: 8px;
+    height: 8px;
+    background: white;
+    border-left: 1px solid #e5e7eb;
+    border-top: 1px solid #e5e7eb;
+    transform: rotate(45deg);
+  }
+  .info-tip-popover p { margin-bottom: 0.25rem; }
+  .info-tip-popover ul { padding-left: 1rem; list-style: disc; }
+  .info-tip-popover ul li { margin-bottom: 0.125rem; }
+  /* 生态位视图切换 */
+  #ecosystem-stock-pool.eco-grouped .eco-node-card { display: block; }
+  #ecosystem-stock-pool.eco-flat .eco-node-card { border: none !important; margin-bottom: 0 !important; padding: 0 !important; }
+  #ecosystem-stock-pool.eco-flat .eco-node-card > .eco-node-header { display: none; }
+  #ecosystem-stock-pool.eco-flat .eco-stock-row { border-left: 2px solid #e5e7eb; padding-left: 0.5rem; margin-bottom: 0.125rem; }
+  #ecosystem-stock-pool.eco-topology .eco-topo-sidebar { display: block; }
+  #ecosystem-stock-pool.eco-topology .eco-stock-list { display: block; }
+  /* 生态位 filter 隐藏辅助 */
+  .eco-stock-hidden { display: none !important; }
 </style>
 
   <script>
@@ -189,6 +237,36 @@
       }
       window.workbenchProcessPanelHtmx(view);
     };
+
+    /** info-tip：点击问号按钮展示/隐藏 Popover，点击外部关闭，ESC 关闭 */
+    window.workbenchInitInfoTips = function (scope) {
+      if (!scope) scope = document;
+      scope.querySelectorAll('.info-tip').forEach(function (tip) {
+        tip.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var pop = this.nextElementSibling;
+          if (!pop || !pop.classList.contains('info-tip-popover')) return;
+          var open = !pop.classList.contains('hidden');
+          document.querySelectorAll('.info-tip-popover').forEach(function (p) { p.classList.add('hidden'); });
+          if (!open) pop.classList.remove('hidden');
+        });
+      });
+    };
+    document.addEventListener('click', function (e) {
+      if (!e.target.closest('.info-tip, .info-tip-popover')) {
+        document.querySelectorAll('.info-tip-popover').forEach(function (p) { p.classList.add('hidden'); });
+      }
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        document.querySelectorAll('.info-tip-popover').forEach(function (p) { p.classList.add('hidden'); });
+      }
+    });
+    // HTMX 新内容注入后初始化 info-tip
+    document.body.addEventListener('htmx:afterSwap', function (ev) {
+      var t = ev.detail && ev.detail.target;
+      if (t) window.workbenchInitInfoTips(t);
+    });
 
     /** 执行区 T2 摘要 · 解除固定后恢复自动同步 */
     document.body.addEventListener('click', function (ev) {

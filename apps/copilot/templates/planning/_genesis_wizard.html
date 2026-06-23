@@ -169,12 +169,17 @@
         <div class="flex items-center justify-between mb-2">
           <p class="text-xs font-semibold text-gray-800">
             📋 产业链 BOM 节点 · 共 {{ nodes|length }} 个
+            <span class="relative inline-block align-middle ml-1">
+              <span class="info-tip" role="button" tabindex="0" title="点击查看说明">📖</span>
+              <div class="info-tip-popover hidden">
+                <p><strong>BOM 产业链节点说明</strong></p>
+                <p>经人工筛选与深度评估的关键节点，覆盖 L1-L5 全栈架构。</p>
+                <p class="mt-1"><strong>⭐ TOP 推荐</strong>：LLM 基于评分选出的高价值节点。可手动增减。</p>
+                <p class="text-gray-400 mt-1">未勾选的节点将不被纳入生态位分析。</p>
+              </div>
+            </span>
           </p>
-          <span class="text-[10px] text-gray-400">定制化节点 · 经人工筛选与深度评估</span>
         </div>
-        <p class="text-[10px] text-gray-500 mb-2">
-          ⭐ <strong>推荐 TOP5</strong>：LLM 基于评分选出的关键节点。可手动增减。
-        </p>
 
         <div class="space-y-1.5 max-h-64 overflow-y-auto bg-white rounded-lg border border-gray-200 p-2">
           {% for n in nodes %}
@@ -284,17 +289,21 @@
       </div>
       {% endif %}
 
-      <div class="bg-amber-50 border border-amber-100 rounded-lg p-2 text-[10px] text-amber-700">
-        ⚠️ 标的池推断将在建板后调用 DeepSeek V4-pro 异步处理（约 60-90s），结果存入板块详情页的「生态位」标签。
-      </div>
-      <div class="text-[10px] text-gray-500 bg-gray-50 rounded-lg p-2">
-        <p class="font-medium text-gray-600 mb-1">🔍 生态位推断流程</p>
-        <ol class="list-decimal pl-4 space-y-0.5">
-          <li>在已选 BOM 节点内逐节点映射 A 股标的</li>
-          <li>每只标的按 5 因子打分（壁垒/成长/盈利/国产替代/政策映射）+ 证据链</li>
-          <li>排除规则检查（ST/立案/商誉/审计非标）→ 一票否决</li>
-          <li>建议新增节点 → 架构师审批</li>
-        </ol>
+      <div class="bg-amber-50 border border-amber-100 rounded-lg p-2 text-[10px] text-amber-700 flex items-center gap-2">
+        <span>⚠️ 标的池推断将在建板后异步处理，结果存入板块生态位。</span>
+        <span class="relative inline-block align-middle ml-auto">
+          <span class="info-tip" role="button" tabindex="0" title="点击查看说明">📖</span>
+          <div class="info-tip-popover hidden">
+            <p><strong>生态位推断四步流程</strong></p>
+            <ol class="list-decimal pl-4 space-y-1 mt-1">
+              <li>在已选 BOM 节点内逐节点映射 A 股标的</li>
+              <li>每只标的按 5 因子打分（壁垒/成长/盈利/国产替代/政策映射）+ 证据链</li>
+              <li>排除规则检查（ST/立案/商誉/审计非标）→ 一票否决</li>
+              <li>建议新增节点 → 架构师审批</li>
+            </ol>
+            <p class="text-gray-400 mt-1">调用 DeepSeek V4-pro 异步处理，约 60-90s。</p>
+          </div>
+        </span>
       </div>
       <form hx-post="/api/strategic/genesis/apply" hx-swap="none" class="space-y-2">
         <input type="hidden" name="board_title" value="{{ preview.board_title }}" />

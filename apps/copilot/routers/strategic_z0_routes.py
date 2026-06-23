@@ -979,6 +979,40 @@ async def api_board_ecosystem_cancel(
 
 
 # ═══════════════════════════════════════════════════
+#  生态位排序接口
+# ═══════════════════════════════════════════════════
+
+@router.get("/api/strategic/boards/{board_id}/ecosystem/sorted", response_class=HTMLResponse)
+async def api_board_ecosystem_sorted(
+    board_id: int,
+    node_sort: str = Query("tier_core_first"),
+    stock_sort: str = Query("composite_desc"),
+    view_mode: str = Query("grouped"),
+    session: AsyncSession = Depends(get_db),
+):
+    """按指定排序参数重新渲染生态位标的池，返回完整 ecosystem-section HTML。"""
+    from apps.copilot.modules.strategic.render import _render_ecosystem_result, render_ecosystem_section
+    from apps.copilot.modules.strategic.service import get_board_detail
+    from apps.copilot.db.models import StrategicBoard
+
+    detail = await get_board_detail(session, board_id)
+    if not detail:
+        return HTMLResponse(
+            '<div id="ecosystem-section" class="mt-6 border border-dashed border-gray-200 rounded-lg p-4">'
+            '<p class="text-red-500 text-xs">板块不存在</p></div>'
+        )
+    stock_pool = detail.get("stock_pool_json")
+    if not stock_pool or stock_pool.get("status") != "ok":
+        return HTMLResponse(render_ecosystem_section(detail))
+
+    html = _render_ecosystem_result(board_id, stock_pool, node_sort, stock_sort, view_mode)
+    return HTMLResponse(
+        f'<div id="ecosystem-section" class="mt-6 border border-dashed border-gray-200 rounded-lg p-4">'
+        f'{html}</div>'
+    )
+
+
+# ═══════════════════════════════════════════════════
 #  板块编辑（添加/修改赛道/概念/时间）
 # ═══════════════════════════════════════════════════
 

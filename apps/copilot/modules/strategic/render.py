@@ -4,8 +4,90 @@
 """
 from __future__ import annotations
 
+import copy
 import html
+from enum import Enum
 from typing import Any, Optional
+
+
+def info_tip(content_html: str, label: str = "?") -> str:
+    """渲染一个问号提示按钮 + Popover。
+
+    content_html 为 Popover 内部 HTML（已转义或安全 HTML）。
+    label 默认为圆点问号「?」，可替换为其他 1~2 字符徽标。
+    """
+    _lbl = html.escape(label)
+    return (
+        f'<span class="relative inline-block align-middle ml-1">'
+        f'<span class="info-tip" role="button" tabindex="0" title="点击查看说明">{_lbl}</span>'
+        f'<div class="info-tip-popover hidden">'
+        f'{content_html}'
+        f'</div>'
+        f'</span>'
+    )
+
+
+# ════════════════════════════════════════════════════════════════
+#  生态位标的池排序（Phase 1 · 3.1）
+# ════════════════════════════════════════════════════════════════
+
+class StockSortKey(str, Enum):
+    COMPOSITE_DESC = "composite_desc"
+    COMPOSITE_ASC = "composite_asc"
+    MOAT = "moat"
+    GROWTH = "growth"
+    PROFIT = "profit"
+    LOCALIZE = "localize"
+    POLICY_BOND = "policy_bond"
+
+
+class NodeSortKey(str, Enum):
+    TIER_CORE_FIRST = "tier_core_first"      # 核心→重要→配套
+    TIER_SUPP_FIRST = "tier_supp_first"       # 配套→重要→核心
+    UPSTREAM_FIRST = "upstream_first"         # 上游→中游→下游→服务
+    DOWNSTREAM_FIRST = "downstream_first"     # 下游→中游→上游→服务
+
+
+_LAYER_ORDER = {"上游": 0, "中游": 1, "下游": 2, "服务层": 3}
+_TIER_ORDER = {"核心": 0, "重要": 1, "配套": 2}
+_ECOSYSTEM_LAYER_ORDER = {"upstream": 0, "midstream": 1, "downstream": 2, "service_layer": 3}
+
+
+def sort_bom_nodes(
+    nodes: list[dict],
+    node_sort: NodeSortKey = NodeSortKey.TIER_CORE_FIRST,
+    stock_sort: StockSortKey = StockSortKey.COMPOSITE_DESC,
+) -> list[dict]:
+    """对 BOM 节点及其内标的进行排序。返回新列表，不修改原数据。"""
+    result = copy.deepcopy(nodes)
+
+    # 1. 节点级排序
+    if node_sort == NodeSortKey.TIER_CORE_FIRST:
+        result.sort(key=lambda n: _TIER_ORDER.get(n.get("tier", "配套"), 99))
+    elif node_sort == NodeSortKey.TIER_SUPP_FIRST:
+        result.sort(key=lambda n: _TIER_ORDER.get(n.get("tier", "配套"), 99), reverse=True)
+    elif node_sort == NodeSortKey.UPSTREAM_FIRST:
+        result.sort(key=lambda n: _ECOSYSTEM_LAYER_ORDER.get(n.get("ecosystem_layer", ""), 99))
+    elif node_sort == NodeSortKey.DOWNSTREAM_FIRST:
+        result.sort(key=lambda n: _ECOSYSTEM_LAYER_ORDER.get(n.get("ecosystem_layer", ""), 99), reverse=True)
+
+    # 2. 节点内标的排序
+    for node in result:
+        stocks = node.get("stocks", [])
+        if stock_sort == StockSortKey.COMPOSITE_DESC:
+            stocks.sort(key=lambda s: s.get("scoring_detail", {}).get("composite", 0), reverse=True)
+        elif stock_sort == StockSortKey.COMPOSITE_ASC:
+            stocks.sort(key=lambda s: s.get("scoring_detail", {}).get("composite", 0))
+        else:
+            factor_key = stock_sort.value
+            stocks.sort(
+                key=lambda s: s.get("scoring_detail", {}).get(factor_key, {}).get("score", 0),
+                reverse=True,
+            )
+        node["stocks"] = stocks
+
+    return result
+
 
 _BOARD_COLOR = {
     "indigo": ("border-indigo-500", "bg-indigo-600", "bg-indigo-50", "text-indigo-800"),
@@ -571,14 +653,17 @@ def render_strategic_overview_drawer(boards):
 #  生态位分析区域（v2.0 · BOM 节点分组 + 5 因子打分明细）
 # ════════════════════════════════════════════════════════════════
 
-def render_ecosystem_section(board: dict[str, Any]) -> str:
-    """生态位分析区域：已完成 → 展示 v2.0 BOM 标的池；进行中 → 进度+JS轮询；未开始 → 触发按钮。"""
+def render_ecosystem_section(board: dict[str, Any],
+                             node_sort: str = "tier_core_first",
+                             stock_sort: str = "composite_desc",
+                             view_mode: str = "grouped") -> str:
+    """生态位分析区域。支持可选排序参数。"""
     board_id = board["id"]
     stock_pool = board.get("stock_pool_json")
 
     # 已完成
     if stock_pool and stock_pool.get("status") == "ok":
-        return _render_ecosystem_result(board_id, stock_pool)
+        return _render_ecosystem_result(board_id, stock_pool, node_sort, stock_sort, view_mode)
 
     # 进行中
     if stock_pool and stock_pool.get("status") == "pending":
@@ -721,27 +806,49 @@ def _render_ecosystem_pending(board_id: int, task_id: str) -> str:
 </div>"""
 
 
-def _render_ecosystem_result(board_id: int, stock_pool: dict[str, Any]) -> str:
-    """渲染生态位分析结果（v2.0：BOM 节点分组 + 5因子打分明细）。"""
+def _render_ecosystem_result(board_id: int, stock_pool: dict[str, Any],
+                             node_sort: str = "tier_core_first",
+                             stock_sort: str = "composite_desc",
+                             view_mode: str = "grouped") -> str:
+    """渲染生态位分析结果。支持可选排序参数。"""
     version = stock_pool.get("version", "1.0")
 
     # v2.0 → BOM 节点分组渲染
     bom_nodes = stock_pool.get("bom_nodes") or []
     if version == "2.0" and bom_nodes:
-        return _render_bom_stock_pool(board_id, stock_pool, bom_nodes)
+        return _render_bom_stock_pool(board_id, stock_pool, bom_nodes, node_sort, stock_sort, view_mode)
 
     # v1.0 fallback → concept_pools 渲染（兼容旧数据）
     return _render_concept_pools_result(board_id, stock_pool)
 
 
-def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes: list[dict]) -> str:
-    """v2.0：BOM 节点分组渲染标的池，每只标的含 5 因子打分明细（可展开）。"""
+def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes: list[dict],
+                           node_sort: str = "tier_core_first",
+                           stock_sort: str = "composite_desc",
+                           view_mode: str = "grouped") -> str:
+    """v2.0：BOM 节点分组渲染标的池，每只标的含 5 因子打分明细（可展开）。
+
+    Args:
+        node_sort: 节点排序方式 (tier_core_first / tier_supp_first / upstream_first / downstream_first)
+        stock_sort: 标的排序方式 (composite_desc / composite_asc / moat / growth / profit / localize / policy_bond)
+        view_mode: 视图模式 (grouped / flat / topology)
+    """
     topo = stock_pool.get("ecosystem_topology", {})
     thesis = stock_pool.get("investment_thesis", "")
     suggested_additions = stock_pool.get("suggested_additions", [])
     excluded_stocks = stock_pool.get("excluded_stocks", [])
     disclaimer = stock_pool.get("disclaimer", "")
     bom_version = stock_pool.get("bom_whitelist_version", "1.0.0")
+
+    # 按传入的排序参数重排节点与标的
+    if node_sort != "default" or stock_sort != "default":
+        bom_nodes = sort_bom_nodes(
+            bom_nodes,
+            NodeSortKey(node_sort),
+            StockSortKey(stock_sort),
+        )
+
+    total_stocks = sum(len(n.get("stocks") or []) for n in bom_nodes or [])
 
     # 生态位拓扑
     topo_rows = ""
@@ -770,39 +877,68 @@ def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes:
             + "</div>"
         )
 
-    # 统计来源
-    total_curated = sum(1 for n in bom_nodes for s in (n.get("stocks") or []) if s.get("stock_source") == "curated")
-    total_llm = total_stocks - total_curated
-
     # ── 批量操作工具栏 ──
-    toolbar = f"""<div class="flex flex-wrap items-center gap-2 mb-3">
-  <span class="text-xs text-gray-500">{total_stocks} 只标的 · {total_curated} 代表 · {total_llm} 增补</span>
-  <button type="button" onclick="document.querySelectorAll('#ecosystem-stock-pool details').forEach(d=>d.open=true)"
-    class="text-[10px] px-2 py-0.5 rounded border border-gray-200 text-gray-500 hover:bg-gray-50">全部展开</button>
-  <button type="button" onclick="document.querySelectorAll('#ecosystem-stock-pool details').forEach(d=>d.open=false)"
-    class="text-[10px] px-2 py-0.5 rounded border border-gray-200 text-gray-500 hover:bg-gray-50">全部折叠</button>
-  <select onchange="filterStockPool(this.value)" class="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-500">
-    <option value="all">筛选：全部</option>
-    <option value="0.8">综合 ≥80</option>
-    <option value="0.6">综合 ≥60</option>
-    <option value="-0.6">综合 <60</option>
+    sorted_url = f"/api/strategic/boards/{board_id}/ecosystem/sorted"
+    toolbar = f"""<div class="flex flex-wrap items-center gap-1.5 mb-3">
+  <span class="text-xs text-gray-500">{total_stocks} 只标的</span>
+  <select onchange="ecoSorted(this, 'node_sort')"
+    class="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-500 bg-white">
+    <option value="tier_core_first" {'selected' if node_sort == 'tier_core_first' else ''}>节点 · 核心优先</option>
+    <option value="tier_supp_first" {'selected' if node_sort == 'tier_supp_first' else ''}>节点 · 配套优先</option>
+    <option value="upstream_first" {'selected' if node_sort == 'upstream_first' else ''}>产业链 · 上游→下游</option>
+    <option value="downstream_first" {'selected' if node_sort == 'downstream_first' else ''}>产业链 · 下游→上游</option>
   </select>
+  <select onchange="ecoSorted(this, 'stock_sort')"
+    class="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-500 bg-white">
+    <option value="composite_desc" {'selected' if stock_sort == 'composite_desc' else ''}>标的 · 综合得分↓</option>
+    <option value="composite_asc" {'selected' if stock_sort == 'composite_asc' else ''}>标的 · 综合得分↑</option>
+    <option value="moat" {'selected' if stock_sort == 'moat' else ''}>壁垒优先</option>
+    <option value="growth" {'selected' if stock_sort == 'growth' else ''}>成长优先</option>
+    <option value="profit" {'selected' if stock_sort == 'profit' else ''}>盈利优先</option>
+    <option value="localize" {'selected' if stock_sort == 'localize' else ''}>国产替代优先</option>
+    <option value="policy_bond" {'selected' if stock_sort == 'policy_bond' else ''}>政策映射优先</option>
+  </select>
+  <select onchange="ecoSorted(this, 'view')"
+    class="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-500 bg-white">
+    <option value="grouped" {'selected' if view_mode == 'grouped' else ''}>视图 · 分组</option>
+    <option value="flat" {'selected' if view_mode == 'flat' else ''}>视图 · 平铺列表</option>
+    <option value="topology" {'selected' if view_mode == 'topology' else ''}>视图 · 拓扑联动</option>
+  </select>
+  <div class="flex-1"></div>
+  <button type="button" onclick="document.querySelectorAll('#ecosystem-stock-pool details').forEach(d=>d.open=true)"
+    class="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-500 hover:bg-gray-50">全部展开</button>
+  <button type="button" onclick="document.querySelectorAll('#ecosystem-stock-pool details').forEach(d=>d.open=false)"
+    class="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-500 hover:bg-gray-50">全部折叠</button>
   <button type="button"
-    class="text-[10px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+    class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
     hx-post="/api/strategic/boards/{board_id}/stock/batch-accept"
     hx-target="#ecosystem-stock-pool" hx-swap="outerHTML">一键晋级</button>
 </div>
 <script>
-function filterStockPool(val) {{
-  const details = document.querySelectorAll('#ecosystem-stock-pool details');
-  details.forEach(d => {{
-    if (val === 'all') {{ d.style.display = ''; return; }}
-    const badge = d.querySelector('[data-composite]');
-    const score = parseFloat(badge?.dataset?.composite || '0');
-    const op = val.startsWith('-') ? (score < parseFloat(val)) : (score >= parseFloat(val));
-    d.style.display = op ? '' : 'none';
+window.ecoSorted = function(sel, dim) {{
+  var container = document.getElementById('ecosystem-section');
+  if (!container) return;
+  var params = new URLSearchParams();
+  var selects = container.querySelectorAll('select[onchange*="ecoSorted"]');
+  selects.forEach(function(s) {{
+    var d = s.getAttribute('onchange').match(/ecoSorted\(this,\s*'(\w+)'\)/);
+    if (d) params.set(d[1], s.value);
   }});
-}}
+  var url = '{sorted_url}?' + params.toString();
+  var indicator = document.getElementById('eco-sort-indicator') || (function() {{
+    var el = document.createElement('span');
+    el.id = 'eco-sort-indicator';
+    el.className = 'text-[10px] text-indigo-600 ml-2';
+    el.textContent = '排序中...';
+    container.querySelector('.flex-wrap')?.appendChild(el);
+    return el;
+  }})();
+  indicator.textContent = '排序中...';
+  fetch(url, {{ headers: {{ 'Accept': 'text/html', 'HX-Request': 'true' }} }})
+    .then(function(r) {{ if (!r.ok) throw new Error(); return r.text(); }})
+    .then(function(html) {{ container.outerHTML = html; if (window.htmx) htmx.process(container); }})
+    .catch(function() {{ indicator.textContent = '排序失败'; }});
+}};
 </script>"""
 
     # BOM 节点 × 标的池
@@ -996,7 +1132,7 @@ function filterStockPool(val) {{
     {refresh_btn}
   </div>
   {f'<div class="bg-white border border-emerald-100 rounded-lg p-3 mb-3 text-xs text-gray-700">{_esc(thesis)}</div>' if thesis else ''}
-  <div id='ecosystem-stock-pool' class='space-y-2'>
+  <div id='ecosystem-stock-pool' class='space-y-2 eco-view_{view_mode}' data-view-mode='{view_mode}'>
     {toolbar}
     <div class='grid grid-cols-1 md:grid-cols-3 gap-3 mb-3'>
       <div class='bg-white border rounded-lg p-3'>
@@ -1011,7 +1147,7 @@ function filterStockPool(val) {{
     </div>
   </div>
   {cvm_section}
-  {f'<p class="text-[10px] text-gray-400 italic mt-2">{_esc(disclaimer)}</p>' if disclaimer else ''}
+  {f'<div class="mt-2 text-right">{info_tip(_esc(disclaimer))}</div>' if disclaimer else ''}
 </div>"""
 
 
@@ -1359,5 +1495,5 @@ def _render_concept_pools_result(board_id: int, stock_pool: dict[str, Any]) -> s
     <p class='text-xs font-medium text-gray-700 mb-2'>概念标的池 ({len(pools)} 个概念 · 共 {total_stocks} 只)</p>
     {pool_html}
   </div>
-  {f'<p class="text-[10px] text-gray-400 italic mt-2">{_esc(disclaimer)}</p>' if disclaimer else ''}
+  {f'<div class="mt-2 text-right">{info_tip(_esc(disclaimer))}</div>' if disclaimer else ''}
 </div>"""
