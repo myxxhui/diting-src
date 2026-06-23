@@ -12,7 +12,10 @@
 
 {% if mode == 'wind' %}
 <div class="p-2 text-xs text-gray-600 space-y-2">
-  <p class="text-gray-500">段 A · 指标先行 · 无 board 时从此开始</p>
+  <p class="text-gray-500">
+    段 A · 指标先行
+    {{ info_tip('无战略板块时从此开始：运行风向标采集宏观/政策/流动性指标，选出优势赛道后再进入智能建板。', '📖')|safe }}
+  </p>
   {% if wind_scan and wind_scan.candidates %}
   <ul class="space-y-1">
     {% for c in wind_scan.candidates[:5] %}

@@ -10,6 +10,15 @@
               hx-swap="outerHTML">
         运行 CVM 评分
       </button>
+      {% if rows %}
+      <button type="button"
+              class="text-xs px-3 py-1.5 rounded-lg border border-violet-200 text-violet-700 hover:bg-violet-50"
+              hx-post="/api/strategic/phases/{{ phase_id }}/cvm/enrich-t2"
+              hx-target="#cvm-matrix-panel"
+              hx-swap="outerHTML">
+        🤖 T2 语义增强
+      </button>
+      {% endif %}
     </div>
   </div>
 
@@ -31,13 +40,27 @@
         <tr>
           <th class="px-2 py-2 text-left">dispatch</th>
           <th class="px-2 py-2 text-left">symbol</th>
-          <th class="px-2 py-2">C1</th>
-          <th class="px-2 py-2">C2</th>
-          <th class="px-2 py-2">C3</th>
-          <th class="px-2 py-2">C4</th>
-          <th class="px-2 py-2">C5</th>
-          <th class="px-2 py-2">C6</th>
-          <th class="px-2 py-2">C7</th>
+          <th class="px-2 py-2">C1 <span class="info-tip" role="button" tabindex="0" title="利润池占有">?</span>
+            <div class="info-tip-popover hidden">利润池占有：该标的在产业链利润池中的份额 capture 是否高且趋势向上？</div>
+          </th>
+          <th class="px-2 py-2">C2 <span class="info-tip" role="button" tabindex="0" title="卡脖子深度">?</span>
+            <div class="info-tip-popover hidden">卡脖子深度：替换成本/认证稀缺度/产能瓶颈。T2 语义验证后更新。</div>
+          </th>
+          <th class="px-2 py-2">C3 <span class="info-tip" role="button" tabindex="0" title="价值量弹性">?</span>
+            <div class="info-tip-popover hidden">价值量弹性：行业放量时价值量是否同步放大？单位用量×单价趋势。</div>
+          </th>
+          <th class="px-2 py-2">C4 <span class="info-tip" role="button" tabindex="0" title="结构主导权">?</span>
+            <div class="info-tip-popover hidden">结构主导权：市场份额/Top 客户锁定/标准话语权。</div>
+          </th>
+          <th class="px-2 py-2">C5 <span class="info-tip" role="button" tabindex="0" title="生态迁移安全">?</span>
+            <div class="info-tip-popover hidden">生态迁移安全：S 曲线推进时是升格(upgrade)还是被 bypass？T2 LLM 判断。</div>
+          </th>
+          <th class="px-2 py-2">C6 <span class="info-tip" role="button" tabindex="0" title="价值持续性">?</span>
+            <div class="info-tip-popover hidden">价值持续性：跨多个 phase 仍为价值链锚点的概率。</div>
+          </th>
+          <th class="px-2 py-2">C7 <span class="info-tip" role="button" tabindex="0" title="伪龙头哨兵">?</span>
+            <div class="info-tip-popover hidden">伪龙头哨兵四分类：真龙头/行业领先/高价值新贵/伪龙头。纯 T1 规则。</div>
+          </th>
           <th class="px-2 py-2 text-left">anchor</th>
           <th class="px-2 py-2 text-left">role</th>
         </tr>
@@ -62,7 +85,14 @@
             <span class="px-1 rounded {% if band in ['high','mid_high'] %}bg-emerald-100 text-emerald-800{% elif band == 'low' %}bg-red-100{% else %}bg-gray-100{% endif %}">{{ band }}</span>
           </td>
           {% endfor %}
-          <td class="px-2 py-2 text-center">{% if c7 %}🟢{% else %}🔴{% endif %}</td>
+          <td class="px-2 py-2 text-center">
+            {% set c7_label = r.scores.c7.get('label', '') if r.scores and r.scores.c7 else '' %}
+            {% if c7_pass %}
+              <span title="C7 通过: {{ c7_label }}">🟢</span>
+            {% else %}
+              <span class="text-[9px] px-1 py-0.5 rounded bg-rose-100 text-rose-700" title="C7 哨兵: {{ r.scores.c7.triggers|join(', ') if r.scores and r.scores.c7 else '' }}">🔴</span>
+            {% endif %}
+          </td>
           <td class="px-2 py-2">{{ r.anchor_path or '—' }}</td>
           <td class="px-2 py-2">{{ r.role_effective or r.role_suggested or '—' }}</td>
         </tr>

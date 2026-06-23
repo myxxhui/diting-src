@@ -9,6 +9,8 @@ from typing import Any, Optional
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from apps.copilot.modules.strategic.render import info_tip
+
 _TPL_DIR = Path(__file__).resolve().parents[2] / "templates" / "planning"
 _env = Environment(
     loader=FileSystemLoader(str(_TPL_DIR)),
@@ -17,6 +19,7 @@ _env = Environment(
 
 
 def _render(name: str, **ctx: Any) -> str:
+    ctx.setdefault("info_tip", info_tip)
     return _env.get_template(name).render(**ctx)
 
 

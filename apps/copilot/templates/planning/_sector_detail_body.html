@@ -10,7 +10,10 @@
     {% if wi.get('d1_score') is not none %}
     <div class="rounded-lg border border-blue-200 bg-gradient-to-br from-blue-50 to-white px-3 py-2">
       <div class="flex items-center gap-1 mb-1">
-        <span class="text-[11px] font-medium text-blue-700">📊 政策方向 D1</span>
+        <span class="text-[11px] font-medium text-blue-700">
+          📊 政策方向 D1
+          {{ info_tip('D1 政策分：基于政策文档的语义方向评分。综合顺逆风文档数、质量、置信度计算。', '?')|safe }}
+        </span>
         {% if wi.get('high_value_flag') %}
         <span class="text-[9px] px-1 py-0 rounded bg-red-100 text-red-700 font-bold">⚡高价值</span>
         {% endif %}
@@ -41,7 +44,25 @@
     {% if zplus is not none %}
     <div class="rounded-lg border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white px-3 py-2">
       <div class="flex items-center gap-1 mb-1">
-        <span class="text-[11px] font-medium text-emerald-700">💎 投资级 Z0+</span>
+        <span class="text-[11px] font-medium text-emerald-700">💎 投资级 Z0+
+          {{ info_tip('Z0+ 四轴投资级评分：政策动量 PM · 商业轨迹 CT · 资本引力 CG · 落地质量 IQ。仅 CT/CG/IQ 可 LLM 重评分。', '?')|safe }}
+        </span>
+        <button type="button"
+                class="ml-auto text-[9px] px-1.5 py-0.5 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-400 transition-all"
+                @click.stop="
+                  form = new FormData();
+                  form.append('sector', '{{ detail.get('sector', '') }}');
+                  fetch('/api/strategic/z0/investment-rescore', {method:'POST',body:form})
+                    .then(r=>r.json()).then(d=>{
+                      if(d.success){
+                        // 刷新整个 sector detail 面板
+                        fetch('/api/strategic/z0/sector-detail?sector={{ detail.get('sector', '')|urlencode }}', {method:'GET'})
+                          .then(r=>r.text()).then(html=>{$el.closest('.space-y-3').outerHTML=html})
+                      } else { alert('重评分失败: '+d.error); }
+                    }).catch(e=>alert('请求失败: '+e.message))
+                ">
+          ♻ 重评分
+        </button>
       </div>
       <div class="flex items-end gap-2 mb-1">
         <span class="text-2xl font-bold text-emerald-700">{{ "%.0f"|format(zplus * 100) }}</span>

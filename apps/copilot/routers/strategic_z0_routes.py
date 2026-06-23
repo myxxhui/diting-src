@@ -137,6 +137,113 @@ async def api_wind_scan_latest(session: AsyncSession = Depends(get_db)):
     return HTMLResponse(render_wind_scan_panel(scan))
 
 
+@router.post("/api/strategic/z0/investment-rescore", response_class=JSONResponse)
+async def api_z0_investment_rescore(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """Z0+ 投资级重评分：仅重跑商业轨迹 + 资本引力 + 执行质量三个 LLM 维度。
+
+    返回 { success, sector, z0_plus_breakdown, errors }.
+    """
+    from apps.copilot.db.models import WindScan
+    from apps.common.ai_dispatcher import AIDispatcher
+    import json as _json
+
+    form = await request.form()
+    sector = (form.get("sector") or "").strip()
+    if not sector:
+        return {"success": False, "error": "缺少 sector 参数"}
+
+    # 找最近的 wind_scan 中该 sector
+    ws_result = await session.execute(
+        select(WindScan).order_by(WindScan.created_at.desc()).limit(1)
+    )
+    ws = ws_result.scalar_one_or_none()
+    if not ws:
+        return {"success": False, "error": "无 WindScan 记录"}
+
+    candidates = ws.candidates_json or []
+    target = None
+    for c in candidates:
+        if str(c.get("sector", "")).strip() == sector:
+            target = c
+            break
+    if not target:
+        return {"success": False, "error": f"未找到赛道 {sector}"}
+
+    # 触发 LLM 重评分
+    z0pb = target.get("z0_plus_breakdown") or {}
+    policy_docs_text = z0pb.get("context_summary", f"对「{sector}」赛道进行投资级重评分")
+
+    dispatcher = AIDispatcher.default()
+    prompt = f"""你是资深投资分析师。为以下赛道重新评估三个投资维度：
+
+赛道名：{sector}
+背景：{policy_docs_text}
+
+当前 z0_plus_breakdown：{_json.dumps(z0pb, ensure_ascii=False)}
+
+输出严格 JSON（无 markdown）：
+{{
+    "commercial_trajectory": {{
+        "score_d1_tier": "A"|"B"|"C",
+        "reasoning": "40-80字中文",
+        "evidence": [],
+        "d1_keywords": []
+    }},
+    "capital_gravity": {{
+        "score_d1_tier": "A"|"B"|"C",
+        "reasoning": "40-80字中文",
+        "evidence": [],
+        "d1_keywords": []
+    }},
+    "implementation_quality": {{
+        "score_d1_tier": "A"|"B"|"C",
+        "reasoning": "40-80字中文",
+        "evidence": [],
+        "d1_keywords": []
+    }}
+}}
+"""
+    try:
+        resp = dispatcher.call(
+            scene="z0_t2_concept_analysis",
+            messages=[
+                {"role": "system", "content": "你是顶级投研分析师。用中文回答。只返回JSON，不含markdown。"},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.1,
+            max_tokens=2000,
+            model_override="claude-opus-4-6",
+        )
+        raw = resp.text if hasattr(resp, "text") else str(resp)
+        llm_result = _parse_llm_json(raw)
+    except Exception as exc:
+        llm_result = {}
+        logger.warning("[z0+ rescore] LLM 调用失败: %s", exc)
+
+    # 合并回 z0_plus_breakdown
+    for dim in ("commercial_trajectory", "capital_gravity", "implementation_quality"):
+        if dim in llm_result:
+            z0pb[dim] = llm_result[dim]
+
+    # 更新 wind_scan
+    for c in candidates:
+        if str(c.get("sector", "")).strip() == sector:
+            c["z0_plus_breakdown"] = z0pb
+            break
+    ws.candidates_json = candidates
+    await session.commit()
+
+    return {
+        "success": True,
+        "sector": sector,
+        "z0_plus_breakdown": z0pb,
+        "errors": [],
+    }
+
+
 @router.get("/api/strategic/genesis/sectors", response_class=HTMLResponse)
 async def api_genesis_sectors(session: AsyncSession = Depends(get_db)):
     """v5.1: 返回全部候赛道列表（HTML 下拉选项片段）"""
@@ -1306,6 +1413,42 @@ async def api_cvm_run(phase_id: int, session: AsyncSession = Depends(get_db)):
     return HTMLResponse(render_cvm_matrix_table(phase_id, rows, dispatch=dispatch))
 
 
+@router.post("/api/strategic/phases/{phase_id}/cvm/enrich-t2", response_class=HTMLResponse)
+async def api_cvm_enrich_t2(
+    phase_id: int,
+    session: AsyncSession = Depends(get_db),
+):
+    """T2 语义增强：对已跑 L1 评分的 CVM 行执行 C2/C5/C6 语义分析。"""
+    from apps.copilot.metrics.cvm_t2_semantic import score_peer_set_t2
+    from apps.copilot.db.models import CvmScorecard
+
+    try:
+        rows = await run_cvm_for_phase(session, phase_id)
+    except ValueError as e:
+        return HTMLResponse(
+            f'<div class="text-xs text-red-700 bg-red-50 rounded-lg px-3 py-2">{_esc(str(e))}</div>'
+        )
+    # T2 语义增强（在 run_cvm_for_phase 的 DB 写入基础上更新）
+    t2_rows = score_peer_set_t2(rows, scene="z0_t2_concept_analysis", model_override="claude-opus-4-6")
+    # 回写 DB
+    for row in t2_rows:
+        sym = row.get("symbol", "")
+        if not sym:
+            continue
+        await session.execute(
+            CvmScorecard.__table__.update()
+            .where(CvmScorecard.phase_id == phase_id)
+            .where(CvmScorecard.symbol == sym)
+            .values(
+                scores_json=row.get("scores", {}),
+                provisional=row.get("provisional", False),
+            )
+        )
+    await session.commit()
+    dispatch = await get_active_dispatch_for_phase(session, phase_id)
+    return HTMLResponse(render_cvm_matrix_table(phase_id, t2_rows, dispatch=dispatch))
+
+
 @router.get("/api/strategic/phases/{phase_id}/cvm/matrix", response_class=HTMLResponse)
 async def api_cvm_matrix(phase_id: int, session: AsyncSession = Depends(get_db)):
     rows = await list_cvm_scorecards(session, phase_id)
@@ -1557,3 +1700,80 @@ async def api_concept_analysis(
         "revenue_transmission": str(parsed.get("revenue_transmission", "")),
         "investment_implication": str(parsed.get("investment_implication", "")),
     })
+
+
+@router.get("/api/strategic/z0/living-status", response_class=HTMLResponse)
+async def api_z0_living_status(
+    board_id: int | None = Query(None),
+    session: AsyncSession = Depends(get_db),
+):
+    """Living Z0 监控面板：显示 D 段活跃状态 + 支持触发心跳。"""
+    from apps.copilot.metrics.living_z0 import living_z0_heartbeat
+
+    result = await living_z0_heartbeat(
+        session,
+        board_id=board_id,
+        do_s0_refresh=True,
+    )
+
+    alerts = result.get("alerts", ["—"])
+    s0 = result.get("s0", {})
+    m1 = s0.get("m1", {})
+    m5 = s0.get("m5", {})
+
+    alert_html = ""
+    for a in alerts:
+        icon = "🟡" if a != "stable" else "🟢"
+        cls = "text-amber-700 bg-amber-50" if a != "stable" else "text-emerald-700 bg-emerald-50"
+        alert_html += f'<span class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded {cls}">{icon} {_esc(a)}</span> '
+
+    html = f"""<div class="rounded-lg border border-gray-200 bg-white px-3 py-2 space-y-2">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-medium text-gray-700">
+          🫀 Living Z0 段D · {_esc(result.get("as_of", "")[:19])}
+        </span>
+        <button type="button"
+                class="text-[9px] px-2 py-0.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-gray-400 transition-all"
+                hx-get="/api/strategic/z0/living-status{'?board_id=' + str(board_id) if board_id else ''}"
+                hx-target="#living-z0-panel"
+                hx-swap="outerHTML">
+          ♻ 刷新心跳
+        </button>
+      </div>
+      <div class="flex flex-wrap gap-1.5">""" + alert_html + """</div>
+      <div class="grid grid-cols-2 gap-2 text-[10px] text-gray-500">
+        <div class="rounded bg-gray-50 px-2 py-1">
+          <span class="text-gray-400">M1 宏观</span>
+          <br><span class="font-medium text-gray-700">{m1.get("status", "—")}</span>
+        </div>
+        <div class="rounded bg-gray-50 px-2 py-1">
+          <span class="text-gray-400">M5 流动性</span>
+          <br><span class="font-medium text-gray-700">{m5.get("status", "—")}</span>
+        </div>
+      </div>
+    </div>"""
+    return HTMLResponse(html)
+
+
+def _parse_llm_json(raw: str) -> dict:
+    """鲁棒解析 LLM 返回的 JSON 字符串。"""
+    import json as _json
+
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+    if text.endswith("```"):
+        text = text.rsplit("```", 1)[0]
+    text = text.strip()
+    try:
+        return _json.loads(text)
+    except _json.JSONDecodeError:
+        pass
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            return _json.loads(text[start : end + 1])
+        except _json.JSONDecodeError:
+            pass
+    return {}
