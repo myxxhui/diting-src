@@ -1100,7 +1100,9 @@ async def api_board_ecosystem_sorted(
     """按指定排序参数重新渲染生态位标的池，返回完整 ecosystem-section HTML。"""
     from apps.copilot.modules.strategic.render import _render_ecosystem_result, render_ecosystem_section
     from apps.copilot.modules.strategic.service import get_board_detail
-    from apps.copilot.db.models import StrategicBoard
+    from apps.copilot.modules.strategic import cvm_scorer
+    from apps.copilot.db.models import StrategicBoard, CvmScorecard
+    from sqlalchemy import select
 
     detail = await get_board_detail(session, board_id)
     if not detail:
@@ -1112,7 +1114,70 @@ async def api_board_ecosystem_sorted(
     if not stock_pool or stock_pool.get("status") != "ok":
         return HTMLResponse(render_ecosystem_section(detail))
 
-    html = _render_ecosystem_result(board_id, stock_pool, node_sort, stock_sort, view_mode)
+    # ── 节点级段永平评分 ──
+    #  1. 收集所有 node→symbols 映射
+    #  2. 查询 CVM 评分
+    #  3. 对每个节点调用 score_node_duan()
+    duan_node_scores: dict[str, dict] = {}
+    bom_nodes = stock_pool.get("bom_nodes") or []
+    if bom_nodes:
+        # 收集所有标的 symbol
+        all_symbols: set[str] = set()
+        node_symbols: dict[str, list[str]] = {}
+        for node in bom_nodes:
+            nid = str(node.get("node_id", ""))
+            syms = [s.get("symbol", "") for s in (node.get("stocks") or []) if s.get("symbol")]
+            node_symbols[nid] = syms
+            all_symbols.update(syms)
+
+        if all_symbols:
+            # 查询已录入的 CVM 评分
+            stmt = select(CvmScorecard).where(
+                CvmScorecard.symbol.in_(list(all_symbols))
+            )
+            result = await session.execute(stmt)
+            cvm_rows = result.scalars().all()
+            # symbol → cvm_scores 映射（取最新记录）
+            sym_cvm: dict[str, dict] = {}
+            for row in cvm_rows:
+                if row.scores_json:
+                    sym_cvm[row.symbol] = row.scores_json
+
+            # 对未录入的标的在线评分（纯计算，不调 LLM）
+            unscored = all_symbols - set(sym_cvm.keys())
+            if unscored:
+                for sym in unscored:
+                    try:
+                        scored = cvm_scorer.score_symbol(sym)
+                        scores = scored.get("scores") or {}
+                        if scores:
+                            sym_cvm[sym] = scores
+                    except Exception:
+                        pass
+
+            # 对每个节点计算段永平评分
+            for node in bom_nodes:
+                nid = str(node.get("node_id", ""))
+                tier = node.get("tier", "配套")
+                stocks = node.get("stocks") or []
+                # 将 CVM 评分合并到每个 stock 的 cvm_scores 字段
+                enriched_stocks: list[dict] = []
+                for st in stocks:
+                    sym = st.get("symbol", "")
+                    enriched = dict(st)
+                    if sym in sym_cvm:
+                        enriched["cvm_scores"] = sym_cvm[sym]
+                    enriched_stocks.append(enriched)
+
+                duan_result = cvm_scorer.score_node_duan(
+                    node_name=node.get("name", ""),
+                    tier=tier,
+                    stocks=enriched_stocks,
+                )
+                duan_node_scores[nid] = duan_result
+
+    html = _render_ecosystem_result(board_id, stock_pool, node_sort, stock_sort, view_mode,
+                                    duan_node_scores=duan_node_scores)
     return HTMLResponse(
         f'<div id="ecosystem-section" class="mt-6 border border-dashed border-gray-200 rounded-lg p-4">'
         f'{html}</div>'

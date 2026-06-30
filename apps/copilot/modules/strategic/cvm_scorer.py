@@ -340,3 +340,148 @@ def score_peer_set(
         row = score_symbol(sym, role_tag=p.get("role_tag"), niche_id=niche_id)
         rows.append(row)
     return rows
+
+
+# ── 节点级段永平过滤器 ──
+# [Ref: 32_ §2.4.8 · 段永平: 好生意+护城河+看不懂不投+不做什么]
+
+_TIER_WEIGHT: dict[str, float] = {"核心": 1.0, "重要": 0.7, "配套": 0.4}
+
+_DUAN_LABEL_CONFIG: list[tuple[str, str, float, str]] = [
+    ("好生意", "✅好生意", 0.65, "符合段永平标准 · 生意本质清晰 + 护城河可识别 + 商业模式可持续"),
+    ("需深研", "❓需深研", 0.35, "部分符合 · 需进一步验证商业模式或竞争优势"),
+    ("看不懂", "❌看不懂", 0.0, "不符合段永平标准 · 生意复杂/护城河薄弱/看不清长期"),
+]
+
+
+def score_node_duan(
+    *,
+    node_name: str = "",
+    tier: str = "配套",
+    stocks: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """节点级段永平过滤器 · 四维评分 → 综合标签。
+
+    从节点内代表性标的的 CVM 评分聚合出节点层段永平认可度。
+    段永平哲学映射：
+      D1 生意本质（30%）← C7 pass rate    → "看不懂不投"、"伪龙头哨兵"
+      D2 护城河深度（30%）← irreplaceability → "护城河"、"长期确定性"
+      D3 长期确定性（20%）← 节点层级核心度    → "好生意"、"长期"
+      D4 商业模式（20%）← C5 bypass risk    → "不做什么"、"利润之上的追求"
+
+    参数：
+      node_name: 节点名称（仅用于诊断日志）
+      tier:      节点层级（核心/重要/配套）
+      stocks:    该节点内的代表性标的列表。每只标的可用：
+                 - ``cvm_scores`` dict（优先，来自 cvm_scorecards.scores_json）
+                 - ``scoring_detail`` dict（兼容旧版）
+                 若无则从层级推算默认值。
+
+    返回：
+      {label, score, passed, breakdown: {D1_生意本质, D2_护城河深度, D3_长期确定性, D4_商业模式}, n_stocks}
+    """
+    stocks = stocks or []
+    n = len(stocks)
+    tier_val = _TIER_WEIGHT.get(tier, 0.5)
+
+    # ── 无标的 → 仅凭层级降级推断 ──
+    if n == 0:
+        d3 = tier_val
+        agg = d3 * 0.40 + 0.30  # 预设 D1=0, D2=0, D4=0.5 → 约 0.30~0.70
+        if agg >= 0.65:
+            label, display, _, tip = _DUAN_LABEL_CONFIG[0]
+        elif agg >= 0.35:
+            label, display, _, tip = _DUAN_LABEL_CONFIG[1]
+        else:
+            label, display, _, tip = _DUAN_LABEL_CONFIG[2]
+        return {
+            "label": label,
+            "display": display,
+            "score": round(agg, 3),
+            "passed": agg >= 0.50,
+            "breakdown": {
+                "D1_生意本质": 0.0,
+                "D2_护城河深度": 0.0,
+                "D3_长期确定性": round(d3, 3),
+                "D4_商业模式": 0.50,
+            },
+            "n_stocks": 0,
+            "tooltip": tip + " · 该节点暂无代表性标的",
+        }
+
+    # ── 四维聚合 ──
+    d1_sum = d2_sum = d4_sum = 0.0
+    d1_cnt = d2_cnt = d4_cnt = 0
+    d3 = tier_val  # D3 由层级直接决定
+
+    for st in stocks:
+        cvm = st.get("cvm_scores") or st.get("scoring_detail") or {}
+
+        # D1: C7 pass rate
+        c7 = cvm.get("c7") if isinstance(cvm.get("c7"), dict) else {}
+        c7_pass = c7.get("pass")
+        if c7_pass is True:
+            d1_sum += 1.0
+        elif c7_pass is False:
+            d1_sum += 0.0
+        else:
+            d1_sum += 0.5  # 无数据 → 中性
+        d1_cnt += 1
+
+        # D2: irreplaceability（新格式）或 composite（旧格式兜底）
+        irr = cvm.get("irreplaceability") if isinstance(cvm.get("irreplaceability"), dict) else {}
+        if irr.get("score") is not None:
+            d2_sum += float(irr["score"])
+        else:
+            composite = cvm.get("composite")
+            if isinstance(composite, (int, float)):
+                d2_sum += float(composite)
+            else:
+                d2_sum += 0.50
+        d2_cnt += 1
+
+        # D4: C5 bypass risk inverse
+        c5 = cvm.get("c5") if isinstance(cvm.get("c5"), dict) else {}
+        c5_risk = str(c5.get("bypass_risk", "") or "low")
+        if c5_risk == "low":
+            d4_sum += 1.0
+        elif c5_risk in ("mid", "acceptable"):
+            d4_sum += 0.6
+        else:  # high / unknown
+            d4_sum += 0.2
+        d4_cnt += 1
+
+    d1 = d1_sum / max(d1_cnt, 1)
+    d2 = d2_sum / max(d2_cnt, 1)
+    d4 = d4_sum / max(d4_cnt, 1)
+
+    # ── 加权聚合 ──
+    aggregate = d1 * 0.30 + d2 * 0.30 + d3 * 0.20 + d4 * 0.20
+
+    # ── 标签 ──
+    for label, display, threshold, tip in _DUAN_LABEL_CONFIG:
+        if aggregate >= threshold:
+            break
+    else:
+        label, display, _, tip = _DUAN_LABEL_CONFIG[-1]
+
+    return {
+        "label": label,
+        "display": display,
+        "score": round(aggregate, 3),
+        "passed": aggregate >= 0.50,
+        "breakdown": {
+            "D1_生意本质": round(d1, 3),
+            "D2_护城河深度": round(d2, 3),
+            "D3_长期确定性": round(d3, 3),
+            "D4_商业模式": round(d4, 3),
+        },
+        "n_stocks": n,
+        "tooltip": (
+            f"D1 生意本质(30%)={d1:.2f} · "
+            f"D2 护城河深度(30%)={d2:.2f} · "
+            f"D3 长期确定性(20%)={d3:.2f} · "
+            f"D4 商业模式(20%)={d4:.2f} | "
+            + tip
+        ),
+    }

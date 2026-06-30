@@ -809,14 +809,19 @@ def _render_ecosystem_pending(board_id: int, task_id: str) -> str:
 def _render_ecosystem_result(board_id: int, stock_pool: dict[str, Any],
                              node_sort: str = "tier_core_first",
                              stock_sort: str = "composite_desc",
-                             view_mode: str = "grouped") -> str:
-    """渲染生态位分析结果。支持可选排序参数。"""
+                             view_mode: str = "grouped",
+                             duan_node_scores: dict[str, dict] | None = None) -> str:
+    """渲染生态位分析结果。支持可选排序参数。
+
+    Args:
+        duan_node_scores: 节点级段永平评分，按 node_id → {score, label, display, breakdown}
+    """
     version = stock_pool.get("version", "1.0")
 
     # v2.0 → BOM 节点分组渲染
     bom_nodes = stock_pool.get("bom_nodes") or []
     if version == "2.0" and bom_nodes:
-        return _render_bom_stock_pool(board_id, stock_pool, bom_nodes, node_sort, stock_sort, view_mode)
+        return _render_bom_stock_pool(board_id, stock_pool, bom_nodes, node_sort, stock_sort, view_mode, duan_node_scores=duan_node_scores)
 
     # v1.0 fallback → concept_pools 渲染（兼容旧数据）
     return _render_concept_pools_result(board_id, stock_pool)
@@ -825,13 +830,15 @@ def _render_ecosystem_result(board_id: int, stock_pool: dict[str, Any],
 def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes: list[dict],
                            node_sort: str = "tier_core_first",
                            stock_sort: str = "composite_desc",
-                           view_mode: str = "grouped") -> str:
+                           view_mode: str = "grouped",
+                           duan_node_scores: dict[str, dict] | None = None) -> str:
     """v2.0：BOM 节点分组渲染标的池，每只标的含 5 因子打分明细（可展开）。
 
     Args:
         node_sort: 节点排序方式 (tier_core_first / tier_supp_first / upstream_first / downstream_first)
         stock_sort: 标的排序方式 (composite_desc / composite_asc / moat / growth / profit / localize / policy_bond)
         view_mode: 视图模式 (grouped / flat / topology)
+        duan_node_scores: 可选，节点级段永平评分 dict[node_id → {score, label, display, breakdown, tooltip}]
     """
     topo = stock_pool.get("ecosystem_topology", {})
     thesis = stock_pool.get("investment_thesis", "")
@@ -952,6 +959,42 @@ window.ecoSorted = function(sel, dim) {{
         layer_label = node.get("ecosystem_layer", "")
         stocks = node.get("stocks", [])
 
+        # ── 段永平认可度徽标 ──
+        duan_scores = duan_node_scores or {}
+        dn = duan_scores.get(nid) or {}
+        duan_display = dn.get("display", "")
+        duan_breakdown = dn.get("breakdown", {})
+        duan_tooltip = dn.get("tooltip", "")
+        if duan_display:
+            if "好生意" in duan_display:
+                duan_badge_color = "bg-emerald-100 text-emerald-700"
+            elif "需深研" in duan_display:
+                duan_badge_color = "bg-amber-100 text-amber-700"
+            else:
+                duan_badge_color = "bg-rose-100 text-rose-600"
+            breakdown_html = (
+                "".join(
+                    f"<tr><td class='text-[10px] text-gray-500 pr-2'>{k}</td>"
+                    f"<td class='text-[10px] font-mono'>{v:.2f}</td></tr>"
+                    for k, v in duan_breakdown.items()
+                )
+                if duan_breakdown else ""
+            )
+            tip_content = (
+                f"<div class='text-xs'>"
+                f"<p class='font-medium mb-1'>{_esc(duan_display)}</p>"
+                f"<table class='w-full'>{breakdown_html}</table>"
+                + (f"<p class='text-[10px] text-gray-400 mt-1'>{_esc(duan_tooltip)}</p>" if duan_tooltip else "")
+                + f"</div>"
+            )
+            duan_badge = (
+                f'<span class="text-[10px] px-1.5 py-0.5 rounded {duan_badge_color} font-medium">'
+                f'{_esc(duan_display)}</span>'
+                + info_tip(tip_content, "📊")
+            )
+        else:
+            duan_badge = ""
+
         stock_rows = ""
         for st in stocks:
             sym = st.get("symbol", "??????")
@@ -1050,6 +1093,7 @@ window.ecoSorted = function(sel, dim) {{
             f"<div class='flex items-center gap-2 mb-2'>"
             f"<span class='text-xs font-semibold text-gray-800'>{_esc(name)}</span>"
             f"<span class='text-[10px] px-1.5 py-0.5 rounded {tier_color}'>{tier}</span>"
+            f"{duan_badge}"
             f"<span class='text-[10px] text-gray-400'>({_esc(layer_label)} | node: {_esc(nid)})</span>"
             f"</div>"
             + (f'<p class="text-[10px] text-gray-500 mb-2">{_esc(rationale)}</p>' if rationale else '')
