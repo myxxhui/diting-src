@@ -658,12 +658,19 @@ def render_ecosystem_section(board: dict[str, Any],
                              stock_sort: str = "composite_desc",
                              view_mode: str = "grouped") -> str:
     """生态位分析区域。支持可选排序参数。"""
+    from apps.copilot.modules.strategic.duan_dual_gate import compute_duan_dual_gates
+
     board_id = board["id"]
     stock_pool = board.get("stock_pool_json")
 
     # 已完成
     if stock_pool and stock_pool.get("status") == "ok":
-        return _render_ecosystem_result(board_id, stock_pool, node_sort, stock_sort, view_mode)
+        duan_node, stock_duan, _ = compute_duan_dual_gates(stock_pool)
+        return _render_ecosystem_result(
+            board_id, stock_pool, node_sort, stock_sort, view_mode,
+            duan_node_scores=duan_node,
+            stock_duan_scores=stock_duan,
+        )
 
     # 进行中
     if stock_pool and stock_pool.get("status") == "pending":
@@ -806,22 +813,72 @@ def _render_ecosystem_pending(board_id: int, task_id: str) -> str:
 </div>"""
 
 
+def _render_duan_gate_badge(dn: dict[str, Any], *, gate_label: str = "段永平") -> str:
+    """渲染段永平双闸徽标（节点 Z0-A / 标的 Z0-B）。"""
+    display = dn.get("display", "")
+    if not display:
+        return ""
+    if "待" in display or dn.get("provisional"):
+        badge_color = "bg-slate-100 text-slate-600"
+    elif "好生意" in display or "代表锚点" in display:
+        badge_color = "bg-emerald-100 text-emerald-700"
+    elif "需深研" in display or "观察" in display:
+        badge_color = "bg-amber-100 text-amber-700"
+    else:
+        badge_color = "bg-rose-100 text-rose-600"
+    breakdown = dn.get("breakdown") or {}
+    tooltip = dn.get("tooltip", "")
+    breakdown_html = (
+        "".join(
+            f"<tr><td class='text-[10px] text-gray-500 pr-2'>{_esc(k)}</td>"
+            f"<td class='text-[10px] font-mono'>{v:.2f}</td></tr>"
+            for k, v in breakdown.items()
+            if isinstance(v, (int, float))
+        )
+        if breakdown else ""
+    )
+    extra = ""
+    if dn.get("c7_category"):
+        extra += f"<p class='text-[10px] text-gray-500'>C7={_esc(dn.get('c7_category'))}</p>"
+    if dn.get("role_tag"):
+        extra += f"<p class='text-[10px] text-gray-500'>role_tag={_esc(dn.get('role_tag'))}</p>"
+    tip_content = (
+        f"<div class='text-xs'>"
+        f"<p class='font-medium mb-1'>{gate_label} · {_esc(display)}</p>"
+        f"<table class='w-full'>{breakdown_html}</table>"
+        + extra
+        + (f"<p class='text-[10px] text-gray-400 mt-1'>{_esc(tooltip)}</p>" if tooltip else "")
+        + "</div>"
+    )
+    return (
+        f'<span class="text-[10px] px-1.5 py-0.5 rounded {badge_color} font-medium">'
+        f'{_esc(display)}</span>'
+        + info_tip(tip_content, "📊")
+    )
+
+
 def _render_ecosystem_result(board_id: int, stock_pool: dict[str, Any],
                              node_sort: str = "tier_core_first",
                              stock_sort: str = "composite_desc",
                              view_mode: str = "grouped",
-                             duan_node_scores: dict[str, dict] | None = None) -> str:
+                             duan_node_scores: dict[str, dict] | None = None,
+                             stock_duan_scores: dict[str, dict] | None = None) -> str:
     """渲染生态位分析结果。支持可选排序参数。
 
     Args:
-        duan_node_scores: 节点级段永平评分，按 node_id → {score, label, display, breakdown}
+        duan_node_scores: Z0-A 节点段永平闸 node_id → pack
+        stock_duan_scores: Z0-B 标的锚点闸 "{node_id}:{symbol}" → pack
     """
     version = stock_pool.get("version", "1.0")
 
     # v2.0 → BOM 节点分组渲染
     bom_nodes = stock_pool.get("bom_nodes") or []
     if version == "2.0" and bom_nodes:
-        return _render_bom_stock_pool(board_id, stock_pool, bom_nodes, node_sort, stock_sort, view_mode, duan_node_scores=duan_node_scores)
+        return _render_bom_stock_pool(
+            board_id, stock_pool, bom_nodes, node_sort, stock_sort, view_mode,
+            duan_node_scores=duan_node_scores,
+            stock_duan_scores=stock_duan_scores,
+        )
 
     # v1.0 fallback → concept_pools 渲染（兼容旧数据）
     return _render_concept_pools_result(board_id, stock_pool)
@@ -831,14 +888,13 @@ def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes:
                            node_sort: str = "tier_core_first",
                            stock_sort: str = "composite_desc",
                            view_mode: str = "grouped",
-                           duan_node_scores: dict[str, dict] | None = None) -> str:
+                           duan_node_scores: dict[str, dict] | None = None,
+                           stock_duan_scores: dict[str, dict] | None = None) -> str:
     """v2.0：BOM 节点分组渲染标的池，每只标的含 5 因子打分明细（可展开）。
 
     Args:
-        node_sort: 节点排序方式 (tier_core_first / tier_supp_first / upstream_first / downstream_first)
-        stock_sort: 标的排序方式 (composite_desc / composite_asc / moat / growth / profit / localize / policy_bond)
-        view_mode: 视图模式 (grouped / flat / topology)
-        duan_node_scores: 可选，节点级段永平评分 dict[node_id → {score, label, display, breakdown, tooltip}]
+        duan_node_scores: Z0-A 节点段永平闸
+        stock_duan_scores: Z0-B 标的锚点闸（key=`{node_id}:{symbol}`）
     """
     topo = stock_pool.get("ecosystem_topology", {})
     thesis = stock_pool.get("investment_thesis", "")
@@ -959,41 +1015,9 @@ window.ecoSorted = function(sel, dim) {{
         layer_label = node.get("ecosystem_layer", "")
         stocks = node.get("stocks", [])
 
-        # ── 段永平认可度徽标 ──
-        duan_scores = duan_node_scores or {}
-        dn = duan_scores.get(nid) or {}
-        duan_display = dn.get("display", "")
-        duan_breakdown = dn.get("breakdown", {})
-        duan_tooltip = dn.get("tooltip", "")
-        if duan_display:
-            if "好生意" in duan_display:
-                duan_badge_color = "bg-emerald-100 text-emerald-700"
-            elif "需深研" in duan_display:
-                duan_badge_color = "bg-amber-100 text-amber-700"
-            else:
-                duan_badge_color = "bg-rose-100 text-rose-600"
-            breakdown_html = (
-                "".join(
-                    f"<tr><td class='text-[10px] text-gray-500 pr-2'>{k}</td>"
-                    f"<td class='text-[10px] font-mono'>{v:.2f}</td></tr>"
-                    for k, v in duan_breakdown.items()
-                )
-                if duan_breakdown else ""
-            )
-            tip_content = (
-                f"<div class='text-xs'>"
-                f"<p class='font-medium mb-1'>{_esc(duan_display)}</p>"
-                f"<table class='w-full'>{breakdown_html}</table>"
-                + (f"<p class='text-[10px] text-gray-400 mt-1'>{_esc(duan_tooltip)}</p>" if duan_tooltip else "")
-                + f"</div>"
-            )
-            duan_badge = (
-                f'<span class="text-[10px] px-1.5 py-0.5 rounded {duan_badge_color} font-medium">'
-                f'{_esc(duan_display)}</span>'
-                + info_tip(tip_content, "📊")
-            )
-        else:
-            duan_badge = ""
+        # ── Z0-A 节点段永平闸徽标 ──
+        dn = (duan_node_scores or {}).get(nid) or {}
+        duan_badge = _render_duan_gate_badge(dn, gate_label="节点环节闸")
 
         stock_rows = ""
         for st in stocks:
@@ -1004,6 +1028,10 @@ window.ecoSorted = function(sel, dim) {{
             ec = st.get("exclusion_check") or {}
             composite = sd.get("composite", 0)
             stock_source = st.get("stock_source", "llm")
+
+            # Z0-B 标的段永平闸徽标
+            sa = (stock_duan_scores or {}).get(f"{nid}:{sym}") or (stock_duan_scores or {}).get(sym) or {}
+            stock_duan_badge = _render_duan_gate_badge(sa, gate_label="标的锚点闸")
 
             # 来源徽章
             if stock_source == "curated":
@@ -1072,6 +1100,7 @@ window.ecoSorted = function(sel, dim) {{
                 f"<span class='font-medium'>{_esc(name_stock)}</span>"
                 f"<span class='text-[10px] text-gray-400 ml-1'>{_esc(pos)}</span>"
                 f"<span class='ml-1'>{source_badge}</span>"
+                f"<span class='ml-1'>{stock_duan_badge}</span>"
                 f"<span class='ml-auto font-bold {comp_color}'>{composite:.0%}</span>"
                 f"{ec_badge}"
                 f"{action_btns}"

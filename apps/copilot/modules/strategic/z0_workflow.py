@@ -263,8 +263,20 @@ async def create_scan_dispatch(
         )
 
     ref = f"cvm://phase/{phase_id}"
-    # CVM 快照：供 Z1.5 生意认知引擎 Step3 护城河分析直接消费（避免 Z1.5 再查表）
+    # CVM 快照 + Z0 段永平双闸只读包 [Ref: 32_ §2.4.9.c]
     cvm_snapshot: dict[str, Any] = {}
+    node_duan_packs: dict[str, Any] = {}
+    stock_duan_anchors: dict[str, Any] = {}
+    board_detail = await get_board_detail(session, board_id)
+    stock_pool = (board_detail or {}).get("stock_pool_json") or {}
+    for node in stock_pool.get("bom_nodes") or []:
+        nid = str(node.get("node_id", ""))
+        if node.get("node_duan_pack"):
+            node_duan_packs[nid] = node["node_duan_pack"]
+        for st in node.get("stocks") or []:
+            sym = st.get("symbol")
+            if sym and st.get("stock_duan_anchor"):
+                stock_duan_anchors[sym] = st["stock_duan_anchor"]
     for c in confirmed:
         sc_scores = c.scores_json or {}
         cvm_snapshot[c.symbol] = {
@@ -292,6 +304,8 @@ async def create_scan_dispatch(
             "board_id": board_id,
             "phase_id": phase_id,
             "cvm_snapshot": cvm_snapshot,
+            "node_duan_packs": node_duan_packs,
+            "stock_duan_anchors": stock_duan_anchors,
         },
     )
     session.add(disp)

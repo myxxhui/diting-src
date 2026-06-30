@@ -1,0 +1,21 @@
+# Z0 CVM / 标的段永平闸 [Ref: 32_ §2.4.4 · §2.4.9.b]
+version: "1.0"
+
+z0_cvm:
+  pool_min_band: acceptable
+  c5_bypass_block: high
+  band_order: [low, acceptable, mid, mid_high, high]
+
+  # S2 不可替代初判 · irreplaceability.score 下限
+  s2_min_irreplaceability: 0.50
+  s2_min_irreplaceability_node_pass_relaxed: 0.30
+
+  # S2 band 下限（无 irreplaceability 时回退）
+  s2_min_band: acceptable
+  s2_min_band_node_pass_relaxed: marginal
+
+  # 每节点 🟢代表锚点上限
+  max_green_anchors_per_node: 2
+
+  # 节点 ✅ 时 S2 放宽一档
+  relax_s2_when_node_pass: true

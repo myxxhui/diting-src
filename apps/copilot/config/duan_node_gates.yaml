@@ -1,0 +1,71 @@
+# Z0-A 节点段永平闸 · N1～N4 [Ref: 32_ §2.4.9.a]
+version: "1.0"
+
+require_node_t2: true
+
+weights:
+  n1: 0.30
+  n2: 0.30
+  n3: 0.20
+  n4: 0.20
+
+thresholds:
+  pass_aggregate: 0.65
+  reject_aggregate: 0.35
+
+# N1 T1 · tier × ecosystem_layer → pass | marginal | fail
+n1_matrix:
+  核心:
+    L1: pass
+    L2: pass
+    L3: pass
+    L4: pass
+    L5: marginal
+    "": pass
+  重要:
+    L1: pass
+    L2: pass
+    L3: pass
+    L4: marginal
+    L5: marginal
+    "": marginal
+  配套:
+    L1: marginal
+    L2: marginal
+    L3: fail
+    L4: fail
+    L5: fail
+    "": fail
+
+n2_scores:
+  low: 1.0
+  mid: 0.55
+  high: 0.15
+  provisional: 0.50
+
+n3_scores:
+  in_segment: 1.0
+  upstream: 0.5
+  downstream: 0.5
+  diffuse: 0.35
+
+n4_scores:
+  expand: 1.0
+  stable: 0.7
+  shrink: 0.25
+
+n3_tier_fallback:
+  核心: 0.85
+  重要: 0.65
+  配套: 0.45
+
+n4_tier_fallback:
+  核心: 1.0
+  重要: 0.7
+  配套: 0.4
+
+node_segment_t2:
+  model: claude-opus-4-6
+  max_output_tokens: 500
+  scene: z0_node_segment_t2
+  fail_action: provisional

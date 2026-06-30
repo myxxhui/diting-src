@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from apps.copilot.modules.strategic.duan_config import load_duan_node_gates, z0_cvm_gates
+
 
 # ── band 等级排序（用于进池门槛 min 校验）──
 _BAND_ORDER: dict[str, int] = {
@@ -166,30 +168,39 @@ def _classify_c7(role_tag: str, role_suggested: str) -> dict[str, Any]:
 
 # ── 进池门槛校验（32_ §2.4.4 · gates.yaml z0_cvm）──
 
-def _check_pool_gate(scores: dict[str, Any]) -> tuple[bool, list[str]]:
-    """校验 CVM 进池必要条件（C7=pass + min(C1,C2,C3,C4)≥acceptable + C5≠bypass_high + 至少一路径）。
+def _pool_min_band() -> str:
+    return str(z0_cvm_gates().get("pool_min_band", _POOL_MIN_BAND))
 
-    返回 (passed, fail_reasons)。
+
+def _c5_bypass_block() -> str:
+    return str(z0_cvm_gates().get("c5_bypass_block", _C5_BYPASS_BLOCK))
+
+
+def _check_pool_gate(
+    scores: dict[str, Any],
+    *,
+    min_band: Optional[str] = None,
+) -> tuple[bool, list[str]]:
+    """校验 CVM 进池必要条件（C7=pass + min(C1,C2,C3,C4)≥min_band + C5≠bypass_high + 至少一路径）。
+
+    [Ref: gates.yaml#z0_cvm]
     """
     reasons: list[str] = []
+    min_ord = _BAND_ORDER.get(min_band or _pool_min_band(), _POOL_MIN_ORD)
 
-    # 条件 1：C7 = pass
     c7 = scores.get("c7") or {}
     if not c7.get("pass", False):
         reasons.append("c7_not_pass")
 
-    # 条件 2：min(C1,C2,C3,C4) ≥ acceptable
     for dim in ("c1", "c2", "c3", "c4"):
         band = (scores.get(dim) or {}).get("band", "low")
-        if _BAND_ORDER.get(band, 0) < _POOL_MIN_ORD:
-            reasons.append(f"{dim}_below_acceptable({band})")
+        if _BAND_ORDER.get(band, 0) < min_ord:
+            reasons.append(f"{dim}_below_{min_band or _pool_min_band()}({band})")
 
-    # 条件 3：C5 ≠ bypass_high
     c5_risk = (scores.get("c5") or {}).get("bypass_risk", "low")
-    if c5_risk == _C5_BYPASS_BLOCK:
+    if c5_risk == _c5_bypass_block():
         reasons.append("c5_bypass_high")
 
-    # 条件 4：至少一路径（A 利润锚 / B 结构锚 / C 成长锚）
     path_a = _BAND_ORDER.get((scores.get("c1") or {}).get("band", "low"), 0) >= _BAND_ORDER["high"]
     path_b = (
         _BAND_ORDER.get((scores.get("c2") or {}).get("band", "low"), 0) >= _BAND_ORDER["high"]
@@ -342,16 +353,407 @@ def score_peer_set(
     return rows
 
 
-# ── 节点级段永平过滤器 ──
-# [Ref: 32_ §2.4.8 · 段永平: 好生意+护城河+看不懂不投+不做什么]
+# ── Z0 段永平双闸 v4.2 完整版 ──
+# [Ref: 32_ §2.4.9.a 节点环节闸 · §2.4.9.b 标的锚点闸 · duan_node_gates.yaml · gates.yaml]
 
 _TIER_WEIGHT: dict[str, float] = {"核心": 1.0, "重要": 0.7, "配套": 0.4}
 
-_DUAN_LABEL_CONFIG: list[tuple[str, str, float, str]] = [
-    ("好生意", "✅好生意", 0.65, "符合段永平标准 · 生意本质清晰 + 护城河可识别 + 商业模式可持续"),
-    ("需深研", "❓需深研", 0.35, "部分符合 · 需进一步验证商业模式或竞争优势"),
-    ("看不懂", "❌看不懂", 0.0, "不符合段永平标准 · 生意复杂/护城河薄弱/看不清长期"),
-]
+_NODE_VERDICT_PASS = ("pass", "✅好生意", 0.65, "环节 bypass 低且利润池锚定")
+_NODE_VERDICT_REVIEW = ("review", "❓需深研", 0.35, "环节 bypass 中或时间跨度待确认")
+_NODE_VERDICT_REJECT = ("reject", "❌看不懂", 0.0, "主链地位不足或 bypass 高")
+_NODE_VERDICT_PROVISIONAL = ("provisional", "⚠️待环节T2", 0.0, "缺节点 T2 语义包")
+
+_STOCK_ANCHOR_ANCHOR = ("anchor", "🟢代表锚点")
+_STOCK_ANCHOR_WATCH = ("watch", "🟡观察占位")
+_STOCK_ANCHOR_REJECT = ("reject", "🔴伪龙头")
+_STOCK_ANCHOR_BLOCK = ("inherit_block", "🔴环节未过闸")
+_STOCK_ANCHOR_WAIT = ("inherit_wait", "⚠️待环节T2")
+_STOCK_ANCHOR_PENDING = ("data_pending", "⚠️待CVM+T2")
+
+_N1_SCORE_MAP = {"pass": 1.0, "marginal": 0.55, "fail": 0.25}
+
+
+def _duan_cfg() -> dict[str, Any]:
+    return load_duan_node_gates()
+
+
+def _normalize_layer(layer: str) -> str:
+    lyr = (layer or "").strip().upper()
+    if lyr and not lyr.startswith("L"):
+        return ""
+    return lyr
+
+
+def infer_role_tag_from_position(position: str) -> tuple[Optional[str], str]:
+    """ecosystem_position → (role_tag, source)。无法映射时 role_tag=None, source=pending。"""
+    pos = (position or "").strip()
+    if not pos:
+        return None, "empty"
+    if any(k in pos for k in ("卡脖子", "替代难", "不可替代", "新贵")):
+        return "卡脖子新贵", "mapped"
+    if any(k in pos for k in ("光模块",)):
+        return "光模块龙头", "mapped"
+    if any(k in pos for k in ("算力", "芯片", "训练")):
+        return "算力精算师", "mapped"
+    if any(k in pos for k in ("办公", "AI 办公", "Copilot")):
+        return "办公 AI 领航者", "mapped"
+    if any(k in pos for k in ("合规", "私有化")):
+        return "合规与私有化先锋", "mapped"
+    if any(k in pos for k in ("Agent", "智能体")):
+        return "工业 Agent 中枢", "mapped"
+    if any(k in pos for k in ("龙头", "巨头", "垄断", "领先")):
+        for key in _ROLE_MAP:
+            if key in pos:
+                return key, "mapped"
+        return "光模块龙头", "mapped_heuristic"
+    if any(k in pos for k in ("代工", "制造", "集成", "土建", "配套", "机柜")):
+        return "算力网络可视化", "mapped"
+    return None, "pending"
+
+
+def _eval_n1_main_chain(tier: str, layer: str) -> tuple[float, str]:
+    """N1 主链地位 T1 · 返回 (score, pass|marginal|fail)。"""
+    cfg = _duan_cfg()
+    matrix = cfg.get("n1_matrix") or {}
+    tier = tier or "配套"
+    lyr = _normalize_layer(layer)
+    tier_row = matrix.get(tier) or matrix.get("配套") or {}
+    status = str(tier_row.get(lyr if lyr else "", tier_row.get("", "fail"))).lower()
+    if status not in _N1_SCORE_MAP:
+        status = "fail"
+    return _N1_SCORE_MAP[status], status
+
+
+def _eval_n2_bypass(node_t2: Optional[dict[str, Any]], tier: str) -> tuple[float, str]:
+    cfg = _duan_cfg()
+    scores = cfg.get("n2_scores") or {}
+    if node_t2:
+        risk = str(node_t2.get("segment_bypass_risk", "mid")).lower()
+        if risk not in scores:
+            risk = "mid"
+        return float(scores.get(risk, 0.55)), risk
+    prov = float(scores.get("provisional", 0.5))
+    tier_adj = {"核心": prov + 0.1, "重要": prov, "配套": prov - 0.1}.get(tier, prov)
+    return tier_adj, "provisional"
+
+
+def _eval_n3_profit_pool(node_t2: Optional[dict[str, Any]], tier: str) -> float:
+    cfg = _duan_cfg()
+    if node_t2:
+        anchor = str(node_t2.get("profit_pool_anchor", "diffuse")).lower()
+        n3 = cfg.get("n3_scores") or {}
+        return float(n3.get(anchor, 0.5))
+    fb = cfg.get("n3_tier_fallback") or _TIER_WEIGHT
+    return float(fb.get(tier, fb.get("配套", 0.45)))
+
+
+def _eval_n4_horizon(node_t2: Optional[dict[str, Any]], tier: str) -> tuple[float, str]:
+    cfg = _duan_cfg()
+    if node_t2:
+        outlook = str(node_t2.get("horizon_outlook", "stable")).lower()
+        n4 = cfg.get("n4_scores") or {}
+        if outlook not in n4:
+            outlook = "stable"
+        return float(n4.get(outlook, 0.7)), outlook
+    fb = cfg.get("n4_tier_fallback") or _TIER_WEIGHT
+    return float(fb.get(tier, fb.get("配套", 0.4))), "provisional"
+
+
+def score_node_segment_duan(
+    *,
+    node_id: str = "",
+    node_name: str = "",
+    tier: str = "配套",
+    ecosystem_layer: str = "",
+    node_t2: Optional[dict[str, Any]] = None,
+    require_node_t2: Optional[bool] = None,
+) -> dict[str, Any]:
+    """Z0-A 节点段永平闸 · N1～N4 环节级（不读标的 CVM 聚合）。"""
+    cfg = _duan_cfg()
+    weights = cfg.get("weights") or {"n1": 0.30, "n2": 0.30, "n3": 0.20, "n4": 0.20}
+    thresholds = cfg.get("thresholds") or {"pass_aggregate": 0.65, "reject_aggregate": 0.35}
+    pass_agg = float(thresholds.get("pass_aggregate", 0.65))
+    reject_agg = float(thresholds.get("reject_aggregate", 0.35))
+    req_t2 = cfg.get("require_node_t2", True) if require_node_t2 is None else require_node_t2
+
+    n1_score, n1_status = _eval_n1_main_chain(tier, ecosystem_layer)
+    n2_score, n2_risk = _eval_n2_bypass(node_t2, tier)
+    n3_score = _eval_n3_profit_pool(node_t2, tier)
+    n4_score, n4_outlook = _eval_n4_horizon(node_t2, tier)
+
+    w1, w2, w3, w4 = (
+        float(weights.get("n1", 0.30)),
+        float(weights.get("n2", 0.30)),
+        float(weights.get("n3", 0.20)),
+        float(weights.get("n4", 0.20)),
+    )
+    aggregate = round(n1_score * w1 + n2_score * w2 + n3_score * w3 + n4_score * w4, 3)
+    breakdown = {
+        "N1_主链地位": round(n1_score, 3),
+        "N2_环节bypass": round(n2_score, 3),
+        "N3_利润池": round(n3_score, 3),
+        "N4_时间跨度": round(n4_score, 3),
+    }
+    provisional = req_t2 and not node_t2
+
+    if provisional:
+        verdict, display, _, tip = _NODE_VERDICT_PROVISIONAL
+    elif n1_status == "fail" or n2_risk == "high" or aggregate < reject_agg:
+        verdict, display, _, tip = _NODE_VERDICT_REJECT
+    elif (
+        n2_risk == "mid"
+        or n4_outlook == "shrink"
+        or n1_status == "marginal"
+        or (reject_agg <= aggregate < pass_agg)
+    ):
+        verdict, display, _, tip = _NODE_VERDICT_REVIEW
+    elif n1_status == "pass" and n2_risk != "high" and n4_outlook in ("expand", "stable") and aggregate >= pass_agg:
+        verdict, display, _, tip = _NODE_VERDICT_PASS
+    else:
+        verdict, display, _, tip = _NODE_VERDICT_REVIEW
+
+    return {
+        "verdict": verdict,
+        "label": display.replace("✅", "").replace("❓", "").replace("❌", "").replace("⚠️", "").strip(),
+        "display": display,
+        "score": aggregate,
+        "passed": verdict == "pass",
+        "depth": "L0",
+        "provisional": provisional,
+        "breakdown": breakdown,
+        "n1_status": n1_status,
+        "n1_pass": n1_status == "pass",
+        "n2_risk": n2_risk,
+        "n4_outlook": n4_outlook,
+        "node_id": node_id,
+        "node_name": node_name,
+        "node_t2_ref": node_t2.get("source") if node_t2 else None,
+        "tooltip": (
+            f"N1={n1_score:.2f}({n1_status}) N2={n2_score:.2f} N3={n3_score:.2f} N4={n4_score:.2f} | "
+            + ("待节点 T2 语义研判 · " if provisional else "")
+            + tip
+        ),
+    }
+
+
+def _eval_s1_anchor(cvm_scores: dict[str, Any], role_tag: Optional[str]) -> tuple[bool, str, dict[str, Any]]:
+    """S1 真锚点 · C7 + role_tag。"""
+    c7 = cvm_scores.get("c7") or {}
+    c7_pass = bool(c7.get("pass", False))
+    c7_cat = str(c7.get("category", ""))
+    triggers = list(c7.get("triggers") or [])
+    if not role_tag:
+        return False, "missing_role_tag", {"c7_category": c7_cat}
+    if not c7_pass or c7_cat == "sentinel" or "representative_only" in triggers:
+        return False, "sentinel_or_fail", {"c7_category": c7_cat, "triggers": triggers}
+    if c7_cat in ("monopoly", "leader"):
+        return True, "pass", {"c7_category": c7_cat}
+    if c7_cat == "max_value":
+        return True, "marginal", {"c7_category": c7_cat}
+    return False, "sentinel_or_fail", {"c7_category": c7_cat}
+
+
+def _eval_s2_irreplaceability(
+    cvm_scores: dict[str, Any],
+    *,
+    node_pass: bool,
+) -> tuple[bool, str]:
+    """S2 不可替代初判 · 节点 ✅ 时阈值放宽一档。"""
+    gates = z0_cvm_gates()
+    irr = cvm_scores.get("irreplaceability") or {}
+    irr_score = float(irr.get("score", 0) or 0)
+    min_irr = float(
+        gates.get("s2_min_irreplaceability_node_pass_relaxed", 0.30)
+        if node_pass and gates.get("relax_s2_when_node_pass", True)
+        else gates.get("s2_min_irreplaceability", 0.50)
+    )
+    if irr_score >= min_irr:
+        return True, "pass"
+    c2_band = (cvm_scores.get("c2") or {}).get("band", "low")
+    min_band = (
+        gates.get("s2_min_band_node_pass_relaxed", "marginal")
+        if node_pass and gates.get("relax_s2_when_node_pass", True)
+        else gates.get("s2_min_band", "acceptable")
+    )
+    min_ord = _BAND_ORDER.get(str(min_band), _POOL_MIN_ORD)
+    if _BAND_ORDER.get(c2_band, 0) >= min_ord:
+        return True, "marginal"
+    return False, "fail"
+
+
+def _eval_s3_pool(cvm_scores: dict[str, Any], pool_gate: Optional[dict[str, Any]], *, node_pass: bool) -> tuple[bool, list[str]]:
+    """S3 进池硬闸 · C5 bypass + pool_gate。"""
+    gates = z0_cvm_gates()
+    min_band = (
+        gates.get("s2_min_band_node_pass_relaxed", "marginal")
+        if node_pass and gates.get("relax_s2_when_node_pass", True)
+        else gates.get("s2_min_band", "acceptable")
+    )
+    if isinstance(pool_gate, dict) and "passed" in pool_gate:
+        passed = bool(pool_gate.get("passed"))
+        reasons = list(pool_gate.get("fail_reasons") or [])
+    else:
+        passed, reasons = _check_pool_gate(cvm_scores, min_band=str(min_band))
+    c5 = (cvm_scores.get("c5") or {}).get("bypass_risk", "low")
+    if c5 == _c5_bypass_block():
+        passed = False
+        reasons = reasons + ["c5_bypass_high"]
+    return passed, reasons
+
+
+def score_stock_duan_anchor(
+    *,
+    symbol: str,
+    node_duan: dict[str, Any],
+    ecosystem_position: str = "",
+    cvm_scores: Optional[dict[str, Any]] = None,
+    role_tag: Optional[str] = None,
+    pool_gate: Optional[dict[str, Any]] = None,
+    skip_top2_cap: bool = False,
+) -> dict[str, Any]:
+    """Z0-B 标的段永平闸 · S1～S3 锚点级（继承节点 verdict）。"""
+    node_verdict = str(node_duan.get("verdict", ""))
+    node_pass = node_verdict == "pass"
+    node_review = node_verdict == "review"
+
+    if node_verdict == "reject":
+        v, d = _STOCK_ANCHOR_BLOCK
+        return _stock_anchor_result(v, d, node_duan, symbol, provisional=False, reason="node_reject")
+    if node_verdict == "provisional" or node_duan.get("provisional"):
+        v, d = _STOCK_ANCHOR_WAIT
+        return _stock_anchor_result(v, d, node_duan, symbol, provisional=True, reason="node_provisional")
+
+    tag_source = "explicit"
+    if not role_tag:
+        role_tag, tag_source = infer_role_tag_from_position(ecosystem_position)
+
+    scored_row: dict[str, Any] = {}
+    if cvm_scores is None and role_tag:
+        scored_row = score_symbol(symbol, role_tag=role_tag)
+        cvm_scores = scored_row.get("scores") or {}
+        pool_gate = scored_row.get("pool_gate")
+    elif cvm_scores is None:
+        cvm_scores = {}
+        pool_gate = pool_gate or {}
+
+    if not cvm_scores or tag_source in ("pending", "empty") or not role_tag:
+        v, d = _STOCK_ANCHOR_PENDING
+        return _stock_anchor_result(
+            v, d, node_duan, symbol, provisional=True,
+            reason="missing_cvm_or_role_tag", role_tag=role_tag, role_tag_source=tag_source,
+            breakdown={"S1": 0, "S2": 0, "S3": 0},
+        )
+
+    s1_ok, s1_level, s1_meta = _eval_s1_anchor(cvm_scores, role_tag)
+    s2_ok, s2_level = _eval_s2_irreplaceability(cvm_scores, node_pass=node_pass)
+    s3_ok, s3_reasons = _eval_s3_pool(cvm_scores, pool_gate, node_pass=node_pass)
+    irr = (cvm_scores.get("irreplaceability") or {}).get("score")
+    c7_cat = s1_meta.get("c7_category", "")
+    breakdown = {
+        "S1_真锚点": 1.0 if s1_ok and s1_level == "pass" else (0.6 if s1_ok else 0.0),
+        "S2_不可替代": 1.0 if s2_ok and s2_level == "pass" else (0.55 if s2_ok else 0.0),
+        "S3_进池闸": 1.0 if s3_ok else 0.0,
+    }
+
+    if not s1_ok or c7_cat == "sentinel":
+        v, d = _STOCK_ANCHOR_REJECT
+        return _stock_anchor_result(
+            v, d, node_duan, symbol, provisional=False,
+            reason="s1_fail", c7_category=c7_cat, pool_gate_passed=s3_ok, role_tag=role_tag,
+            role_tag_source=tag_source, irreplaceability=irr, breakdown=breakdown,
+            s1_level=s1_level, s2_level=s2_level, s3_fail_reasons=s3_reasons,
+        )
+    if not s3_ok:
+        v, d = _STOCK_ANCHOR_REJECT
+        return _stock_anchor_result(
+            v, d, node_duan, symbol, provisional=False,
+            reason="s3_fail", c7_category=c7_cat, pool_gate_passed=False, role_tag=role_tag,
+            role_tag_source=tag_source, irreplaceability=irr, breakdown=breakdown,
+            s3_fail_reasons=s3_reasons,
+        )
+    if s1_level == "marginal" or s2_level == "marginal" or node_review:
+        v, d = _STOCK_ANCHOR_WATCH
+        return _stock_anchor_result(
+            v, d, node_duan, symbol, provisional=bool(scored_row.get("provisional", True)),
+            reason="marginal_or_node_review" if node_review else "marginal_s1_s2",
+            c7_category=c7_cat, pool_gate_passed=s3_ok, role_tag=role_tag,
+            role_tag_source=tag_source, irreplaceability=irr, breakdown=breakdown,
+        )
+    if s1_ok and s2_ok and s3_ok:
+        v, d = _STOCK_ANCHOR_ANCHOR
+        return _stock_anchor_result(
+            v, d, node_duan, symbol, provisional=bool(scored_row.get("provisional", True)),
+            c7_category=c7_cat, pool_gate_passed=True, role_tag=role_tag,
+            role_tag_source=tag_source, irreplaceability=irr, breakdown=breakdown,
+            pool_eligible=bool(scored_row.get("pool_eligible", True)),
+        )
+    v, d = _STOCK_ANCHOR_WATCH
+    return _stock_anchor_result(
+        v, d, node_duan, symbol, provisional=bool(scored_row.get("provisional", True)),
+        c7_category=c7_cat, pool_gate_passed=s3_ok, role_tag=role_tag,
+        role_tag_source=tag_source, irreplaceability=irr, breakdown=breakdown,
+    )
+
+
+def apply_top2_anchor_cap(
+    stock_duan_by_key: dict[str, dict[str, Any]],
+    *,
+    max_green: Optional[int] = None,
+) -> dict[str, dict[str, Any]]:
+    """每节点仅保留 top N 🟢代表锚点，其余降为 🟡观察占位。"""
+    gates = z0_cvm_gates()
+    cap = max_green if max_green is not None else int(gates.get("max_green_anchors_per_node", 2))
+    by_node: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    for key, pack in stock_duan_by_key.items():
+        if ":" in key:
+            nid, _sym = key.split(":", 1)
+        else:
+            nid = str(pack.get("node_duan_ref", ""))
+        by_node.setdefault(nid, []).append((key, pack))
+
+    out = dict(stock_duan_by_key)
+    for _nid, items in by_node.items():
+        anchors = [(k, p) for k, p in items if p.get("verdict") == "anchor"]
+        if len(anchors) <= cap:
+            continue
+        anchors.sort(
+            key=lambda x: (
+                float(x[1].get("irreplaceability") or 0),
+                1 if x[1].get("pool_gate_passed") else 0,
+            ),
+            reverse=True,
+        )
+        for key, pack in anchors[cap:]:
+            demoted = dict(pack)
+            demoted["verdict"] = "watch"
+            demoted["display"] = _STOCK_ANCHOR_WATCH[1]
+            demoted["reason"] = "top2_cap_exceeded"
+            demoted["watch_only"] = True
+            out[key] = demoted
+    return out
+
+
+def _stock_anchor_result(
+    verdict: str,
+    display: str,
+    node_duan: dict[str, Any],
+    symbol: str,
+    *,
+    provisional: bool,
+    reason: str = "",
+    **extra: Any,
+) -> dict[str, Any]:
+    pack = {
+        "verdict": verdict,
+        "display": display,
+        "depth": "L1",
+        "provisional": provisional,
+        "symbol": symbol,
+        "node_duan_ref": node_duan.get("node_id") or node_duan.get("node_name"),
+        "reason": reason,
+        **extra,
+    }
+    return pack
 
 
 def score_node_duan(
@@ -359,129 +761,17 @@ def score_node_duan(
     node_name: str = "",
     tier: str = "配套",
     stocks: list[dict[str, Any]] | None = None,
+    ecosystem_layer: str = "",
+    node_id: str = "",
+    node_t2: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    """节点级段永平过滤器 · 四维评分 → 综合标签。
-
-    从节点内代表性标的的 CVM 评分聚合出节点层段永平认可度。
-    段永平哲学映射：
-      D1 生意本质（30%）← C7 pass rate    → "看不懂不投"、"伪龙头哨兵"
-      D2 护城河深度（30%）← irreplaceability → "护城河"、"长期确定性"
-      D3 长期确定性（20%）← 节点层级核心度    → "好生意"、"长期"
-      D4 商业模式（20%）← C5 bypass risk    → "不做什么"、"利润之上的追求"
-
-    参数：
-      node_name: 节点名称（仅用于诊断日志）
-      tier:      节点层级（核心/重要/配套）
-      stocks:    该节点内的代表性标的列表。每只标的可用：
-                 - ``cvm_scores`` dict（优先，来自 cvm_scorecards.scores_json）
-                 - ``scoring_detail`` dict（兼容旧版）
-                 若无则从层级推算默认值。
-
-    返回：
-      {label, score, passed, breakdown: {D1_生意本质, D2_护城河深度, D3_长期确定性, D4_商业模式}, n_stocks}
-    """
-    stocks = stocks or []
-    n = len(stocks)
-    tier_val = _TIER_WEIGHT.get(tier, 0.5)
-
-    # ── 无标的 → 仅凭层级降级推断 ──
-    if n == 0:
-        d3 = tier_val
-        agg = d3 * 0.40 + 0.30  # 预设 D1=0, D2=0, D4=0.5 → 约 0.30~0.70
-        if agg >= 0.65:
-            label, display, _, tip = _DUAN_LABEL_CONFIG[0]
-        elif agg >= 0.35:
-            label, display, _, tip = _DUAN_LABEL_CONFIG[1]
-        else:
-            label, display, _, tip = _DUAN_LABEL_CONFIG[2]
-        return {
-            "label": label,
-            "display": display,
-            "score": round(agg, 3),
-            "passed": agg >= 0.50,
-            "breakdown": {
-                "D1_生意本质": 0.0,
-                "D2_护城河深度": 0.0,
-                "D3_长期确定性": round(d3, 3),
-                "D4_商业模式": 0.50,
-            },
-            "n_stocks": 0,
-            "tooltip": tip + " · 该节点暂无代表性标的",
-        }
-
-    # ── 四维聚合 ──
-    d1_sum = d2_sum = d4_sum = 0.0
-    d1_cnt = d2_cnt = d4_cnt = 0
-    d3 = tier_val  # D3 由层级直接决定
-
-    for st in stocks:
-        cvm = st.get("cvm_scores") or st.get("scoring_detail") or {}
-
-        # D1: C7 pass rate
-        c7 = cvm.get("c7") if isinstance(cvm.get("c7"), dict) else {}
-        c7_pass = c7.get("pass")
-        if c7_pass is True:
-            d1_sum += 1.0
-        elif c7_pass is False:
-            d1_sum += 0.0
-        else:
-            d1_sum += 0.5  # 无数据 → 中性
-        d1_cnt += 1
-
-        # D2: irreplaceability（新格式）或 composite（旧格式兜底）
-        irr = cvm.get("irreplaceability") if isinstance(cvm.get("irreplaceability"), dict) else {}
-        if irr.get("score") is not None:
-            d2_sum += float(irr["score"])
-        else:
-            composite = cvm.get("composite")
-            if isinstance(composite, (int, float)):
-                d2_sum += float(composite)
-            else:
-                d2_sum += 0.50
-        d2_cnt += 1
-
-        # D4: C5 bypass risk inverse
-        c5 = cvm.get("c5") if isinstance(cvm.get("c5"), dict) else {}
-        c5_risk = str(c5.get("bypass_risk", "") or "low")
-        if c5_risk == "low":
-            d4_sum += 1.0
-        elif c5_risk in ("mid", "acceptable"):
-            d4_sum += 0.6
-        else:  # high / unknown
-            d4_sum += 0.2
-        d4_cnt += 1
-
-    d1 = d1_sum / max(d1_cnt, 1)
-    d2 = d2_sum / max(d2_cnt, 1)
-    d4 = d4_sum / max(d4_cnt, 1)
-
-    # ── 加权聚合 ──
-    aggregate = d1 * 0.30 + d2 * 0.30 + d3 * 0.20 + d4 * 0.20
-
-    # ── 标签 ──
-    for label, display, threshold, tip in _DUAN_LABEL_CONFIG:
-        if aggregate >= threshold:
-            break
-    else:
-        label, display, _, tip = _DUAN_LABEL_CONFIG[-1]
-
-    return {
-        "label": label,
-        "display": display,
-        "score": round(aggregate, 3),
-        "passed": aggregate >= 0.50,
-        "breakdown": {
-            "D1_生意本质": round(d1, 3),
-            "D2_护城河深度": round(d2, 3),
-            "D3_长期确定性": round(d3, 3),
-            "D4_商业模式": round(d4, 3),
-        },
-        "n_stocks": n,
-        "tooltip": (
-            f"D1 生意本质(30%)={d1:.2f} · "
-            f"D2 护城河深度(30%)={d2:.2f} · "
-            f"D3 长期确定性(20%)={d3:.2f} · "
-            f"D4 商业模式(20%)={d4:.2f} | "
-            + tip
-        ),
-    }
+    """兼容别名 · v4.1 标的聚合已废止。"""
+    _ = stocks
+    return score_node_segment_duan(
+        node_id=node_id,
+        node_name=node_name,
+        tier=tier,
+        ecosystem_layer=ecosystem_layer,
+        node_t2=node_t2,
+        require_node_t2=True,
+    )

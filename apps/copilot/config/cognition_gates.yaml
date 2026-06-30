@@ -1,0 +1,16 @@
+# Z1.5 生意认知坊 intake [Ref: 32_ §2.4.9.c]
+version: "1.0"
+
+z15_intake_requires:
+  node_duan_verdict: [pass, review]
+  stock_duan_anchor: [anchor, watch]
+  gate_a: pass
+
+z15_skip_when_z0_green:
+  skip_segment_bypass_in_step0: true
+  skip_c7_recheck_in_step3: true
+
+gate_a5:
+  block_c7_sentinel_wash: true
+  block_node_reject: true
+  block_node_provisional: true
