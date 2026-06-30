@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.mypy_cache/
+
+# 前端
+frontend/node_modules/
+frontend/dist/
+
+# 环境与密钥
+.env
+*.env.local
+*.pem
+
+# Git / IDE
+.git/
+.vscode/
+.idea/

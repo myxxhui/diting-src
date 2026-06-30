@@ -1,0 +1,5 @@
+# apps/industry_graph/frontend/.gitignore
+node_modules/
+dist/
+.env.local
+*.tsbuildinfo

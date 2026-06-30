@@ -1,0 +1,34 @@
+# ============================================================
+# 产业图谱后端依赖（版本锁定）
+# 与 pyproject.toml [industry-graph] optional-deps 保持一致
+# ============================================================
+
+# ---- Web 框架 ----
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+pydantic-settings==2.5.0
+httpx==0.27.0
+
+# ---- 图数据库 ----
+neo4j==5.25.0
+
+# ---- 异步任务 ----
+arq==0.5.0
+redis==5.2.0
+
+# ---- 数据处理 ----
+pydantic==2.9.0
+orjson==3.10.0
+
+# ---- AI/LLM ----
+anthropic==0.39.0
+
+# ---- 数据库（共享 PG L2）----
+asyncpg==0.29.0
+sqlalchemy[asyncio]==2.0.35
+
+# ---- 工具 ----
+python-dotenv==1.0.1
+pyyaml==6.0.2
+tenacity==8.5.0       # LLM 调用重试
+structlog==24.4.0

@@ -321,7 +321,7 @@ async def api_daily_run_html(symbol: str, session: AsyncSession = Depends(get_db
     redis = _redis_for_panel()
     await run_daily_pipeline(session, symbol, redis_client=redis)
     await session.commit()
-    return await api_executing_detail_html(symbol, session, live=True)
+    return await api_executing_detail_html(symbol=symbol, session=session, live=True)
 
 
 @router.post("/api/executing/{symbol}/collect")

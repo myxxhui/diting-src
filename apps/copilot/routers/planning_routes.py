@@ -2095,7 +2095,9 @@ def _render_radar_candidates_html(
         )
         remove_btn = (
             f"<form hx-post='/api/funnel/symbols/{sym_raw}/remove' "
-            f"hx-target='#radar-candidates-list' hx-swap='innerHTML' class='inline'>"
+            f"hx-target='#radar-candidates-list' hx-swap='innerHTML' class='inline'"
+            f" hx-confirm='确认移除该标的？'"
+            f">"
             f"<button type='submit' class='text-xs px-2 py-1 rounded border border-gray-200 "
             f"text-gray-600 hover:bg-gray-100'>移除</button></form>"
         )

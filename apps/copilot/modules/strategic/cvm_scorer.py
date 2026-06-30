@@ -1,10 +1,25 @@
-"""CVM 6+1 T1 规则评分（v2.0 · C1-C4 独立 band · C7 四分类引擎）。
+"""CVM 6+1 T1 规则评分（v2.1 · C1-C4 独立 band · C7 四分类引擎 · 进池门槛 + 不可替代性汇总）。
 
-[Ref: 33_ §4.6 · 34_ §3.7 · 32_ §2.4.4]
+[Ref: 33_ §4.6 · 34_ §3.7 · 32_ §2.4.4 · 32_ §2.4.8（Z1.5 消费契约）]
 """
 from __future__ import annotations
 
 from typing import Any, Optional
+
+
+# ── band 等级排序（用于进池门槛 min 校验）──
+_BAND_ORDER: dict[str, int] = {
+    "low": 0,
+    "acceptable": 1,
+    "mid": 2,
+    "mid_high": 3,
+    "high": 4,
+}
+# 进池门槛：C1-C4 最低 acceptable 档（≥ acceptable）
+_POOL_MIN_BAND = "acceptable"
+_POOL_MIN_ORD = _BAND_ORDER.get(_POOL_MIN_BAND, 1)
+# C5 bypass_risk 上限：不可为 high
+_C5_BYPASS_BLOCK = "high"
 
 
 # ── 角色映射表 ──
@@ -149,6 +164,94 @@ def _classify_c7(role_tag: str, role_suggested: str) -> dict[str, Any]:
     return _C7_CLASSES.get(c7_cat, _C7_CLASSES["leader"])
 
 
+# ── 进池门槛校验（32_ §2.4.4 · gates.yaml z0_cvm）──
+
+def _check_pool_gate(scores: dict[str, Any]) -> tuple[bool, list[str]]:
+    """校验 CVM 进池必要条件（C7=pass + min(C1,C2,C3,C4)≥acceptable + C5≠bypass_high + 至少一路径）。
+
+    返回 (passed, fail_reasons)。
+    """
+    reasons: list[str] = []
+
+    # 条件 1：C7 = pass
+    c7 = scores.get("c7") or {}
+    if not c7.get("pass", False):
+        reasons.append("c7_not_pass")
+
+    # 条件 2：min(C1,C2,C3,C4) ≥ acceptable
+    for dim in ("c1", "c2", "c3", "c4"):
+        band = (scores.get(dim) or {}).get("band", "low")
+        if _BAND_ORDER.get(band, 0) < _POOL_MIN_ORD:
+            reasons.append(f"{dim}_below_acceptable({band})")
+
+    # 条件 3：C5 ≠ bypass_high
+    c5_risk = (scores.get("c5") or {}).get("bypass_risk", "low")
+    if c5_risk == _C5_BYPASS_BLOCK:
+        reasons.append("c5_bypass_high")
+
+    # 条件 4：至少一路径（A 利润锚 / B 结构锚 / C 成长锚）
+    path_a = _BAND_ORDER.get((scores.get("c1") or {}).get("band", "low"), 0) >= _BAND_ORDER["high"]
+    path_b = (
+        _BAND_ORDER.get((scores.get("c2") or {}).get("band", "low"), 0) >= _BAND_ORDER["high"]
+        and _BAND_ORDER.get((scores.get("c4") or {}).get("band", "low"), 0) >= _BAND_ORDER["mid_high"]
+    )
+    path_c = (
+        _BAND_ORDER.get((scores.get("c3") or {}).get("band", "low"), 0) >= _BAND_ORDER["high"]
+        and _BAND_ORDER.get((scores.get("c6") or {}).get("band", "low"), 0) >= _BAND_ORDER["mid_high"]
+    )
+    if not (path_a or path_b or path_c):
+        reasons.append("no_anchor_path")
+
+    return (len(reasons) == 0, reasons)
+
+
+# ── 不可替代性汇总（供 Z1.5 Step3 护城河分析消费 · 段永平护城河哲学）──
+
+_ANCHOR_STRENGTH_SCORE: dict[str, float] = {
+    "high": 1.0,
+    "mid_high": 0.75,
+    "mid": 0.5,
+    "none": 0.0,
+}
+
+
+def _calc_irreplaceability(scores: dict[str, Any]) -> dict[str, Any]:
+    """汇总不可替代性：C2 卡脖子深度（0.4）+ C7 anchor_strength（0.35）+ C4 结构主导权（0.25）。
+
+    段永平哲学映射：护城河 = 不可替代性 + 长期一致性。
+    本字段供 Z1.5 Step3 护城河五力分析直接消费。
+    """
+    c2_band = (scores.get("c2") or {}).get("band", "low")
+    c4_band = (scores.get("c4") or {}).get("band", "low")
+    anchor = (scores.get("c7") or {}).get("anchor_strength", "none")
+
+    c2_score = _BAND_ORDER.get(c2_band, 0) / 4.0
+    c4_score = _BAND_ORDER.get(c4_band, 0) / 4.0
+    anchor_score = _ANCHOR_STRENGTH_SCORE.get(anchor, 0.0)
+
+    irreplaceability = round(c2_score * 0.40 + anchor_score * 0.35 + c4_score * 0.25, 3)
+
+    if irreplaceability >= 0.75:
+        level = "high"
+    elif irreplaceability >= 0.5:
+        level = "mid_high"
+    elif irreplaceability >= 0.3:
+        level = "mid"
+    else:
+        level = "low"
+
+    return {
+        "score": irreplaceability,
+        "level": level,
+        "components": {
+            "c2_chokepoint": round(c2_score, 3),
+            "c7_anchor_strength": round(anchor_score, 3),
+            "c4_structure_dominance": round(c4_score, 3),
+        },
+        "duan_mapping": "护城河=不可替代性+长期一致性",
+    }
+
+
 def score_symbol(
     symbol: str,
     *,
@@ -192,8 +295,17 @@ def score_symbol(
             "anchor_strength": c7_result.get("anchor_strength", "none"),
             "triggers": c7_result.get("triggers", []),
         },
+        # 不可替代性汇总（供 Z1.5 Step3 护城河分析消费 · 段永平护城河哲学）
+        "irreplaceability": _calc_irreplaceability({
+            "c2": {"band": b2},
+            "c4": {"band": b4},
+            "c7": {"anchor_strength": c7_result.get("anchor_strength", "none")},
+        }),
     }
-    pool_eligible = pool_default and c7_pass and role_suggested != "representative"
+
+    # 进池门槛校验（32_ §2.4.4 · C7=pass + min(C1-C4)≥acceptable + C5≠bypass_high + 至少一路径）
+    gate_passed, gate_fail_reasons = _check_pool_gate(scores)
+    pool_eligible = pool_default and gate_passed and role_suggested != "representative"
     return {
         "symbol": symbol,
         "niche_id": niche_id,
@@ -201,6 +313,12 @@ def score_symbol(
         "anchor_path": anchor_path,
         "role_suggested": role_suggested,
         "pool_eligible": pool_eligible,
+        "pool_gate": {
+            "passed": gate_passed,
+            "fail_reasons": gate_fail_reasons,
+            "min_band_required": _POOL_MIN_BAND,
+            "c5_bypass_block": _C5_BYPASS_BLOCK,
+        },
         "dispatch_priority": 1 if role_suggested in ("monopoly", "max_value") else 2,
         "provisional": True,
         "human_confirmed": False,

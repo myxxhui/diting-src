@@ -262,7 +262,19 @@ async def create_scan_dispatch(
             )
         )
 
-    ref = f"cvm/phase-{phase_id}.json"
+    ref = f"cvm://phase/{phase_id}"
+    # CVM 快照：供 Z1.5 生意认知引擎 Step3 护城河分析直接消费（避免 Z1.5 再查表）
+    cvm_snapshot: dict[str, Any] = {}
+    for c in confirmed:
+        sc_scores = c.scores_json or {}
+        cvm_snapshot[c.symbol] = {
+            "role": c.role_override or c.role_suggested or "",
+            "anchor_path": c.anchor_path or "",
+            "irreplaceability": sc_scores.get("irreplaceability", {}),
+            "c7": sc_scores.get("c7", {}),
+            "c2_band": (sc_scores.get("c2") or {}).get("band", ""),
+            "c4_band": (sc_scores.get("c4") or {}).get("band", ""),
+        }
     now = datetime.now(timezone.utc)
     disp = ScanDispatch(
         board_id=board_id,
@@ -276,7 +288,11 @@ async def create_scan_dispatch(
         status="active",
         human_confirmed=True,
         dispatched_at=now,
-        genesis_ref_json={"board_id": board_id, "phase_id": phase_id},
+        genesis_ref_json={
+            "board_id": board_id,
+            "phase_id": phase_id,
+            "cvm_snapshot": cvm_snapshot,
+        },
     )
     session.add(disp)
     await session.flush()

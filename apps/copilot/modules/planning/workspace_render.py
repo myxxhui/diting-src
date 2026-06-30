@@ -257,7 +257,9 @@ def render_planning_symbol_card(
         f"<span class='text-gray-300'>|</span>"
         f"<form hx-post='/api/funnel/symbols/{sym_esc}/demote' hx-swap='none' class='inline'>"
         f"<button type='submit' class='text-amber-700 hover:underline'>降级到候选</button></form>"
-        f"<form hx-post='/api/funnel/symbols/{sym_esc}/remove' hx-swap='none' class='inline ml-auto'>"
+        f"<form hx-post='/api/funnel/symbols/{sym_esc}/remove' hx-swap='none' class='inline ml-auto'"
+        f" hx-confirm='确认移除 {name}？\n\n将从规划区移除该标的。'"
+        f">"
         f"<button type='submit' class='text-gray-500 hover:underline'>移除</button></form>"
         f"</div></div></details></div>"
     )
@@ -308,6 +310,16 @@ def render_executing_symbol_card(
     advice = t2_summaries.get(sym)
     t2_line = _t2_summary_line(advice)
     t2_banner = render_executing_t2_banner(sym, advice, embedded=True)
+    # 移除确认文案：真实持仓加重警告
+    _is_real_pos = bool(qty and float(qty) > 0 and cost and float(cost) > 0)
+    _rm_confirm = (
+        "⚠️ 确认移除真实持仓 " + name + "？\n\n"
+        "成本 " + str(cost) + " · 持仓 " + str(qty) + " 股\n\n"
+        "此操作将停止数据采集并从持仓监护室隐藏。7 天内可在归档区恢复。"
+    ) if _is_real_pos else (
+        "确认移除 " + name + "？\n\n"
+        "此操作将停止该标的的数据采集，并从持仓监护室隐藏。7 天内可在归档区恢复。"
+    )
     return (
         f"<div class='executing-symbol-card-wrap workspace-symbol-card-wrap mb-3' data-symbol='{sym_esc}'>"
         f"<details class='executing-symbol-card workspace-symbol-card group bg-white border border-gray-200 "
@@ -349,10 +361,12 @@ def render_executing_symbol_card(
         f"<button type='submit' class='text-sm px-3 py-1.5 rounded-lg border border-gray-300 "
         f"bg-white text-gray-700 hover:bg-gray-50'>本波归档</button></form>"
         f"<form hx-post='/api/funnel/symbols/{sym_esc}/demote' hx-swap='none' class='inline'>"
-        f"<button type='submit' class='text-xs px-2 py-1 rounded border border-amber-200 "
+        f"<button type='submit' class='text-xs px-2 py-1 rounded border border-amber-200 '"
         f"text-amber-800 bg-white'>降级到规划</button></form>"
-        f"<form hx-post='/api/funnel/symbols/{sym_esc}/remove' hx-swap='none' class='inline ml-auto'>"
-        f"<button type='submit' class='text-xs text-gray-500 hover:underline'>移除</button></form>"
+        f"<form hx-post='/api/funnel/symbols/{sym_esc}/remove' hx-swap='none' class='inline ml-auto'"
+        f" hx-confirm='{_rm_confirm}'"
+        f">"
+        f"<button type='submit' class='text-xs text-red-400 hover:text-red-600 hover:underline'>移除</button></form>"
         f"</div></section>"
         f"<div id='exec-{sym_esc}' class='px-4'></div>"
         f"<section class='px-4 pb-4 border-t border-gray-100'>"
