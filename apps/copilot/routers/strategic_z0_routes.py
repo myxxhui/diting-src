@@ -215,7 +215,7 @@ async def api_z0_investment_rescore(
             ],
             temperature=0.1,
             max_tokens=2000,
-            model_override="claude-opus-4-6",
+            model_override="deepseek-v4-pro",
         )
         raw = resp.text if hasattr(resp, "text") else str(resp)
         llm_result = _parse_llm_json(raw)
@@ -1120,9 +1120,13 @@ async def api_board_ecosystem_sorted(
     node_sort: str = Query("tier_core_first"),
     stock_sort: str = Query("composite_desc"),
     view_mode: str = Query("grouped"),
+    node_duan_gate: str = Query("all"),
+    stock_duan_gate: str = Query("all"),
     session: AsyncSession = Depends(get_db),
 ):
-    """按指定排序参数重新渲染生态位标的池，返回完整 ecosystem-section HTML。"""
+    """按指定排序参数重新渲染生态位标的池，返回完整 ecosystem-section HTML。
+    支持段永平双闸筛选参数：node_duan_gate, stock_duan_gate
+    """
     from apps.copilot.modules.strategic.render import _render_ecosystem_result, render_ecosystem_section
     from apps.copilot.modules.strategic.service import get_board_detail
     from apps.copilot.modules.strategic.duan_dual_gate import compute_duan_dual_gates_async
@@ -1150,6 +1154,8 @@ async def api_board_ecosystem_sorted(
         board_id, stock_pool, node_sort, stock_sort, view_mode,
         duan_node_scores=duan_node_scores,
         stock_duan_scores=stock_duan_scores,
+        node_duan_gate_filter=node_duan_gate,
+        stock_duan_gate_filter=stock_duan_gate,
     )
     return HTMLResponse(html)
 
@@ -1507,7 +1513,7 @@ async def api_cvm_enrich_t2(
             f'<div class="text-xs text-red-700 bg-red-50 rounded-lg px-3 py-2">{_esc(str(e))}</div>'
         )
     # T2 语义增强（在 run_cvm_for_phase 的 DB 写入基础上更新）
-    t2_rows = score_peer_set_t2(rows, scene="z0_t2_concept_analysis", model_override="claude-opus-4-6")
+    t2_rows = score_peer_set_t2(rows, scene="z0_t2_concept_analysis", model_override="deepseek-v4-pro")
     # 回写 DB
     for row in t2_rows:
         sym = row.get("symbol", "")
@@ -1751,8 +1757,7 @@ async def api_concept_analysis(
             ],
             temperature=0.3,
             max_tokens=800,
-            model_override="claude-opus-4-6",
-            force_route="remote",
+            model_override="deepseek-v4-pro",
         )
         raw = (result.text or "").strip()
         # 清理可能的 markdown 代码块

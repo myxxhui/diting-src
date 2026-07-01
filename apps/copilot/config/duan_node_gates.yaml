@@ -65,7 +65,7 @@ n4_tier_fallback:
   配套: 0.4
 
 node_segment_t2:
-  model: claude-opus-4-6
+  model: deepseek-v4-pro
   max_output_tokens: 500
   scene: z0_node_segment_t2
   fail_action: provisional

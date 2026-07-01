@@ -64,6 +64,6 @@ def resolve_deepseek_api(model_override: str | None) -> tuple[str, bool]:
     spec = DEEPSEEK_MODEL_SPECS.get(raw)
     if spec:
         return str(spec["api_model"]), bool(spec.get("thinking"))
-    # 未知 slug：reasoner 系默认开思考，其余直连 API
-    thinking = raw == "deepseek-reasoner" or "reasoner" in raw or raw.endswith("-think")
-    return raw, thinking
+    # 未知 slug：fallback to DEEPSEEK_MODEL
+    from os import environ
+    return environ.get("DEEPSEEK_MODEL", "deepseek-chat").strip() or "deepseek-chat", False
