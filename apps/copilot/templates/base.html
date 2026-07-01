@@ -94,18 +94,20 @@
       border-color: #6b7280;
       color: #f9fafb;
     }
-    /* 主内容区至少占视口宽度 85%（原 max-width:1280px 宽屏留白过多） */
+    /* 主内容区占视口宽度 95%（宽屏充分利用横屏空间） */
     main {
       box-sizing: border-box;
-      width: 85%;
-      min-width: min(85vw, 100%);
-      max-width: none;
+      width: 95%;
+      min-width: min(95vw, 100%);
+      max-width: 1920px;
       margin: 0 auto;
       padding: 28px 0;
     }
     @media (max-width: 640px) {
       main { width: 94%; min-width: 0; padding: 16px 0; }
     }
+    /* 统一正文字号：从 text-[10px] 升级为 text-xs=0.75rem */
+    body { font-size: 0.875rem; }
     .card {
       background: white;
       border-radius: 12px;

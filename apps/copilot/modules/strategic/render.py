@@ -329,7 +329,7 @@ def render_strategic_timeline(board, *, selected_phase_id=None):
         f"title='当前'></div>"
         f"{''.join(blocks)}"
         f"</div></div></div>"
-        f"<div class='grid gap-3 sm:grid-cols-2'>{''.join(cards)}</div>"
+        f"<div class='grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4'>{''.join(cards)}</div>"
     )
 
 
@@ -352,7 +352,7 @@ def render_phase_panel(phase: dict[str, Any]) -> str:
                 f"<summary class='cursor-pointer text-xs flex items-center justify-between gap-2'>"
                 f"<span>{icon} {_esc(p.get('label'))}</span>"
                 f"<span class='font-mono text-gray-500'>{val_txt}</span></summary>"
-                f"<div class='mt-1 pl-4 text-[11px] text-gray-500 space-y-0.5'>"
+                f"<div class='mt-1 pl-4 text-xs text-gray-500 space-y-0.5'>"
                 f"<p>Key: <code>{_esc(p.get('probe_key'))}</code></p>"
                 f"<p>频次: {_esc(p.get('cadence'))} · 源: {_esc(p.get('source_hint'))}</p>"
                 f"<p>{_esc(p.get('blocker') or '')}</p></div></details>"
@@ -390,7 +390,7 @@ def render_phase_panel(phase: dict[str, Any]) -> str:
         traps_html = (
             "<div class='mt-3 border border-rose-100 rounded-lg p-2 bg-rose-50/50'>"
             "<p class='text-xs font-medium text-rose-800 mb-1'>🛡️ 伪科技三死穴（advisory）</p>"
-            "<ul class='text-[11px] text-rose-700 list-disc pl-4 space-y-0.5'>"
+            "<ul class='text-xs text-rose-700 list-disc pl-4 space-y-0.5'>"
             + "".join(f"<li>{_esc(t)}</li>" for t in traps[:3])
             + "</ul></div>"
         )
@@ -463,7 +463,7 @@ def render_command_center_main(board, *, selected_phase_id=None):
         f"</div>"
         f"<div class='flex items-center gap-2'>{edit_btn}</div>"
         f"</div>"
-        + (f"<div class='text-[10px] text-gray-400 mb-2'>赛道：{_esc(sector_display)} · 概念：{_esc(concepts_preview)}</div>" if sector else "")
+        + (f"<div class='text-xs text-gray-400 mb-2'>赛道：{_esc(sector_display)} · 概念：{_esc(concepts_preview)}</div>" if sector else "")
         + f"{qualitative}"
         f"{render_strategic_timeline(board, selected_phase_id=selected_phase_id)}"
         f"<div id='strategic-edit-modal-root'></div>"
@@ -928,13 +928,13 @@ def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes:
         role = layer.get("role", "")
         segments = layer.get("key_segments", [])
         seg_badges = "".join(
-            f'<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{_esc(s)}</span>'
+            f'<span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{_esc(s)}</span>'
             for s in segments
         ) if segments else ""
         topo_rows += (
             f"<div class='py-2 border-b border-gray-100 last:border-0'>"
             f"<span class='text-xs font-medium'>{label}</span>"
-            f"<span class='text-[10px] text-gray-400 ml-1'>({hint})</span>"
+            f"<span class='text-xs text-gray-400 ml-1'>({hint})</span>"
             f"<p class='text-xs text-gray-600 mt-0.5'>{_esc(role)}</p>"
             + (f'<div class="flex flex-wrap gap-1 mt-1">{seg_badges}</div>' if seg_badges else '')
             + "</div>"
@@ -945,14 +945,14 @@ def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes:
     toolbar = f"""<div class="flex flex-wrap items-center gap-1.5 mb-3">
   <span class="text-xs text-gray-500">{total_stocks} 只标的</span>
   <select onchange="ecoSorted(this, 'node_sort')"
-    class="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-500 bg-white">
+    class="text-xs px-2 py-1 rounded border border-gray-200 text-gray-600 bg-white">
     <option value="tier_core_first" {'selected' if node_sort == 'tier_core_first' else ''}>节点 · 核心优先</option>
     <option value="tier_supp_first" {'selected' if node_sort == 'tier_supp_first' else ''}>节点 · 配套优先</option>
     <option value="upstream_first" {'selected' if node_sort == 'upstream_first' else ''}>产业链 · 上游→下游</option>
     <option value="downstream_first" {'selected' if node_sort == 'downstream_first' else ''}>产业链 · 下游→上游</option>
   </select>
   <select onchange="ecoSorted(this, 'stock_sort')"
-    class="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-500 bg-white">
+    class="text-xs px-2 py-1 rounded border border-gray-200 text-gray-600 bg-white">
     <option value="composite_desc" {'selected' if stock_sort == 'composite_desc' else ''}>标的 · 综合得分↓</option>
     <option value="composite_asc" {'selected' if stock_sort == 'composite_asc' else ''}>标的 · 综合得分↑</option>
     <option value="moat" {'selected' if stock_sort == 'moat' else ''}>壁垒优先</option>
@@ -962,19 +962,19 @@ def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes:
     <option value="policy_bond" {'selected' if stock_sort == 'policy_bond' else ''}>政策映射优先</option>
   </select>
   <select onchange="ecoSorted(this, 'view')"
-    class="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-500 bg-white">
+    class="text-xs px-2 py-1 rounded border border-gray-200 text-gray-600 bg-white">
     <option value="grouped" {'selected' if view_mode == 'grouped' else ''}>视图 · 分组</option>
     <option value="flat" {'selected' if view_mode == 'flat' else ''}>视图 · 平铺列表</option>
     <option value="topology" {'selected' if view_mode == 'topology' else ''}>视图 · 拓扑联动</option>
   </select>
   <div class="flex-1"></div>
   <button type="button" onclick="document.querySelectorAll('#ecosystem-stock-pool details').forEach(d=>d.open=true)"
-    class="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-500 hover:bg-gray-50">全部展开</button>
+    class="text-xs px-2 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50">全部展开</button>
   <button type="button" onclick="document.querySelectorAll('#ecosystem-stock-pool details').forEach(d=>d.open=false)"
-    class="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-500 hover:bg-gray-50">全部折叠</button>
+    class="text-xs px-2 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50">全部折叠</button>
   <button type="button"
     id="duan-enrich-btn-{board_id}"
-    class="text-[10px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100"
+    class="text-xs px-2 py-1 rounded bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100"
     hx-post="/api/strategic/boards/{board_id}/ecosystem/duan-enrich"
     hx-target="#ecosystem-section"
     hx-swap="outerHTML"
@@ -983,9 +983,9 @@ def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes:
     hx-confirm="将对全部 BOM 节点调用大模型跑段永平环节 T2 + 标的锚点研判（约 1～3 分钟，结果落库）。继续？">
     段永平双闸研判
   </button>
-  <span id="duan-enrich-spinner-{board_id}" class="htmx-indicator text-[10px] text-violet-600">研判中…</span>
+  <span id="duan-enrich-spinner-{board_id}" class="htmx-indicator text-xs text-violet-600">研判中…</span>
   <button type="button"
-    class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+    class="text-xs px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
     hx-post="/api/strategic/boards/{board_id}/stock/batch-accept"
     hx-target="#ecosystem-stock-pool" hx-swap="outerHTML">一键晋级</button>
 </div>
@@ -1047,16 +1047,16 @@ window.ecoSorted = function(sel, dim) {{
 
             # 来源徽章
             if stock_source == "curated":
-                source_badge = '<span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">代表标的</span>'
+                source_badge = '<span class="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">代表标的</span>'
             else:
-                source_badge = '<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">LLM 增补</span>'
+                source_badge = '<span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">LLM 增补</span>'
 
             # 排除检查状态
             ec_ok = ec.get("passed", False)
             ec_badge = (
-                '<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">排除通过</span>'
+                '<span class="text-xs px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">排除通过</span>'
                 if ec_ok else
-                '<span class="text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700">排除未通过</span>'
+                '<span class="text-xs px-1.5 py-0.5 rounded bg-rose-100 text-rose-700">排除未通过</span>'
             )
 
             # composite 颜色
@@ -1064,14 +1064,14 @@ window.ecoSorted = function(sel, dim) {{
 
             # 操作按钮（HTMX · 可重入）
             action_btns = f"""<span class="flex gap-1 ml-1" id="stock-actions-{board_id}-{sym}">
-  <button type="button" class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+  <button type="button" class="text-xs px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
     hx-post="/api/strategic/boards/{board_id}/stock/{sym}/accept"
     hx-target="#stock-actions-{board_id}-{sym}" hx-swap="innerHTML"
     hx-indicator="#stock-actions-{board_id}-{sym}">✓</button>
-  <button type="button" class="text-[10px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100"
+  <button type="button" class="text-xs px-2 py-1 rounded bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100"
     hx-post="/api/strategic/boards/{board_id}/stock/{sym}/reject"
     hx-target="#stock-row-{board_id}-{sym}" hx-swap="outerHTML">✗</button>
-  <button type="button" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100"
+  <button type="button" class="text-xs px-2 py-1 rounded bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100"
     onclick="document.getElementById('score-edit-{board_id}-{sym}')?.classList.toggle('hidden')">📝</button>
 </span>"""
 
@@ -1085,22 +1085,22 @@ window.ecoSorted = function(sel, dim) {{
                 fev_html = ""
                 if fevidence:
                     fev_html = "<ul class='list-disc pl-4 space-y-0.5'>" + "".join(
-                        f"<li class='text-[10px] text-gray-600'>{_esc(ev)}</li>" for ev in fevidence
+                        f"<li class='text-xs text-gray-600'>{_esc(ev)}</li>" for ev in fevidence
                     ) + "</ul>"
                 # policy_bond 特殊处理
                 if fk == "policy_bond":
                     matched = fv.get("matched_concepts", [])
                     note = fv.get("note", "")
                     fev_html = (
-                        f"<p class='text-[10px] text-gray-600'>"
+                        f"<p class='text-xs text-gray-600'>"
                         f"匹配概念：{', '.join(matched) if matched else '无'}"
                         + (f" · {_esc(note)}" if note else "")
                         + "</p>"
                     )
                 factor_detail += (
                     f"<tr class='border-b border-gray-50'>"
-                    f"<td class='py-1.5 text-[11px] text-gray-700 font-medium w-20'>{flabel}</td>"
-                    f"<td class='py-1.5 text-[11px] font-mono w-14'>{fscore_txt}</td>"
+                    f"<td class='py-1.5 text-xs text-gray-700 font-medium w-20'>{flabel}</td>"
+                    f"<td class='py-1.5 text-xs font-mono w-14'>{fscore_txt}</td>"
                     f"<td class='py-1.5'>{fev_html}</td>"
                     f"</tr>"
                 )
@@ -1110,7 +1110,7 @@ window.ecoSorted = function(sel, dim) {{
                 f"<summary class='flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-gray-50 text-xs'>"
                 f"<span class='font-mono font-medium'>{_esc(sym)}</span>"
                 f"<span class='font-medium'>{_esc(name_stock)}</span>"
-                f"<span class='text-[10px] text-gray-400 ml-1'>{_esc(pos)}</span>"
+                f"<span class='text-xs text-gray-400 ml-1'>{_esc(pos)}</span>"
                 f"<span class='ml-1'>{source_badge}</span>"
                 f"<span class='ml-1'>{stock_duan_badge}</span>"
                 f"<span class='ml-auto font-bold {comp_color}'>{composite:.0%}</span>"
@@ -1119,7 +1119,7 @@ window.ecoSorted = function(sel, dim) {{
                 f"</summary>"
                 f"<div class='px-3 py-2 bg-gray-50/70'>"
                 f"<table class='w-full text-xs'>"
-                f"<thead><tr class='text-[10px] text-gray-400'><th class='text-left font-normal w-20'>因子</th><th class='text-left font-normal w-14'>得分</th><th class='text-left font-normal'>证据</th></tr></thead>"
+                f"<thead><tr class='text-xs text-gray-400'><th class='text-left font-normal w-20'>因子</th><th class='text-left font-normal w-14'>得分</th><th class='text-left font-normal'>证据</th></tr></thead>"
                 f"<tbody>{factor_detail}</tbody>"
                 f"</table>"
                 f"</div>"
@@ -1130,14 +1130,14 @@ window.ecoSorted = function(sel, dim) {{
             stock_rows = '<p class="text-xs text-gray-400 py-2 text-center">该节点未生成标的</p>'
 
         node_html += (
-            f"<div class='mb-3 border rounded-lg p-3 bg-white'>"
+            f"<div class='border rounded-lg p-4 bg-white shadow-sm'>"
             f"<div class='flex items-center gap-2 mb-2'>"
-            f"<span class='text-xs font-semibold text-gray-800'>{_esc(name)}</span>"
-            f"<span class='text-[10px] px-1.5 py-0.5 rounded {tier_color}'>{tier}</span>"
+            f"<span class='text-sm font-semibold text-gray-800'>{_esc(name)}</span>"
+            f"<span class='text-xs px-1.5 py-0.5 rounded {tier_color}'>{tier}</span>"
             f"{duan_badge}"
-            f"<span class='text-[10px] text-gray-400'>({_esc(layer_label)} | node: {_esc(nid)})</span>"
+            f"<span class='text-xs text-gray-400'>({_esc(layer_label)} | node: {_esc(nid)})</span>"
             f"</div>"
-            + (f'<p class="text-[10px] text-gray-500 mb-2">{_esc(rationale)}</p>' if rationale else '')
+            + (f'<p class="text-xs text-gray-500 mb-2">{_esc(rationale)}</p>' if rationale else '')
             + f"<div class='space-y-0.5'>{stock_rows}</div>"
             + "</div>"
         )
@@ -1148,8 +1148,8 @@ window.ecoSorted = function(sel, dim) {{
         addition_rows = "".join(
             f"<li class='text-xs text-gray-600 flex items-center gap-2'>"
             f"<span class='font-medium'>{_esc(a.get('node_name', '?'))}</span>"
-            f"<span class='text-[10px] text-gray-400'>{_esc(a.get('rationale', ''))}</span>"
-            f"<span class='text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700'>{a.get('status', 'pending_approval')}</span>"
+            f"<span class='text-xs text-gray-400'>{_esc(a.get('rationale', ''))}</span>"
+            f"<span class='text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700'>{a.get('status', 'pending_approval')}</span>"
             f"</li>"
             for a in suggested_additions
         )
@@ -1167,8 +1167,8 @@ window.ecoSorted = function(sel, dim) {{
             f"<li class='text-xs text-rose-600 flex items-center gap-2'>"
             f"<span class='font-mono'>{_esc(e.get('symbol', '?'))}</span>"
             f"<span>{_esc(e.get('stock_name', '?'))}</span>"
-            f"<span class='text-[10px] px-1.5 py-0.5 rounded bg-rose-100'>{_esc(e.get('exclusion_rule', ''))}</span>"
-            f"<span class='text-[10px] text-rose-500'>{_esc(e.get('reason', ''))}</span>"
+            f"<span class='text-xs px-1.5 py-0.5 rounded bg-rose-100'>{_esc(e.get('exclusion_rule', ''))}</span>"
+            f"<span class='text-xs text-rose-500'>{_esc(e.get('reason', ''))}</span>"
             f"</li>"
             for e in excluded_stocks
         )
@@ -1180,7 +1180,7 @@ window.ecoSorted = function(sel, dim) {{
 
     # 刷新按钮
     refresh_btn = f"""<button type='button'
-    class='text-[10px] px-2 py-1 rounded border border-gray-200 text-gray-500 hover:bg-gray-50 mt-2'
+    class='text-xs px-2 py-1 rounded border border-gray-200 text-gray-500 hover:bg-gray-50 mt-2'
     hx-post='/api/strategic/boards/{board_id}/ecosystem/infer'
     hx-target='#ecosystem-section' hx-swap='outerHTML'>🔄 重新分析</button>"""
 
@@ -1190,16 +1190,16 @@ window.ecoSorted = function(sel, dim) {{
         node_html = '<p class="text-xs text-gray-400 py-4 text-center">暂未生成标的池</p>'
 
     # ── CVM 衔接区 ──
-    cvm_section = f"""<div class="mt-4 border border-blue-200 rounded-lg p-3 bg-blue-50/30">
-  <div class="flex items-center justify-between">
+    cvm_section = f"""<div class="mt-4 border border-blue-200 rounded-lg p-4 bg-blue-50/30">
+  <div class="flex items-center justify-between gap-4">
     <div>
-      <p class="text-xs font-medium text-blue-800">下游衔接</p>
-      <p class="text-[10px] text-blue-600 mt-0.5">已选标的将自动进入 CVM 矩阵进行 Gate-A 财务交叉验证</p>
+      <p class="text-sm font-medium text-blue-800">下游衔接</p>
+      <p class="text-xs text-blue-600 mt-0.5">已选标的将自动进入 CVM 矩阵进行 Gate-A 财务交叉验证</p>
     </div>
     <div class="flex gap-2">
-      <button type="button" class="text-[10px] px-2 py-1 rounded bg-white text-blue-700 border border-blue-200 hover:bg-blue-50"
+      <button type="button" class="text-xs px-3 py-1.5 rounded bg-white text-blue-700 border border-blue-200 hover:bg-blue-50"
         hx-post="/api/strategic/boards/{board_id}/stock/preview-accepted" hx-target="#accepted-stock-preview" hx-swap="innerHTML">预览已选标的</button>
-      <button type="button" class="text-[10px] px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+      <button type="button" class="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700"
         hx-post="/api/strategic/boards/{board_id}/stock/push-to-cvm" hx-target="#cvm-push-result" hx-swap="innerHTML"
         hx-confirm="确认将当前猎物池标的推送至 CVM 矩阵进行 Gate-A 验证？">推送到 CVM 矩阵</button>
     </div>
@@ -1208,28 +1208,23 @@ window.ecoSorted = function(sel, dim) {{
   <div id="cvm-push-result" class="mt-2"></div>
 </div>"""
 
-    return f"""<div id='ecosystem-section' class='mt-6 border border-emerald-200 rounded-lg p-4 bg-emerald-50/30'>
+    return f"""<div id='ecosystem-section' class='mt-6 border border-emerald-200 rounded-lg p-5 bg-emerald-50/30'>
   <div class='flex items-center justify-between mb-3'>
     <h3 class='text-sm font-semibold text-gray-800'>
-      产业生态位分析 <span class='text-[10px] text-emerald-600 font-normal ml-1'>✓ 已完成</span>
-      <span class='text-[10px] text-gray-400 font-normal ml-2'>BOM v{bom_version} · 5因子打分 · {total_stocks} 只标的</span>
+      产业生态位分析 <span class='text-xs text-emerald-600 font-normal ml-1'>✓ 已完成</span>
+      <span class='text-xs text-gray-400 font-normal ml-2'>BOM v{bom_version} · 5因子打分 · {total_stocks} 只标的</span>
     </h3>
     {refresh_btn}
   </div>
   {f'<div class="bg-white border border-emerald-100 rounded-lg p-3 mb-3 text-xs text-gray-700">{_esc(thesis)}</div>' if thesis else ''}
-  <div id='ecosystem-stock-pool' class='space-y-2 eco-view_{view_mode}' data-view-mode='{view_mode}'>
+  <div id='ecosystem-stock-pool' class='space-y-3 eco-view_{view_mode}' data-view-mode='{view_mode}'>
     {toolbar}
-    <div class='grid grid-cols-1 md:grid-cols-3 gap-3 mb-3'>
-      <div class='bg-white border rounded-lg p-3'>
-        <p class='text-xs font-medium text-gray-700 mb-2'>产业生态位拓扑</p>
-        {topo_rows}
-      </div>
-      <div class='md:col-span-2'>
-        {node_html}
-        {additions_html}
-        {excluded_html}
-      </div>
+    {f'<details class="bg-white border rounded-lg p-3 mb-3 text-xs" open><summary class="font-medium text-gray-700 cursor-pointer">产业生态位拓扑</summary><div class="mt-2">{topo_rows}</div></details>' if topo_rows else ''}
+    <div class='grid grid-cols-1 lg:grid-cols-2 gap-3'>
+      {node_html}
     </div>
+    {additions_html}
+    {excluded_html}
   </div>
   {cvm_section}
   {f'<div class="mt-2 text-right">{info_tip(_esc(disclaimer))}</div>' if disclaimer else ''}
@@ -1505,13 +1500,13 @@ def _render_concept_pools_result(board_id: int, stock_pool: dict[str, Any]) -> s
         role = layer.get("role", "")
         segments = layer.get("key_segments", [])
         seg_badges = "".join(
-            f'<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{_esc(s)}</span>'
+            f'<span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{_esc(s)}</span>'
             for s in segments
         ) if segments else ""
         topo_rows += (
             f"<div class='py-2 border-b border-gray-100 last:border-0'>"
             f"<span class='text-xs font-medium'>{label}</span>"
-            f"<span class='text-[10px] text-gray-400 ml-1'>({hint})</span>"
+            f"<span class='text-xs text-gray-400 ml-1'>({hint})</span>"
             f"<p class='text-xs text-gray-600 mt-0.5'>{_esc(role)}</p>"
             + (f'<div class="flex flex-wrap gap-1 mt-1">{seg_badges}</div>' if seg_badges else '')
             + "</div>"
@@ -1554,7 +1549,7 @@ def _render_concept_pools_result(board_id: int, stock_pool: dict[str, Any]) -> s
         )
 
     refresh_btn = f"""<button type='button'
-    class='text-[10px] px-2 py-1 rounded border border-gray-200 text-gray-500 hover:bg-gray-50 mt-2'
+    class='text-xs px-2 py-1 rounded border border-gray-200 text-gray-500 hover:bg-gray-50 mt-2'
     hx-post='/api/strategic/boards/{board_id}/ecosystem/infer'
     hx-target='#ecosystem-section' hx-swap='outerHTML'>🔄 重新分析</button>"""
 

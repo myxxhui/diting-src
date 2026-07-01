@@ -43,12 +43,12 @@
   <div id="genesis-toast"></div>
 
   <div class="flex flex-col xl:flex-row min-h-[28rem]">
-    <aside class="xl:w-60 shrink-0 border-b xl:border-b-0 xl:border-r border-gray-100 bg-gray-50/50"
+    <aside class="xl:w-64 shrink-0 border-b xl:border-b-0 xl:border-r border-gray-100 bg-gray-50/50"
            id="strategic-left-sidebar">
       {{ strategic_left_sidebar_html|default('')|safe }}
     </aside>
 
-    <main class="flex-1 min-w-0 p-4 overflow-y-auto max-h-[70vh]" id="strategic-command-main">
+    <main class="flex-1 min-w-0 p-5" id="strategic-command-main">
       {% if z0_mode == 'wind' %}
         {% include "planning/_wind_scan_panel.html" %}
       {% else %}
@@ -57,7 +57,7 @@
       {% endif %}
     </main>
 
-    <aside class="xl:w-80 shrink-0 border-t xl:border-t-0 xl:border-l border-gray-100 bg-white p-4 overflow-y-auto max-h-[70vh]"
+    <aside class="xl:w-80 shrink-0 border-t xl:border-t-0 xl:border-l border-gray-100 bg-white p-5"
            id="strategic-phase-panel">
       {% if z0_mode == 'wind' %}
         {{ strategic_p0_banner_html|default('')|safe }}
