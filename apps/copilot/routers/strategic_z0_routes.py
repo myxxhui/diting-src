@@ -1151,10 +1151,7 @@ async def api_board_ecosystem_sorted(
         duan_node_scores=duan_node_scores,
         stock_duan_scores=stock_duan_scores,
     )
-    return HTMLResponse(
-        f'<div id="ecosystem-section" class="mt-6 border border-dashed border-gray-200 rounded-lg p-4">'
-        f'{html}</div>'
-    )
+    return HTMLResponse(html)
 
 
 @router.post("/api/strategic/boards/{board_id}/ecosystem/duan-enrich", response_class=HTMLResponse)
@@ -1197,10 +1194,7 @@ async def api_board_ecosystem_duan_enrich(
         duan_node_scores=duan_node,
         stock_duan_scores=stock_duan,
     )
-    return HTMLResponse(
-        f'<div id="ecosystem-section" class="mt-6 border border-dashed border-gray-200 rounded-lg p-4">'
-        f'{html}</div>'
-    )
+    return HTMLResponse(html)
 
 
 # ═══════════════════════════════════════════════════

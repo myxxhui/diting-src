@@ -973,6 +973,18 @@ def _render_bom_stock_pool(board_id: int, stock_pool: dict[str, Any], bom_nodes:
   <button type="button" onclick="document.querySelectorAll('#ecosystem-stock-pool details').forEach(d=>d.open=false)"
     class="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-500 hover:bg-gray-50">全部折叠</button>
   <button type="button"
+    id="duan-enrich-btn-{board_id}"
+    class="text-[10px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100"
+    hx-post="/api/strategic/boards/{board_id}/ecosystem/duan-enrich"
+    hx-target="#ecosystem-section"
+    hx-swap="outerHTML"
+    hx-indicator="#duan-enrich-spinner-{board_id}"
+    hx-timeout="300000"
+    hx-confirm="将对全部 BOM 节点调用大模型跑段永平环节 T2 + 标的锚点研判（约 1～3 分钟，结果落库）。继续？">
+    段永平双闸研判
+  </button>
+  <span id="duan-enrich-spinner-{board_id}" class="htmx-indicator text-[10px] text-violet-600">研判中…</span>
+  <button type="button"
     class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
     hx-post="/api/strategic/boards/{board_id}/stock/batch-accept"
     hx-target="#ecosystem-stock-pool" hx-swap="outerHTML">一键晋级</button>
