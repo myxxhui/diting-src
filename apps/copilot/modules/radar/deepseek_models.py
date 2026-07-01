@@ -14,8 +14,8 @@ from typing import Any
 DEEPSEEK_MODEL_SPECS: dict[str, dict[str, Any]] = {
     "deepseek-v4-pro": {
         "api_model": "deepseek-chat",
-        "thinking": True,
-        "label": "DeepSeek V4 Pro（旗舰 · 思考）",
+        "thinking": False,
+        "label": "DeepSeek V4 Pro（旗舰）",
     },
     "deepseek-v4-flash": {
         "api_model": "deepseek-v4-flash",
