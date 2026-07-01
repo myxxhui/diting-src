@@ -13,7 +13,7 @@ from typing import Any
 # slug（不含 deepseek: 前缀）→ API 参数
 DEEPSEEK_MODEL_SPECS: dict[str, dict[str, Any]] = {
     "deepseek-v4-pro": {
-        "api_model": "deepseek-v4-pro",
+        "api_model": "deepseek-chat",
         "thinking": True,
         "label": "DeepSeek V4 Pro（旗舰 · 思考）",
     },

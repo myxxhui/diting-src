@@ -184,6 +184,8 @@ _SCENE_ROUTE: dict[Scene, Route] = {
     "radar_chat": "remote",
     "radar_distill": "deepseek",
     "genesis_ecosystem": "deepseek",
+    "z0_node_segment_t2": "deepseek",
+    "z0_t2_concept_analysis": "deepseek",
 }
 
 
