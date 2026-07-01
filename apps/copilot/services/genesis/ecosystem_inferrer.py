@@ -50,7 +50,9 @@ _BOM_NODES_PROMPT = "\n".join(
 
 
 # ── BOM 节点生成 System Prompt（v4.0 · 通用赛道 BOM 分解 · 强化上下游覆盖） ──
-_BOM_GENERATION_SYSTEM_PROMPT = """你是一个中国 A 股产业链深度分解专家。你的任务是：
+_BOM_GENERATION_SYSTEM_PROMPT = """**重要：所有分析文本必须用简体中文，禁止输出英文。**
+
+你是一个中国 A 股产业链深度分解专家。你的任务是：
 
 给定一个政策重点赛道（sector）及其关联的 A 股概念板块列表，将该赛道的产业链**全方位**分解为 BOM（Bill of Materials）节点清单。
 
@@ -169,7 +171,9 @@ def _build_bom_prompt(nodes: list[Any]) -> str:
 def _build_system_prompt(bom_nodes: list[Any]) -> str:
     """根据传入的 BOM 节点列表构建 System Prompt（v3.0 · 含代表标的锚点）。"""
     bom_text = _build_bom_prompt(bom_nodes)
-    return f"""你是一个中国 A 股产业生态分析专家。你的任务是：
+    return f"""**重要：所有分析文本必须用简体中文，禁止输出英文。**
+
+你是一个中国 A 股产业生态分析专家。你的任务是：
 给定一个政策重点赛道和用户选定的 A 股概念板块，根据下发的产业链 BOM 白名单，
 在每个节点范围内生成最具 3-5 年成长潜力的 A 股标的池。
 
@@ -234,7 +238,9 @@ composite = moat × 0.30 + growth × 0.25 + profit × 0.20 + localize × 0.15 + 
 8. 输出纯 JSON，不要额外解释。"""
 
 # ── User Prompt 模板 ──
-_ECOSYSTEM_PROMPT_TPL = Template("""## 赛道信息
+_ECOSYSTEM_PROMPT_TPL = Template("""**重要：所有文本输出必须用简体中文，禁止输出英文。**
+
+## 赛道信息
 
 - 赛道名称：{{ sector_display_name }}
 - 政策推动力评分（政策动量）：{{ policy_momentum }}/1.0

@@ -12,7 +12,9 @@ from apps.copilot.modules.strategic.duan_config import load_duan_node_gates
 
 logger = logging.getLogger(__name__)
 
-_NODE_T2_SYSTEM = """你是中国 A 股产业链环节分析专家。任务：对**单个产业链环节**（不是具体上市公司）做段永平式「环节是不是好生意」初判。
+_NODE_T2_SYSTEM = """**重要：所有输出必须用简体中文，禁止输出英文。**
+
+你是中国 A 股产业链环节分析专家。任务：对**单个产业链环节**（不是具体上市公司）做段永平式「环节是不是好生意」初判。
 
 禁止：分析具体股票代码、公司财报、管理层、估值。
 必须：只讨论该环节在技术路线中的位置、是否会被 bypass、利润池归属、5～10 年趋势。
@@ -38,17 +40,17 @@ def score_node_segment_t2(
 ) -> dict[str, Any]:
     """单节点 T2 · 失败返回空 dict（调用方 → provisional）。"""
     cfg = (load_duan_node_gates().get("node_segment_t2") or {})
-    model = model_override or cfg.get("model", "claude-opus-4-6")
+    model = model_override or cfg.get("model", "deepseek-v4-pro")
     scene = cfg.get("scene", "z0_node_segment_t2")
 
-    user_prompt = f"""环节 node_id={node_id}
+    user_prompt = f"""请用简体中文输出。环节 node_id={node_id}
 环节名称：{node_name}
 tier：{tier}
 ecosystem_layer：{ecosystem_layer or '未标注'}
 赛道上下文：{sector_context or '战略板块'}
 拓扑摘要：{topology_snippet or '无'}
 
-请输出 segment_bypass_risk / profit_pool_anchor / horizon_outlook / reasoning。"""
+请输出 segment_bypass_risk / profit_pool_anchor / horizon_outlook / reasoning（reasoning 必须用中文）。"""
 
     try:
         from apps.common.ai_dispatcher import AIDispatcher
